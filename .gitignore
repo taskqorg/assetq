@@ -1,0 +1,8 @@
+.specq/
+.taskq/
+.worktrees/
+target/
+__pycache__/
+*.pyc
+.env
+.env.*

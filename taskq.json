@@ -1,0 +1,7 @@
+{
+  "board": "github",
+  "repo": "taskqorg/assetq",
+  "publish": "pr",
+  "incident_reports": false,
+  "create_claim_issue": 1
+}
