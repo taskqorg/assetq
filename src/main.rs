@@ -61,6 +61,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     let rest = &args[args.len().min(1)..];
     match cmd {
+        "image-turn" => assetq::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
         "serve" => serve(rest),
         "work" => {
             let ctx = Arc::new(exec::Ctx::new(Config::from_env()?).map_err(|e| e.to_string())?);

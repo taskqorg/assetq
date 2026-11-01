@@ -50,6 +50,16 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 **Image worker (`image.worker.v1`).** A capable Codex worker receives text, attachments and output constraints through AgentQ and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
+The worker uses `agentq-runtime` 0.1.0 at immutable revision `513193c8a96f3de1c71a86291a679230817ce0b2`. Its native app-server path inherits the existing account, model, permissions and optional optimization.
+
+New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
+
+Until the supported grant interface is qualified, refuse new native launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
+
+A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
+
+Native terminal image-tool evidence, an allowed original artifact path and full PNG decoding are required before import. Preserve a bounded preview, dimensions, input identities, runtime/tool evidence and actual or explicitly unknown usage. Exact worker limits, capability refusal and recovery are specified in [image worker](docs/image-worker.md).
+
 Claude is eligible only after equivalent tool and output-path qualification. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
 
 **Image to 3D prop (`model.meshy-prop.v1`).** Resolve a verified input image; submit a versioned Meshy image-to-3D request with explicit `meshy-t2`, Smart Topology, a 3000-triangle target and 2K PBR as the starting recipe. Preserve source GLB/textures, then validate and render with headless Blender. Provider support and current cost require fresh verification before dispatch.

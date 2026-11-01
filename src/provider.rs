@@ -23,11 +23,13 @@ pub enum Poll {
     Pending,
     Done { outputs: usize, credits: Option<u64> },
     Failed { reason: String, credits: Option<u64> },
+    Cancelled,
 }
 
 pub struct Output {
     pub content_type: String,
     pub reader: Box<dyn Read + Send>,
+    pub evidence: Value,
 }
 
 pub trait Provider: Send + Sync {
@@ -67,7 +69,9 @@ impl FakeProvider {
         let path = self.effect_path(effect)?;
         let mut f = fs::OpenOptions::new().write(true).create_new(true).open(path).map_err(|e| e.to_string())?;
         f.write_all(receipt.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
-        fs::File::open(self.dir.join("effects")).and_then(|f| f.sync_all()).map_err(|e| e.to_string())
+        #[cfg(unix)]
+        fs::File::open(self.dir.join("effects")).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
+        Ok(())
     }
     fn op_path(&self, op: &str) -> Result<PathBuf, String> {
         if op.len() != 36 || !op.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
@@ -166,9 +170,14 @@ impl Provider for FakeProvider {
             return Ok(Output {
                 content_type: "application/x-assetq-synthetic".into(),
                 reader: Box::new(io::Cursor::new(half).chain(Broken)),
+                evidence: Value::Null,
             });
         }
-        Ok(Output { content_type: "application/x-assetq-synthetic".into(), reader: Box::new(io::Cursor::new(bytes)) })
+        Ok(Output {
+            content_type: "application/x-assetq-synthetic".into(),
+            reader: Box::new(io::Cursor::new(bytes)),
+            evidence: Value::Null,
+        })
     }
     fn cancel(&self, op: &str) -> Result<bool, String> {
         if self.fault("cancel_unconfirmed") {

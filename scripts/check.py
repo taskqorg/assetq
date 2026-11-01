@@ -17,8 +17,17 @@ SPECQ = ROOT / ".specq"
 
 
 def run(*args, cwd=ROOT, timeout=120, env=None):
-    return subprocess.run(args, cwd=cwd, check=True, timeout=timeout, text=True, env=env,
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT).stdout
+    # A Windows PostgreSQL child can inherit stdout past pg_ctl's exit.
+    # A file keeps that handle from turning completion into an endless EOF wait.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
+        result = subprocess.run(args, cwd=cwd, timeout=timeout, text=True, env=env,
+                                stdout=output, stderr=subprocess.STDOUT,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        output.seek(0)
+        text = output.read()
+        if result.returncode:
+            raise subprocess.CalledProcessError(result.returncode, args, output=text)
+        return text
 
 
 def pg_bin():
@@ -28,7 +37,8 @@ def pg_bin():
     which = shutil.which("initdb")
     candidates.append(which and str(Path(which).parent))
     for directory in candidates:
-        if directory and (Path(directory) / "initdb").exists() and (Path(directory) / "pg_ctl").exists():
+        suffix = ".exe" if os.name == "nt" else ""
+        if directory and (Path(directory) / f"initdb{suffix}").exists() and (Path(directory) / f"pg_ctl{suffix}").exists():
             return Path(directory)
     raise RuntimeError("PostgreSQL server binaries (initdb, pg_ctl) not found; set ASSETQ_PG_BIN")
 
@@ -38,7 +48,7 @@ def postgres_cluster():
     """A throwaway cluster on a private socket; fsync is off because the
     fixture is disposable. Yields a libpq keyword string without dbname."""
     binaries = pg_bin()
-    base = Path(tempfile.mkdtemp(prefix="aq-pg-", dir="/tmp"))
+    base = Path(tempfile.mkdtemp(prefix="aq-pg-"))
     data = base / "data"
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -47,7 +57,8 @@ def postgres_cluster():
     try:
         run(str(binaries / "initdb"), "-D", str(data), "-U", "assetq", "--auth=trust", "-E", "UTF8",
             "--no-locale", env=env)
-        options = f"-k {base} -p {port} -c listen_addresses='' -c fsync=off -c max_connections=300"
+        host_options = "-h 127.0.0.1" if os.name == "nt" else f"-k {base} -c listen_addresses=''"
+        options = f"{host_options} -p {port} -c fsync=off -c max_connections=300"
         try:
             run(str(binaries / "pg_ctl"), "-D", str(data), "-l", str(base / "log"), "-w", "-o", options,
                 "start", env=env)
@@ -55,7 +66,7 @@ def postgres_cluster():
             log = (base / "log").read_text() if (base / "log").exists() else ""
             raise RuntimeError(f"PostgreSQL fixture did not start: {error.stdout}{log}") from error
         try:
-            yield f"host={base} port={port} user=assetq"
+            yield f"host={'127.0.0.1' if os.name == 'nt' else base} port={port} user=assetq"
         finally:
             run(str(binaries / "pg_ctl"), "-D", str(data), "-m", "immediate", "stop", env=env)
     finally:
@@ -66,8 +77,12 @@ def rust_checks(name=None):
     print(run("cargo", "fmt", "--check"), end="")
     with postgres_cluster() as pg:
         env = dict(os.environ, ASSETQ_TEST_PG=pg, ASSETQ_TEST_PG_BIN=str(pg_bin()))
+        if os.name == "nt":
+            # Keep unrelated native database fixtures from starving each other;
+            # concurrency cases still launch their own competing callers.
+            env["RUST_TEST_THREADS"] = "1"
         print(run("cargo", "test", "--locked", *([name] if name else []), timeout=480, env=env), end="")
-    print("Rust model, store, PostgreSQL and service-restart checks passed (synthetic provider only).")
+    print(f"Selected Rust checks passed (filter: {name or 'all'}); fixture providers do not qualify real generation.")
 
 
 def needs_rust(paths):

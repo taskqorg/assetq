@@ -1,6 +1,6 @@
 # Service, lifecycle and storage
 
-This page specifies the first AssetQ service build: one Rust binary (`assetq`) with an HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic provider only. The real image-worker and Meshy methods attach in later tasks. Deployment and rollback: [deploy](deploy.md).
+One Rust binary (`assetq`) provides the HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic fixture provider and an optional [Codex image worker](image-worker.md). Meshy and managed deployment qualification remain separate. Deployment and rollback: [deploy](deploy.md).
 
 ## Lifecycle model
 
@@ -11,6 +11,7 @@ Attempt IDs are persisted separately from job IDs and effect IDs; each attempt r
 - **Effect:** `none`, `intended` (intent persisted before the provider call), `submitted` (operation ID recorded), `uncertain` (reply lost), `done`, `failed`. A new dispatch requires `none`. An intended or uncertain effect is reconciled by provider lookup of its effect ID: a found operation is adopted, and only a confirmed sealed absence (the old effect can no longer be accepted) allows one new dispatch. A provider that cannot establish that barrier must return unknown; an empty eventually consistent lookup is not confirmed absence.
 - **Cancellation:** `requested`, `provider_confirmed`, `locally_stopped`, `uncertain`. An unconfirmed provider cancel keeps the charge unknown with a reason, stays `waiting` without an executor lease, and retains project active-job and spend reservations. Observation of the same operation continues after restart until confirmed stop, completion or failure. Completion after requested or uncertain cancellation stops locally without importing results; only a terminal observation releases active-job capacity.
 - **Completion:** `succeeded` requires every step done, every expected output imported and a manifest commit in the same transaction as the transition. Duplicate provider completions and late events after a terminal phase are no-ops.
+- **Observation failure:** `observation_unknown` retains the same effect/operation and active-job/spend reservations, records the missing observation's reason, and never authorizes redispatch. A later terminal provider observation can still complete that operation. Duplicate identical unknown observations need no new record.
 
 Replay traces in `tests/traces/` cover the happy path, crash after intent, lost reply (found and absent), duplicate input and events, stale executors, partial import, full store and four cancellation paths. `assetq selftest` replays the same embedded traces.
 
@@ -20,7 +21,7 @@ A method version declares a bounded step list (at most 16) from `synthetic.gener
 
 Executors claim fenced work with `FOR UPDATE SKIP LOCKED`. A submission persists dispatch intent and the effect row, calls the provider, records the receipt, and releases the lease. Waiting jobs hold no executor capacity; pollers reconcile, poll and cancel provider operations through the same idempotent events that a webhook would use. On restart, expired leases are reclaimed and waiting operations continue from their stored IDs. No step needs the originating chat.
 
-`synthetic.fake@1` is the only enabled method. Its provider keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers to refuse delayed stale submissions, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@1` and `model.meshy-prop.v1@1` are registered as disabled; a request for them is refused.
+`synthetic.fake@1` keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@2` is experimental; new dispatch refuses pending protected host-grant integration, while configured observers can retain/import existing operations with `synthetic: false`. Version 1 and `model.meshy-prop.v1@1` stay disabled. No recommendation is promoted automatically.
 
 ## API
 
@@ -68,7 +69,7 @@ Unknown stays explicit. Provider health, store integrity and backup read `unknow
 
 ## Not in this build
 
-Real providers, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy.
+Meshy, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy. The qualified native image route does not qualify another client, host or managed storage deployment.
 
 ## Recovery and restore checks
 

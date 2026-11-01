@@ -16,6 +16,10 @@ python3 scripts/check.py --test resource_bounds
 
 The last command starts a disposable PostgreSQL cluster and filters Rust tests by name. Set `ASSETQ_PG_BIN` to a directory containing `initdb`, `pg_ctl`, `pg_dump` and `psql` when discovery does not find them. Run as an ordinary unprivileged user. Fixtures create unique databases and temporary directories; they never use production configuration or credentials. A sandbox refusal is `sandbox-blocked`, never a passing database or service check.
 
+Windows fixtures accept the same binaries with `.exe` suffixes and use a loopback-only temporary port instead of a Unix socket. Image worker development uses `cargo test --locked --lib image_worker::tests` and `python3 scripts/check.py --test image_worker`.
+
+Windows runs unrelated Rust fixtures sequentially; concurrency cases retain their explicit competing callers. The slow-import fixture measures a real guarded metadata transaction, bounds its calibrated lease to ten seconds, and keeps both fetch and stream slower than that lease. Its forced-expiry, no-commit, attempts, submission and replay assertions remain unchanged. This calibrates the check; it does not qualify 250 ms production leases on Windows.
+
 ## Protected risks
 
 - R3/R5: project-scoped jobs, attachment/download access, method versions, comparisons and recommendation promotion; caller names never become storage paths.

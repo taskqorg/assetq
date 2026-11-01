@@ -138,6 +138,10 @@ pub enum Event {
         reason: String,
         credits: Option<u64>,
     },
+    ObservationUnknown {
+        op_id: String,
+        reason: String,
+    },
     ObjectImported {
         fence: i64,
         key: String,
@@ -376,6 +380,7 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
                 return bad("completion must have 1..=16 outputs");
             }
             n.effect = EffectState::Done;
+            n.reason = None;
             n.outputs = Some(*outputs);
             set_usage(&mut n, *credits);
             if matches!(s.cancel, CancelState::Requested | CancelState::Uncertain) {
@@ -398,6 +403,12 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
             set_usage(&mut n, *credits);
             n.phase = Phase::Failed;
             n.lease = None;
+            n.reason = Some(reason.clone());
+        }
+        Event::ObservationUnknown { op_id, reason } => {
+            if s.effect != EffectState::Submitted || !op_matches(op_id) || s.lease.is_some() {
+                return bad("observation for an unknown or leased operation");
+            }
             n.reason = Some(reason.clone());
         }
         Event::ObjectImported { fence, key } => {

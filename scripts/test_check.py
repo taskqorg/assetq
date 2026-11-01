@@ -1,6 +1,9 @@
 """R8 risk: a modified cached rule checker must not execute as the pinned gate."""
 from pathlib import Path
 import tempfile
+import queue
+import threading
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -8,6 +11,27 @@ import check
 
 
 class GateTrust(unittest.TestCase):
+    def test_background_child_cannot_hold_command_output_open(self):
+        # R8: pg_ctl exits while its background server retains stdout.
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory) / "release"
+            child = "import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); end=time.monotonic()+10\nwhile not p.exists() and time.monotonic()<end: time.sleep(.01)"
+            parent = "import subprocess,sys; subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]],close_fds=False); print('parent finished')"
+            result = queue.Queue()
+            def run_parent():
+                try:
+                    result.put(check.run(sys.executable, "-c", parent, child, str(release), timeout=5))
+                except Exception as error:
+                    result.put(error)
+            thread = threading.Thread(target=run_parent, daemon=True)
+            thread.start()
+            try:
+                self.assertEqual(result.get(timeout=3).strip(), "parent finished")
+            finally:
+                release.touch()
+                thread.join(timeout=10)
+            self.assertFalse(thread.is_alive())
+
     def test_unknown_impact_keeps_implementation_checks(self):
         self.assertFalse(check.needs_rust(["assetq.md", "docs/service.md"]))
         for paths in [[], ["Cargo.lock"], ["src/api.rs", "README.md"], ["scripts/check.py"], [".github/workflows/tests.yml"]]:

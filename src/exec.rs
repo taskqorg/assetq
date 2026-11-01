@@ -25,6 +25,9 @@ impl Ctx {
         if let Some(dir) = &cfg.fake_provider_dir {
             providers.push(Arc::new(crate::provider::FakeProvider::new(dir.clone())?));
         }
+        if let Some(root) = &cfg.image_worker_root {
+            providers.push(Arc::new(crate::image_worker::ImageWorker::new(cfg.clone(), root.clone())?));
+        }
         Ok(Ctx { cfg, store, providers })
     }
     pub fn provider_names(&self) -> Vec<&str> {
@@ -207,7 +210,7 @@ fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> 
                 );
                 let mut src = std::io::Cursor::new(body.into_bytes());
                 if !job.imported.contains("output-0") {
-                    match put_output(c, ctx, id, &job, &info, "output-0", "application/x-assetq-synthetic", &mut src, None)? {
+                    match put_output(c, ctx, id, &job, &info, "output-0", "application/x-assetq-synthetic", &mut src, None, Value::Null)? {
                         Some(j) => job = j,
                         None => return Ok(()),
                     }
@@ -328,7 +331,7 @@ fn import(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInfo) -> Res
             }
         };
         let mut reader = out.reader;
-        match put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op))? {
+        match put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op), out.evidence)? {
             Some(j) => job = j,
             None => return Ok(None),
         }
@@ -347,6 +350,7 @@ fn put_output(
     content_type: &str,
     src: &mut dyn std::io::Read,
     op: Option<&str>,
+    evidence: Value,
 ) -> Result<Option<Job>> {
     let result = db::with_recovery(c, ctx.cfg.metadata_quota_bytes, |c| {
         let _writer = ctx.store.writer_lock()?;
@@ -362,6 +366,7 @@ fn put_output(
         let provenance = json!({
             "job_id": id, "method": job.method, "provider": info.spec["provider"], "provider_operation": op,
             "parents": info.request["attachments"], "request": info.request, "import_key": key, "synthetic": synthetic,
+            "provider_evidence": evidence,
         });
         let mut tx = db::write_tx(c, true)?;
         db::insert_object(
@@ -472,9 +477,23 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
                 }
             } else {
                 match provider.poll(&op) {
-                    Ok(Poll::Pending) | Err(_) => return Ok(true),
+                    Ok(Poll::Pending) => return Ok(true),
+                    Err(reason) => {
+                        if job.reason.as_deref() == Some(reason.as_str()) {
+                            return Ok(true);
+                        }
+                        Event::ObservationUnknown { op_id: op, reason }
+                    }
                     Ok(Poll::Done { outputs, credits }) => Event::ProviderCompleted { op_id: op, outputs, credits },
                     Ok(Poll::Failed { reason, credits }) => Event::ProviderFailed { op_id: op, reason, credits },
+                    Ok(Poll::Cancelled) if matches!(job.cancel, CancelState::Requested | CancelState::Uncertain) => {
+                        Event::CancelConfirmed { op_id: op }
+                    }
+                    Ok(Poll::Cancelled) => Event::ProviderFailed {
+                        op_id: op,
+                        reason: "native worker interrupted without an AssetQ cancellation request".into(),
+                        credits: None,
+                    },
                 }
             }
         }

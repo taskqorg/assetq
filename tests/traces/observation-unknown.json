@@ -1,0 +1,12 @@
+{"name":"worker interruption remains observable and never replays","covers":"R4/R6: a lost native observation retains operation, reason and admission until terminal observation","steps":[
+{"event":{"type":"accepted","method":"image.worker.v1@2","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"worker","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"observation_unknown","op_id":"foreign","reason":"lost"},"reject":"invalid"},
+{"event":{"type":"observation_unknown","op_id":"op1","reason":"native observation lost; no replay"}},
+{"event":{"type":"observation_unknown","op_id":"op1","reason":"native observation lost; no replay"}},
+{"event":{"type":"claimed","owner":"replacement","fence":2},"reject":"invalid"},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e2"},"reject":"stale"},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":3,"credits":null}}
+],"expect":{"phase":"active","effect":"done","op_id":"op1","reason":null,"submissions":1,"manifest":false}}
