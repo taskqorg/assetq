@@ -64,6 +64,12 @@ The initial managed deployment is on pds18. Use one dedicated `assetq` Unix serv
 
 Start with streamed filesystem-backed object storage behind the AssetQ API; no additional S3 server is required. Store manifests and ownership in PostgreSQL. File/object keys are server-owned, never arbitrary caller paths. Only committed, verified objects appear in successful results; retain or reconcile crash leftovers safely.
 
+R7 requires a configurable filesystem free-space floor before dispatch and during streamed writes. Serialize writers across processes and charge temporary and orphan bytes. Failed space observations refuse new effects with an unknown reason; exhaustion preserves committed assets and existing provider identities.
+
+Metadata admission leaves a separately configured recovery reserve. Every metadata writer, including events, leases, cancellation, observations and migrations, uses serialized physical-size checks covering indexes and TOAST.
+
+Bound each transaction and check its physical growth before commit; exhaustion stops further writes without deleting evidence. Reads and reconciliation resume from retained state after capacity returns.
+
 Project-scoped APIs provide authenticated uploads and downloads, checksums, size/type limits, pagination and bounded retention. Permanent asset IDs are independent of expiring transport URLs. Do not automatically publish private inputs or expose storage directories as a public web root.
 
 Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback/restore procedure. Additive activation uses existing host mechanisms and preserves other workloads.

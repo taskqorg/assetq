@@ -19,6 +19,7 @@ name = "assetq"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "libc",
  "postgres",
  "serde",
  "serde_json",

@@ -11,6 +11,109 @@ pub fn connect(url: &str) -> Result<Client> {
     Client::connect(url, NoTls).map_err(Error::from)
 }
 
+pub fn connect_config(cfg: &crate::Config) -> Result<Client> {
+    let mut c = connect(&cfg.database_url)?;
+    configure(&mut c, cfg)?;
+    Ok(c)
+}
+
+pub fn configure(c: &mut Client, cfg: &crate::Config) -> Result<()> {
+    if cfg.metadata_admission_headroom_bytes < 4 << 20 {
+        return Err(Error::new(422, "bad_config", "metadata transaction headroom must be at least 4 MiB"));
+    }
+    c.query_one("SELECT set_config('assetq.metadata_quota', $1, false), set_config('assetq.metadata_headroom', $2, false), set_config('assetq.metadata_recovery', $3, false)",
+        &[&cfg.metadata_quota_bytes.to_string(), &cfg.metadata_admission_headroom_bytes.to_string(), &cfg.metadata_recovery_headroom_bytes.to_string()])?;
+    Ok(())
+}
+
+const METADATA_LOCK: i64 = 0x415353455452;
+
+fn metadata_limits(c: &mut impl GenericClient) -> Result<(u64, u64, u64)> {
+    let r = c.query_one(
+        "SELECT coalesce(nullif(current_setting('assetq.metadata_quota', true), ''), '1073741824')::bigint,
+        coalesce(nullif(current_setting('assetq.metadata_headroom', true), ''), '4194304')::bigint,
+        coalesce(nullif(current_setting('assetq.metadata_recovery', true), ''), '16777216')::bigint",
+        &[],
+    )?;
+    Ok((r.get::<_, i64>(0) as u64, r.get::<_, i64>(1) as u64, r.get::<_, i64>(2) as u64))
+}
+
+pub fn metadata_bytes(c: &mut impl GenericClient) -> Result<u64> {
+    // Includes all relations, indexes, TOAST and retained dead/aborted allocations.
+    let size: i64 = c.query_one("SELECT pg_database_size(current_database())", &[])?.get(0);
+    u64::try_from(size).map_err(|_| Error::new(503, "metadata_unknown", "negative database size"))
+}
+
+pub fn metadata_check(c: &mut impl GenericClient, recovery: bool) -> Result<()> {
+    let (quota, headroom, reserve) = metadata_limits(c)?;
+    let ceiling = if recovery { quota } else { quota.saturating_sub(reserve) };
+    if metadata_bytes(c)?.checked_add(headroom).is_none_or(|n| n > ceiling) {
+        return Err(Error::new(
+            507,
+            "metadata_full",
+            if recovery {
+                "metadata recovery headroom exhausted"
+            } else {
+                "metadata admission headroom exhausted; recovery reserve retained"
+            },
+        ));
+    }
+    Ok(())
+}
+
+/// Acquire before row/table locks; never hold across a stream or provider call.
+pub fn write_tx(c: &mut Client, recovery: bool) -> Result<Transaction<'_>> {
+    let mut tx = c.transaction()?;
+    tx.batch_execute("SET LOCAL lock_timeout = '5s'")?;
+    tx.query_one("SELECT pg_advisory_xact_lock($1)", &[&METADATA_LOCK])?;
+    metadata_check(&mut tx, recovery)?;
+    let (quota, _, reserve) = metadata_limits(&mut tx)?;
+    let start = metadata_bytes(&mut tx)?;
+    let ceiling = if recovery { quota } else { quota.saturating_sub(reserve) };
+    tx.query_one("SELECT set_config('assetq.write_start', $1, true), set_config('assetq.write_ceiling', $2, true), set_config('assetq.write_charge', '0', true)",
+        &[&start.to_string(), &ceiling.to_string()])?;
+    Ok(tx)
+}
+
+/// Cap cumulative payload and row-allocation allowance before issuing mutations.
+pub fn charge(tx: &mut Transaction, bytes: usize) -> Result<()> {
+    let (_, headroom, _) = metadata_limits(tx)?;
+    let old: String = tx
+        .query_one("SELECT current_setting('assetq.write_charge', true)", &[])?
+        .get::<_, Option<String>>(0)
+        .ok_or_else(|| Error::new(503, "metadata_unknown", "unguarded metadata transaction"))?;
+    let previous = old.parse::<u64>().map_err(|_| Error::new(503, "metadata_unknown", "invalid transaction charge"))?;
+    let cost = (bytes as u64)
+        .checked_mul(16)
+        .and_then(|n| n.checked_add(64 << 10))
+        .and_then(|n| n.checked_add(previous))
+        .filter(|n| *n <= headroom)
+        .ok_or_else(|| Error::new(507, "metadata_full", "metadata transaction payload allowance exhausted"))?;
+    tx.query_one("SELECT set_config('assetq.write_charge', $1, true)", &[&cost.to_string()])?;
+    Ok(())
+}
+
+pub fn commit_write(mut tx: Transaction) -> Result<()> {
+    let r = tx.query_one("SELECT current_setting('assetq.write_start')::bigint, current_setting('assetq.write_ceiling')::bigint", &[])?;
+    let used = metadata_bytes(&mut tx)?;
+    let (_, headroom, _) = metadata_limits(&mut tx)?;
+    if used > r.get::<_, i64>(1) as u64 || used.saturating_sub(r.get::<_, i64>(0) as u64) > headroom {
+        return Err(Error::new(507, "metadata_full", "physical metadata growth exceeded transaction allowance; transaction refused"));
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn metadata_status(c: &mut Client) -> Value {
+    match (metadata_limits(c), metadata_bytes(c)) {
+        (Ok((quota, headroom, reserve)), Ok(used)) => json!({"state": "observed", "used_bytes": used,
+            "quota_bytes": quota, "transaction_headroom_bytes": headroom, "recovery_reserve_bytes": reserve,
+            "admission": if used.checked_add(headroom).is_some_and(|n| n <= quota.saturating_sub(reserve)) { "available" } else { "exhausted" },
+            "recovery": if used.checked_add(headroom).is_some_and(|n| n <= quota) { "available" } else { "exhausted" }}),
+        _ => json!({"state": "unknown", "reason": "physical metadata measurement unavailable"}),
+    }
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -23,7 +126,7 @@ const SCHEMA: &str = include_str!("schema.sql");
 
 /// Apply schema version 1 once and register the built-in method versions.
 pub fn migrate(c: &mut Client) -> Result<()> {
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, false)?;
     tx.batch_execute("CREATE TABLE IF NOT EXISTS schema_version (version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now()); LOCK TABLE schema_version IN EXCLUSIVE MODE;")?;
     if tx.query_opt("SELECT 1 FROM schema_version WHERE version <> 1 LIMIT 1", &[])?.is_some() {
         return Err(Error::new(409, "schema_mismatch", "this candidate supports only schema 1"));
@@ -33,7 +136,7 @@ pub fn migrate(c: &mut Client) -> Result<()> {
         tx.batch_execute(SCHEMA)?;
         tx.execute("INSERT INTO schema_version (version) VALUES (1)", &[])?;
     }
-    tx.commit()?;
+    commit_write(tx)?;
     Ok(())
 }
 
@@ -114,14 +217,25 @@ pub fn builtin_methods() -> Vec<(&'static str, i32, &'static str, Value)> {
 // shortcut: one admitting writer across processes; use byte reservations if concurrent streaming is needed.
 const ADMISSION_LOCK: i64 = 0x415353455451;
 pub fn with_admission<T>(c: &mut Client, quota: u64, f: impl FnOnce(&mut Client) -> Result<T>) -> Result<T> {
+    with_writer(c, quota, false, f)
+}
+
+pub fn with_recovery<T>(c: &mut Client, quota: u64, f: impl FnOnce(&mut Client) -> Result<T>) -> Result<T> {
+    with_writer(c, quota, true, f)
+}
+
+fn with_writer<T>(c: &mut Client, quota: u64, recovery: bool, f: impl FnOnce(&mut Client) -> Result<T>) -> Result<T> {
     let locked: bool = c.query_one("SELECT pg_try_advisory_lock($1)", &[&ADMISSION_LOCK])?.get(0);
     if !locked {
         return Err(Error::new(429, "admission_busy", "another writer holds the admission reservation"));
     }
     let result = (|| {
-        let used: i64 = c.query_one("SELECT pg_database_size(current_database())", &[])?.get(0);
-        // Reserve the bounded JSON request plus job events/manifest overhead.
-        if (used as u64).saturating_add(4 << 20) > quota {
+        let (_, headroom, reserve) = metadata_limits(c)?;
+        if metadata_bytes(c)?
+            .checked_add(headroom)
+            .and_then(|n| n.checked_add(if recovery { 0 } else { reserve }))
+            .is_none_or(|n| n > quota)
+        {
             return Err(Error::new(507, "metadata_full", "database admission quota exhausted"));
         }
         f(c)
@@ -159,7 +273,8 @@ pub fn authenticate(c: &mut impl GenericClient, token: &str) -> Result<Principal
 }
 
 pub fn create_project(c: &mut Client, id: &str, budget: i64, max_active: i32) -> Result<()> {
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, id.len())?;
     tx.execute(
         "INSERT INTO projects (id, budget_credits, max_active_jobs) VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE SET budget_credits = $2, max_active_jobs = $3",
@@ -167,20 +282,24 @@ pub fn create_project(c: &mut Client, id: &str, budget: i64, max_active: i32) ->
     )
     .map_err(|e| Error::new(400, "bad_project", e.to_string()))?;
     for (mid, version, status, spec) in builtin_methods() {
+        charge(&mut tx, spec.to_string().len())?;
         tx.execute(
             "INSERT INTO methods (project, id, version, status, spec) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
             &[&id, &mid, &version, &status, &spec],
         )?;
     }
-    tx.commit()?;
+    commit_write(tx)?;
     Ok(())
 }
 
 /// Create a grant and return the secret once; only its hash is stored.
 pub fn create_token(c: &mut Client, project: &str, role: &str) -> Result<String> {
     let token = format!("aq_{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
-    c.execute("INSERT INTO tokens (hash, project, role) VALUES ($1, $2, $3)", &[&sha256_hex(token.as_bytes()), &project, &role])
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, project.len() + role.len() + token.len())?;
+    tx.execute("INSERT INTO tokens (hash, project, role) VALUES ($1, $2, $3)", &[&sha256_hex(token.as_bytes()), &project, &role])
         .map_err(|e| Error::new(400, "bad_grant", e.to_string()))?;
+    commit_write(tx)?;
     Ok(token)
 }
 
@@ -206,7 +325,8 @@ pub struct NewObject<'a> {
 
 /// Record a committed blob and its project-scoped object row. Idempotent per
 /// `(job_id, import_key)` so a resumed import reuses the earlier object.
-pub fn insert_object(c: &mut impl GenericClient, o: &NewObject) -> Result<String> {
+pub fn insert_object(c: &mut Transaction, o: &NewObject) -> Result<String> {
+    charge(c, o.provenance.to_string().len() + o.content_type.len() + o.project.len() + o.import_key.map(str::len).unwrap_or(0))?;
     c.execute("INSERT INTO blobs (sha256, size) VALUES ($1, $2) ON CONFLICT DO NOTHING", &[&o.sha256, &(o.size as i64)])?;
     if let (Some(job), Some(key)) = (o.job_id, o.import_key) {
         if let Some(r) = c.query_opt("SELECT id, sha256 FROM objects WHERE job_id = $1 AND import_key = $2", &[&job, &key])? {
@@ -262,15 +382,18 @@ pub fn list_objects(c: &mut impl GenericClient, project: &str, after: Option<&st
     Ok(json!({"items": items, "next": next}))
 }
 
-pub fn set_acceptance(c: &mut impl GenericClient, p: &Principal, id: &str, value: &str) -> Result<Value> {
+pub fn set_acceptance(c: &mut Client, p: &Principal, id: &str, value: &str) -> Result<Value> {
     p.require_owner()?;
     if !matches!(value, "pending" | "accepted" | "rejected") {
         return Err(Error::new(422, "bad_acceptance", "acceptance is pending, accepted or rejected"));
     }
-    let n = c.execute("UPDATE objects SET acceptance = $3 WHERE id = $1 AND project = $2", &[&id, &p.project, &value])?;
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, id.len() + value.len())?;
+    let n = tx.execute("UPDATE objects SET acceptance = $3 WHERE id = $1 AND project = $2", &[&id, &p.project, &value])?;
     if n == 0 {
         return Err(Error::new(404, "not_found", "no such object in this project"));
     }
+    commit_write(tx)?;
     get_object(c, &p.project, id)
 }
 
@@ -319,7 +442,8 @@ pub fn create_method_version(c: &mut Client, p: &Principal, body: &Value) -> Res
     }
     let spec = &body["spec"];
     validate_spec(spec)?;
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, body.to_string().len())?;
     tx.execute("LOCK TABLE methods IN SHARE ROW EXCLUSIVE MODE", &[])?;
     let v: i32 =
         tx.query_one("SELECT coalesce(max(version), 0) + 1 FROM methods WHERE id = $1 AND project = $2", &[&id, &p.project])?.get(0);
@@ -327,7 +451,7 @@ pub fn create_method_version(c: &mut Client, p: &Principal, body: &Value) -> Res
         "INSERT INTO methods (id, version, status, spec, project) VALUES ($1, $2, $3, $4, $5) RETURNING id, version, status, spec, created_at::text",
         &[&id, &v, &status, spec, &p.project],
     )?;
-    tx.commit()?;
+    commit_write(tx)?;
     Ok(method_json(&r))
 }
 
@@ -451,7 +575,7 @@ pub fn submit_job(c: &mut Client, p: &Principal, req: &Value, limits: &Limits, p
     let canonical = json!({"operation": operation, "method": method_name, "text": text, "attachments": attachments, "constraints": constraints, "budget": {"max_credits": budget}});
     let hash = sha256_hex(canonical.to_string().as_bytes());
 
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, false)?;
     // Serialize admission per project so limits and idempotency are exact.
     let prow = tx.query_one("SELECT budget_credits, max_active_jobs FROM projects WHERE id = $1 FOR UPDATE", &[&p.project])?;
     if let Some(r) = tx.query_opt("SELECT id, request_hash FROM jobs WHERE project = $1 AND idempotency_key = $2", &[&p.project, &key])? {
@@ -509,13 +633,14 @@ pub fn submit_job(c: &mut Client, p: &Principal, req: &Value, limits: &Limits, p
     let method = format!("{mid}@{mver}");
     let event = Event::Accepted { method, steps };
     let state = model::apply(None, &event)?;
+    charge(&mut tx, canonical.to_string().len() + serde_json::to_string(&state).unwrap().len() + key.len())?;
     tx.execute(
         "INSERT INTO jobs (id, project, idempotency_key, request_hash, request, method_id, method_version, phase, state, reserved_credits, events)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1)",
         &[&id, &p.project, &key, &hash, &canonical, &mid, &mver, &state.phase.as_str(), &serde_json::to_value(&state).unwrap(), &reserve],
     )?;
     tx.execute("INSERT INTO job_events (job_id, seq, event) VALUES ($1, 1, $2)", &[&id, &serde_json::to_value(&event).unwrap()])?;
-    tx.commit()?;
+    commit_write(tx)?;
     Ok((get_job(c, &p.project, &id)?, true))
 }
 
@@ -605,6 +730,10 @@ pub fn apply_event(tx: &mut Transaction, id: &str, event: &Event, lease_ms: u64,
     if next == cur {
         return Ok(next); // idempotent duplicate: nothing to record
     }
+    charge(tx, serde_json::to_string(&next).unwrap().len() + serde_json::to_string(event).unwrap().len())?;
+    if let Event::SubmitAcked { effect_id, op_id, .. } | Event::Reconciled { effect_id, op_id: Some(op_id) } = event {
+        tx.execute("UPDATE effects SET op_id = $2, updated_at = now() WHERE id = $1", &[effect_id, op_id])?;
+    }
     if let Event::Claimed { owner, fence } = event {
         tx.execute("INSERT INTO attempts (id, job_id, fence, owner) VALUES ($1,$2,$3,$4)", &[&new_id(), &id, fence, owner])?;
     }
@@ -629,9 +758,9 @@ pub fn apply_event(tx: &mut Transaction, id: &str, event: &Event, lease_ms: u64,
 
 pub fn cancel_job(c: &mut Client, project: &str, id: &str) -> Result<Value> {
     get_job(c, project, id)?;
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, true)?;
     apply_event(&mut tx, id, &Event::CancelRequested, 0, 0)?;
-    tx.commit()?;
+    commit_write(tx)?;
     get_job(c, project, id)
 }
 
@@ -673,19 +802,22 @@ pub fn propose_recommendation(c: &mut Client, p: &Principal, body: &Value) -> Re
         return Err(Error::new(422, "bad_recommendation", "object constraints and nonempty evidence required"));
     }
     let id = new_id();
-    c.execute(
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, body.to_string().len())?;
+    tx.execute(
         "INSERT INTO recommendations (id, use_case, constraints, method_id, method_version, evidence, observed_at, state, proposed_by, project)
          VALUES ($1, $2, $3, $4, $5, $6, $7::text::timestamptz, 'proposed', $8, $8)",
         &[&id, &use_case, &constraints, &mid, &mver, evidence, &observed, &p.project],
     )
     .map_err(|e| Error::new(422, "bad_recommendation", e.to_string()))?;
+    commit_write(tx)?;
     get_recommendation(c, &p.project, &id)
 }
 
 /// Promotion follows the owner-approved policy: an owner grant (R1, methods section).
 pub fn promote_recommendation(c: &mut Client, p: &Principal, id: &str) -> Result<Value> {
     p.require_owner()?;
-    let mut tx = c.transaction()?;
+    let mut tx = write_tx(c, false)?;
     let r = tx.query_opt(
         "SELECT use_case, constraints FROM recommendations WHERE id = $1 AND project = $2 AND state = 'proposed' FOR UPDATE",
         &[&id, &p.project],
@@ -693,13 +825,21 @@ pub fn promote_recommendation(c: &mut Client, p: &Principal, id: &str) -> Result
     let r = r.ok_or_else(|| Error::new(404, "not_found", "no proposed recommendation"))?;
     let use_case: String = r.get(0);
     let constraints: Value = r.get(1);
+    let previous = tx.query(
+        "SELECT id FROM recommendations WHERE use_case = $1 AND project = $2 AND constraints = $3 AND state = 'promoted'",
+        &[&use_case, &p.project, &constraints],
+    )?;
+    for _ in &previous {
+        charge(&mut tx, 0)?;
+    }
+    charge(&mut tx, constraints.to_string().len())?;
     tx.query_one("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE", &[&p.project])?;
     tx.execute(
         "UPDATE recommendations SET state = 'withdrawn' WHERE use_case = $1 AND project = $2 AND constraints = $3 AND state = 'promoted'",
         &[&use_case, &p.project, &constraints],
     )?;
     tx.execute("UPDATE recommendations SET state = 'promoted', promoted_by = $2 WHERE id = $1", &[&id, &p.project])?;
-    tx.commit()?;
+    commit_write(tx)?;
     get_recommendation(c, &p.project, id)
 }
 
@@ -765,10 +905,13 @@ pub fn add_comparison(c: &mut Client, p: &Principal, body: &Value) -> Result<Val
     let results = body.get("results").cloned().ok_or_else(|| Error::new(422, "bad_comparison", "results required"))?;
     let missing = body.get("missing_cases").cloned().unwrap_or(json!([]));
     let id = new_id();
-    c.execute(
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, body.to_string().len())?;
+    tx.execute(
         "INSERT INTO comparisons (id, use_case, dataset_version, evaluator_version, method_versions, results, missing_cases, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         &[&id, &use_case, &dataset, &evaluator, methods, &results, &missing, &p.project],
     )?;
+    commit_write(tx)?;
     Ok(json!({"id": id}))
 }
 
@@ -790,11 +933,14 @@ pub fn list_comparisons(c: &mut impl GenericClient, project: &str, use_case: Opt
     ))
 }
 
-pub fn observe(c: &mut impl GenericClient, kind: &str, subject: &str, value: &Value) -> Result<()> {
-    c.execute(
+pub fn observe(c: &mut Client, kind: &str, subject: &str, value: &Value) -> Result<()> {
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, kind.len() + subject.len() + value.to_string().len())?;
+    tx.execute(
         "INSERT INTO observations (kind, subject, value) VALUES ($1, $2, $3) ON CONFLICT (kind, subject) DO UPDATE SET value = $3, observed_at = now()",
         &[&kind, &subject, value],
     )?;
+    commit_write(tx)?;
     Ok(())
 }
 
