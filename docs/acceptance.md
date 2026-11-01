@@ -27,7 +27,8 @@ Report actual triangles versus target, component count, dimensions, textures, GL
 | Foreign project or invalid file path | Refuse unauthorized reads/writes and caller-chosen storage paths |
 | Optimizer absent/disabled | Plain worker runs; existing auth/model/permissions remain unchanged |
 | Telemetry outage | Local job/result truth survives and incomplete metrics remain explicit |
-| Backup loss scenario | Restore job metadata, method and object bytes outside the live store; hashes and download pass |
+| Initial backup baseline | Use the existing managed-host mechanism for consistent object/metadata snapshots; restore job, method and object bytes into an isolated local store; hashes and authenticated download pass |
+| Independent external restoration | Keep provider retrieval and isolated restoration Open/unknown until observed; this does not block initial image, 3D or site delivery |
 
 ## Acceptance record
 

@@ -26,3 +26,9 @@ The earlier request also requires text and attachment inputs, image/video/3D/aud
 > assets.ufobe.com - сайт для api и для менеджмента наших ассетов - просмотр, поиск, бенчмарк пайплайнов и т.д.
 
 The canonical management application and API belong at `https://assets.ufobe.com`. AssetQ owns browsing/search, previews/detail, generation jobs, method management and pipeline benchmarks. This supersedes the earlier plan to put the complete asset workspace in DashQ; DashQ retains summary metadata and deep links. Private asset access, scoped authority and the 1000-credit Meshy ceiling remain unchanged.
+
+## Initial backup baseline
+
+> не заморачивайся, сделай как-то там сейчас, как у нас в других проектах сделано по дефолту. И давай дальше продолжай.
+
+Task #4 steering note 6557600407 retains this owner direction: reuse the managed host's existing backup mechanism, consistent object/metadata snapshots and a verified isolated local restore. Independent external retrieval/restoration remains Open/unknown and does not block initial release or image/3D/site work. Data integrity, scoped access, paired snapshots and local restore/hash checks remain required; native image-tool and original bitmap acceptance is unchanged.

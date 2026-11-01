@@ -88,7 +88,11 @@ Publish the approved `assets.ufobe.com` name through the existing Caddy HTTPS en
 
 Another public hostname, firewall change, destructive migration or unrelated service restart requires separate concrete approval. The website does not authorize direct public storage listeners or directory listing.
 
-Back up objects, manifests, job state and registry revisions consistently outside pds18 and prove restoration. Provider URLs and RAID do not satisfy backup acceptance. Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
+For initial delivery, reuse the managed host's existing backup mechanism for consistent snapshots of objects, manifests, job state and registry revisions. Prove an isolated local restore with hashes and authenticated retrieval.
+
+Independent external retrieval and restoration remain Open/unknown until observed; they do not block initial image, 3D or site delivery. Provider URLs and RAID alone are not backup evidence.
+
+Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
 
 ## Control and observability
 
