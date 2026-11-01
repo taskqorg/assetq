@@ -20,3 +20,9 @@ The owner accepted the architecture discussed in this chat: AgentQ owns a reusab
 ## Preserved broader requirements
 
 The earlier request also requires text and attachment inputs, image/video/3D/audio and other asset kinds, durable jobs lasting hours, alternative APIs/models/pipelines, adding and changing methods, comparative tests, agent-and-human recommendations, operational control and owned asset storage on pds18. The two initial methods are the first implementation scope, not deletion of those requirements.
+
+## Website direction
+
+> assets.ufobe.com - сайт для api и для менеджмента наших ассетов - просмотр, поиск, бенчмарк пайплайнов и т.д.
+
+The canonical management application and API belong at `https://assets.ufobe.com`. AssetQ owns browsing/search, previews/detail, generation jobs, method management and pipeline benchmarks. This supersedes the earlier plan to put the complete asset workspace in DashQ; DashQ retains summary metadata and deep links. Private asset access, scoped authority and the 1000-credit Meshy ceiling remain unchanged.

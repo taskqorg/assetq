@@ -1,6 +1,6 @@
 # AssetQ contract
 
-AssetQ accepts text and attachments, executes durable asset-generation jobs, and retains verified assets with versioned methods and evidence-backed recommendations. It is a Rust service and CLI; agent execution belongs to AgentQ, task scheduling to TaskQ, and infrastructure primitives to CoreQ.
+AssetQ accepts text and attachments, executes durable asset-generation jobs, and retains verified assets with versioned methods and evidence-backed recommendations. It provides a Rust service, CLI and web management application; agent execution belongs to AgentQ, task scheduling to TaskQ, and infrastructure primitives to CoreQ.
 
 ## Principles
 
@@ -12,6 +12,7 @@ AssetQ accepts text and attachments, executes durable asset-generation jobs, and
 - **R6 Executable lifecycle.** Job and attempt transitions follow one executable behavioral model with replayable traces for submission, crash, recovery, cancellation, duplicate events and result import. Completion requires a verified manifest and retrievable payloads; product or visual acceptance is separate.
 - **R7 Bounded operation.** Admission enforces declared spend, file, storage, concurrency and execution limits. A full store or exhausted budget stops new effects with a reason and preserves existing work. Observability cannot silently authorize work or bypass these limits.
 - **R8 Delivery evidence.** The selected canonical gate is `python3 scripts/check.py`, with a 600-second elapsed budget on `ubuntu-latest`, including setup. Docs-only changes run pinned contract lint and whitespace checks; implementation adds deterministic core and affected checks. Native/provider/storage qualification is separate and named per path.
+- **R9 Canonical web surface.** `https://assets.ufobe.com` is the AssetQ management site and API origin. Asset browsing, search, generation jobs, pipeline benchmarks and method management belong here. DashQ shows source-backed summary metadata and links to AssetQ; it does not duplicate the asset workspace.
 
 ## Requests and durable execution
 
@@ -22,6 +23,18 @@ Record job, attempt and effect identities independently. Persist dispatch intent
 Cancellation distinguishes requested, provider-confirmed, locally stopped and uncertain. Report incurred or unknown charges. Retry policy never blindly repeats an uncertain paid submission. A service restart resumes observation and safe steps without requiring the original chat.
 
 The first implementation supports a registered bounded sequence of steps, including external waiting and local validation. It does not require a general workflow editor. Executors can run on qualified hosts distinct from the storage/control host.
+
+## Web management and API
+
+The management application and versioned API share `https://assets.ufobe.com`. The browser uses the same AssetQ contracts as CLI and agent callers; it has no separate job state, asset catalog or recommendation store. Define exact API paths in the service contract and preserve published compatibility.
+
+Provide an asset library with visual previews, authenticated downloads, text search and project/type filters; asset detail includes versions, source relationships, provenance and validation. Unsupported previews show the file type and download action rather than a fabricated render.
+
+Provide generation requests with text and attachments, durable progress/cancellation/results, method/API/model/pipeline inspection and versioned edits, and benchmark setup, runs and comparable outputs. Show dataset/evaluator versions, quality judgments, cost, time, failures and scoped recommendations, including incomplete or unknown evidence.
+
+Browser identity and API credentials remain separate, project-scoped authorities. Reuse the existing host sign-in guard for browser entry where qualified; machine routes require explicit scoped authentication, never a wildcard browser-auth exemption. A reachable website does not make assets public or grant generation, benchmark, edit or promotion rights.
+
+Apply the [specq design workflow](https://github.com/taskqorg/specq/blob/main/design/workflow.md) before implementing a new visual candidate. Include empty, loading, long-running, cancelled, failed, stale/unknown and permission-denied states. Accept the actual browser and API journeys separately from mockups.
 
 ## Versioned methods and recommendations
 
@@ -53,7 +66,11 @@ Start with streamed filesystem-backed object storage behind the AssetQ API; no a
 
 Project-scoped APIs provide authenticated uploads and downloads, checksums, size/type limits, pagination and bounded retention. Permanent asset IDs are independent of expiring transport URLs. Do not automatically publish private inputs or expose storage directories as a public web root.
 
-Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback/restore procedure. Additive activation uses existing host mechanisms and preserves other workloads. A new public hostname, firewall change, destructive migration or unrelated service restart requires separate concrete approval.
+Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback/restore procedure. Additive activation uses existing host mechanisms and preserves other workloads.
+
+Publish the approved `assets.ufobe.com` name through the existing Caddy HTTPS entry on pds18, proxying to the loopback-only AssetQ service. Change only this named DNS/site configuration after verifying its current ownership and target; preserve apex/wildcard records, other sites and existing access guards. Verify TLS, browser/API authentication and rollback on the exact candidate.
+
+Another public hostname, firewall change, destructive migration or unrelated service restart requires separate concrete approval. The website does not authorize direct public storage listeners or directory listing.
 
 Back up objects, manifests, job state and registry revisions consistently outside pds18 and prove restoration. Provider URLs and RAID do not satisfy backup acceptance. Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
 
@@ -61,7 +78,9 @@ Back up objects, manifests, job state and registry revisions consistently outsid
 
 Expose jobs and step progress, queued/active/uncertain work, provider availability, per-method outcomes, usage and spend, comparison evidence, recommendations, storage usage/integrity and backup/restore observations. Keep generation success, asset validation and owner acceptance separately visible.
 
-Reuse DashQ for a control surface and ServerQ for host observations when their integrations are ready. AssetQ API/CLI remain independently operable. Langfuse can receive correlated traces and evaluation records; its outage cannot own or erase job state. Keep primary assets in the AssetQ store.
+Use the AssetQ site for asset operations and pipeline benchmarks. Reuse DashQ for summary metadata/deep links and ServerQ for host observations when their integrations are ready. AssetQ API/CLI remain independently operable.
+
+Langfuse can receive correlated traces and evaluation records; its outage cannot own or erase job state. Keep primary assets in the AssetQ store.
 
 ## Linked specifications
 
