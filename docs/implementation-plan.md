@@ -15,7 +15,8 @@ The owner request is preserved in [intake](intake/2026-11-01-owner-request.md). 
 | Image-to-3D prop method | [assetq#5](https://github.com/taskqorg/assetq/issues/5) | Image-worker method |
 | Managed-store connected live journeys | [assetq#6](https://github.com/taskqorg/assetq/issues/6) | Both methods and reviewed private host activation receipts |
 | Method comparisons and guidance | [assetq#7](https://github.com/taskqorg/assetq/issues/7) | Real generation and storage receipts |
-| Human control surface | [dashq#246](https://github.com/taskqorg/dashq/issues/246) | Stable AssetQ controls and scoped recommendations |
+| Management website and API origin | [assetq#9](https://github.com/taskqorg/assetq/issues/9) | Versioned controls and benchmark evidence |
+| Fleet summary and links to the AssetQ site | [dashq#246](https://github.com/taskqorg/dashq/issues/246) | Stable AssetQ metadata and canonical destinations |
 
 Storage preparation has a separate task in the private host repository. Its identity, infrastructure inventory and operator effects stay in restricted PM evidence. GitHub and GitLab dependencies do not cross providers; the PM creates the concrete activation task once the candidate and reviewed effects exist.
 
@@ -41,8 +42,10 @@ The PM created a ten-minute heartbeat in the existing owner chat. It follows thi
 3. Implement and qualify the Codex image-worker route through AgentQ. A real image-generation capability is required; never substitute a procedural drawing or silently use a direct paid API. Expose a precise capability gap when the selected runtime lacks the tool.
 4. Implement image-to-3D with the csgo Meshy prop baseline, explicit parameters, provider reconciliation and headless Blender validation. Consume the first image, retain source GLB/textures and render views.
 5. Run the connected real journey on the managed store, record generated image/3D asset IDs, methods, actual costs, recovery and download verification, and present outputs for owner visual acceptance.
-6. Expose shared controls and comparison/recommendation records to humans and agents, with DashQ/ServerQ integration as dependencies permit. Seed the two methods without calling either universally best.
-7. Integrate those source-backed controls into DashQ through the shared design workflow, with scoped actions and owner visual review. Preserve the existing TaskQ/AgentQ views and ServerQ's read-only host boundary.
+6. Expose shared controls and comparison/recommendation records to humans and agents. Seed the two methods without calling either universally best.
+7. Build the canonical management site at `assets.ufobe.com` through the shared design workflow: asset browsing/previews/search/detail, generation jobs, methods and pipeline benchmarks, using the same scoped AssetQ API. Include owner visual review and real browser/API acceptance.
+8. Publish this approved name through existing pds18 Caddy HTTPS and a loopback-only application after exact DNS/site ownership, authentication and rollback checks. Change only the named record/site, preserving apex/wildcard and other services. Keep private host installation evidence restricted.
+9. Integrate source-backed summary metadata and deep links into DashQ, preserving its existing views and ServerQ's read-only host boundary. The complete asset/benchmark workspace belongs in AssetQ.
 
 ## Spend and operational boundaries
 
