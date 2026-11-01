@@ -1,0 +1,9 @@
+{"name":"cancel while submission is uncertain","covers":"cancel waits for reconciliation; a confirmed-absent request stops locally without charge","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_uncertain","fence":1,"effect_id":"e1","reason":"timeout"}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"cancel_stopped_locally"},"reject":"invalid"},
+{"event":{"type":"reconciled","effect_id":"e1","op_id":null}}
+],"expect":{"phase":"cancelled","cancel":"locally_stopped","effect":"none"}}

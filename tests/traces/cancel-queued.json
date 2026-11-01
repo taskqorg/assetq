@@ -1,0 +1,5 @@
+{"name":"cancel before any effect","covers":"a queued job stops locally at once; no claim follows","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"claimed","owner":"x1","fence":1},"reject":"invalid"}
+],"expect":{"phase":"cancelled","cancel":"locally_stopped","submissions":0}}

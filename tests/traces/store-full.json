@@ -1,0 +1,6 @@
+{"name":"full store stops new effects","covers":"a full store pauses before dispatch; nothing is submitted or lost","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"paused","fence":1,"reason":"store_full: no new provider effects until space is available"}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"},"reject":"stale"}
+],"expect":{"phase":"active","submissions":0,"effect":"none","lease":null,"reason":"store_full: no new provider effects until space is available"}}

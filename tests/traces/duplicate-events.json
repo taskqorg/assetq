@@ -1,0 +1,18 @@
+{"name":"duplicate input and provider events","covers":"duplicate acceptance refused; repeated webhook/poll completion and imports are idempotent","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]},"reject":"invalid"},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"provider_completed","op_id":"other","outputs":1,"credits":1},"reject":"invalid"},
+{"event":{"type":"claimed","owner":"x1","fence":2}},
+{"event":{"type":"object_imported","fence":2,"key":"output-0"}},
+{"event":{"type":"object_imported","fence":2,"key":"output-0"}},
+{"event":{"type":"step_completed","fence":2,"step":1}},
+{"event":{"type":"step_completed","fence":2,"step":1},"reject":"invalid"},
+{"event":{"type":"step_completed","fence":2,"step":2}},
+{"event":{"type":"manifest_committed","fence":2,"items":1}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}}
+],"expect":{"phase":"succeeded","submissions":1,"imported":["output-0"],"manifest":true}}

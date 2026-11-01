@@ -1,0 +1,11 @@
+{"name":"completion after uncertain cancel","covers":"observe the original operation without dispatch or import after uncertain cancellation","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"cancel_uncertain","reason":"provider did not confirm the cancel"}},
+{"event":{"type":"claimed","owner":"x2","fence":2},"reject":"invalid"},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}}
+],"expect":{"phase":"cancelled","cancel":"locally_stopped","lease":null,"effect":"done","op_id":"op1","submissions":1,"usage_credits":1,"usage_note":null,"manifest":false,"imported":[]}}
