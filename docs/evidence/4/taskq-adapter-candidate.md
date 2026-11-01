@@ -1,14 +1,22 @@
-# TaskQ adapter refresh candidate
+# TaskQ adapter qualification and anchor promotion
 
-Prepare one isolated Mac adapter candidate for AssetQ #4 under R1/R3-R5/R8. This is a source/build handoff, not native qualification or a replacement trust anchor. The signed staged Mac binary and its SHA-256 remain **unknown pending PM build and qualification**.
+AssetQ #4 promotes one qualified Mac adapter under R1/R3-R5/R8. [PM native qualification note 6562927357](https://github.com/taskqorg/assetq/issues/4#issuecomment-6562927357) identifies TaskQ `e990d88943e95abd8d182d8157bfe84a94343a07` and final signed artifact SHA-256 `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4`. This is adapter qualification; refreshed AssetQ composition and current image-tool/output capability remain unqualified.
 
 Source direction: [PM note 6562586802](https://github.com/taskqorg/assetq/issues/4#issuecomment-6562586802): "select an appropriate reviewed/merged current TaskQ adapter source that can read the existing policy" and "update the compiled adapter anchor only in the same reviewed deliverable once qualified."
+
+Promotion direction: note 6562927357 says, "Promote this qualified compiled adapter anchor in your existing reviewed deliverable; preserve historical anchor/evidence and current runtime193 fix."
 
 ## Failure and preserved state
 
 PM built exact AssetQ `1111fe6b66fbdcfb2eaec1a96db65f97dd4be2e2` on Mac; binary SHA-256 `7f715332980c2b170e8a3c37a15b6a56cdedcfdcc86559f0d22686ab97c87554`. Build passed, but the old staged TaskQ adapter reported `policy unknown: unknown grant antigravity workspace` before durable launch intent or native creation. The installed current TaskQ read the same policy revision 33 and unchanged AssetQ Codex project Workspace grant. PM verified no launch intent/native identity and acknowledged original-slot release. No handshake, model/paid call or crate replay occurred.
 
-The old artifact remains SHA-256 `de4c406b9a8378623ee113d634f9f6808a5cc2ba8ab5ae23db77c0b5bd25fa0a`, built from TaskQ `56b1a1eba274bf88520e4d668461372fe3048b00`. Preserve it and its receipts for original-operation recovery. AssetQ still compiles this digest; a newly built adapter cannot pass it. AgentQ's corrected runtime pin `8427bba6145aac0239cd16a8dae0caf8efa00695` is unchanged.
+The old artifact remains SHA-256 `de4c406b9a8378623ee113d634f9f6808a5cc2ba8ab5ae23db77c0b5bd25fa0a`, built from TaskQ `56b1a1eba274bf88520e4d668461372fe3048b00`. Preserve it, its receipts and its original AssetQ binary for original-operation recovery. The refreshed build compiles only the qualified digest above. `image-observe` also verifies that compiled digest: old qualification directories require their preserved original binaries, never a new-build fallback or replay. AgentQ's corrected runtime pin `8427bba6145aac0239cd16a8dae0caf8efa00695` is unchanged.
+
+## Reported native qualification
+
+PM's exact staged artifact passed the existing-current-policy read with no grant/settings changes. Its scoped receipt reports real launch with independently trusted effective authority and native executable identity, `initialize`/`initialized`, named kernel control denials, parent/child workspace file operations and loopback, and outside write/create/unlink/rename/symlink denial with unchanged canaries. Forged-policy refusal, consumed-operation no replay, standalone interruption with exit 137, native/descendant termination and acknowledged original-slot release passed. Model/paid turns: 0.
+
+The Windows worker has not inspected the private artifact path or raw receipts; the linked PM record supplies the native evidence and explicit promotion direction. No staged path, key or raw authority payload is copied here. The adapter observation does not prove current image generation, an AssetQ handshake or durable slot integration. Use these exact retained signed bytes for the next composed run; a rebuild is another candidate until separately identified and qualified.
 
 ## Selected immutable source and CI
 
@@ -35,7 +43,7 @@ Compare the old reviewed source directly with the selected merge, not a GitHub m
 | `src/runtime/owner.rs` | Refuses transcript access for an unqualified non-Codex/non-remote runtime; Codex transcript branch remains |
 | `Cargo.toml`, `Cargo.lock` | AgentQ source changes from `513193c8a96f3de1c71a86291a679230817ce0b2` to `9be735b5a82f5a526cd8b1757196387956c3b5d0`; CoreQ stays `v0.18.0`. This is TaskQ's dependency, not a change to AssetQ's runtime pin |
 
-`policy::load` checks every saved grant against `service::RUNTIMES`. The old runtime list contains only Claude, Codex and Codex App; the candidate adds Antigravity. This identifies why the old binary refuses the observed mixed-runtime policy. No policy parser is copied or weakened. Source compatibility is established; a successful read of the actual host policy by this exact staged candidate is still required.
+`policy::load` checks every saved grant against `service::RUNTIMES`. The old runtime list contains only Claude, Codex and Codex App; the candidate adds Antigravity. This identifies why the old binary refuses the observed mixed-runtime policy. No policy parser is copied or weakened. The later PM receipt above reports the successful actual-policy read for this exact staged artifact; source comparison alone did not prove it.
 
 The changed profile also applies to Codex: it adds deny rules, not Antigravity writable homes. The expected profile must be independently derived from the candidate policy/profile append source, actual staged paths, native executable and current host environment. Reusing the old profile digest, or copying a digest from an operation receipt, is invalid.
 
@@ -49,6 +57,8 @@ git diff 56b1a1eba274bf88520e4d668461372fe3048b00 e990d88943e95abd8d182d8157bfe8
 The first command passed locally. Read-only Astra review found no blocking source/API incompatibility; neither observation proves native execution.
 
 ## PM build, staging and digest
+
+This reproduces the source/build preparation; PM has completed staging and adapter qualification for the recorded digest above. Do not rebuild or re-sign it merely to repeat composed qualification. A later rebuild must retain its own actual digest and qualification rather than borrowing this receipt.
 
 Use the existing approved Mac Workspace channel and an isolated new build directory. Preserve installed TaskQ, the running host service, grants, accounts, models, capacity and all active operations. Do not run an installer or `dev-install.sh`. Keep private paths, keys and raw receipts in restricted PM evidence.
 
@@ -75,13 +85,15 @@ Hash the **final staged bytes after all signing/copying** with `shasum -a 256` a
 
 ## Qualification and promotion order
 
+PM's linked receipt completes steps 1 and 2 for the recorded artifact. This candidate performs step 3 by changing the compiled constant, without any runtime/input override. Step 4 remains open.
+
 1. PM first qualifies the staged TaskQ adapter through the existing operator-controlled adapter driver and existing authority, without using an AssetQ digest override. Read-only `service permissions` from the registered AssetQ root must parse the current policy and report the existing Codex project Workspace grant; do not supply `--runtime`, `--mode` or `--scope`, which can write grants. Confirm the revision/account/approver/executable and independently derived profile match current host state.
 2. Reuse the existing bounded non-generating TaskQ adapter qualification and owned slot protocol. Retain authority, handshake, filesystem/network/child and control/outside write/create/delete/rename/alias denial evidence, interruption, exact-incarnation reconciliation and acknowledged original-slot release. Unknown, refused or incomplete evidence leaves the adapter unqualified. Neither stage may start a model/image turn or replay an old operation.
 3. Return the final signed-artifact digest and exact native receipt scope through PM's existing channel. Only after qualification, update AssetQ's compiled `ADAPTER_SHA256` in this same reviewed deliverable and preserve the old anchor as evidence. No environment variable, input field or temporary validator override can substitute for that reviewed change. Retain existing registry versions and historical operation provenance.
-4. Build that exact AssetQ candidate and repeat the [composed consumer recipe](protected-consumer.md) with a fresh owned qualification operation. The current compiled old digest must refuse the replacement until step 3. Retain current selected image-tool/output-path evidence separately; successful TaskQ adapter checks alone cannot qualify the AssetQ consumer or image generation.
+4. Build the exact refreshed AssetQ candidate and repeat the [composed consumer recipe](protected-consumer.md) with a fresh owned qualification operation and the exact retained signed adapter bytes. Confirm its initial `adapter_sha256` equals the full promoted digest above. Independently derive the current profile and identities again; prior-operation authority is not a match source. Retain current selected image-tool/output-path evidence separately; successful TaskQ adapter checks alone cannot qualify the AssetQ consumer or image generation.
 
 Rollback retains the previous binaries, source pins and original operation receipts; it does not relaunch a turn or modify an operator grant. The failed PM operation above is already reconciled and released, not a reusable qualification slot.
 
-Local verification: pinned contract lint and whitespace checks pass; all 17 repository links in the changed documents resolve; both shell blocks pass `bash -n`. Read-only Astra review found no blocking source or runbook findings. This continuation changes documentation only: implementation, tests, scripts and dependency locks match `1111fe6b66fbdcfb2eaec1a96db65f97dd4be2e2`, whose Windows canonical gate passed in 330.70 seconds. That unchanged-code receipt is retained, not reported as a new Mac build or native pass. No full implementation suite was repeated for this documentation handoff.
+Previous documentation handoff `9585a97bae34c0cb2811fd73ae86c3aa5802b6fa`: pinned contract lint, whitespace, 17 repository links and both shell syntax checks passed; read-only Astra review found no blocking source/runbook findings. It reused the unchanged implementation receipt from `1111fe6b66fbdcfb2eaec1a96db65f97dd4be2e2` (Windows canonical gate, 330.70 seconds). The present anchor promotion changes executable bytes and requires its own affected and canonical check receipt. That receipt belongs to the refreshed task/PR candidate, separately from PM's Mac adapter qualification.
 
-Open: actual Mac build/sign/staged digest, exact-candidate current-policy read and native adapter qualification; then reviewed anchor promotion, composed/current-image-tool qualification and durable slot integration. New image dispatch remains refused. The original accepted crate and AssetQ's runtime wire correction remain unchanged.
+Open: refreshed AssetQ Mac build and composed/current-image-tool qualification, then durable slot integration. New image dispatch remains refused. The original accepted crate, method versions and AssetQ runtime wire correction remain unchanged.

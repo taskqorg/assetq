@@ -10,6 +10,8 @@ Requests cannot choose executable, account, model, permissions, environment, out
 
 AgentQ #186/PR188 supplies the protected app-server API; #193/PR195 corrects its receipt lookup to the producer's `authority.resolved.effective` while retaining authority and incarnation checks. The [original blocker](blockers/4-protected-launch.md) is historical diagnosis; its upstream implementation is published. Current composed AssetQ qualification remains required, using TaskQ's existing operator authority and the PM-qualified staged Mac adapter digest. No new Windows grant or AssetQ policy store is introduced.
 
+The compiled adapter digest now selects the exact native-qualified TaskQ artifact from source `e990d88943e95abd8d182d8157bfe84a94343a07`; its [qualification record](evidence/4/taskq-adapter-candidate.md) preserves the previous anchor and the scope of PM's proof. This refresh is for bounded qualification, not a generation/method change. Existing registry specifications and completed provenance stay unchanged; old qualification recovery uses its preserved original binaries rather than a digest fallback.
+
 The worker resolves attachment IDs through the job's project, verifies store hashes, and accepts PNG image references only. It passes these verified immutable files as native local-image inputs. Parameters are bounded `max_width` and `max_height` (64..4096, default 4096); one original PNG of at most 16 million pixels and the configured upload-byte limit is supported. Preview PNGs fit 512 by 512. Unsupported input or absent native image generation is an explicit `capability_unavailable` refusal; no paid API or Claude fallback is selected.
 
 ## Durable operation
