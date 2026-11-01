@@ -90,6 +90,19 @@ def needs_rust(paths):
     return not paths or any(not p.endswith(".md") for p in paths)
 
 
+def changed_paths():
+    try:
+        base = run("git", "merge-base", "origin/main", "HEAD").strip()
+        if base == run("git", "rev-parse", "HEAD").strip():
+            base = run("git", "rev-parse", "HEAD^").strip()
+        changed = run("git", "diff", "--name-only", base, "HEAD").splitlines()
+    except subprocess.CalledProcessError:
+        changed = ["unknown-base"]
+    changed += run("git", "diff", "--name-only", "HEAD").splitlines()
+    changed += run("git", "ls-files", "--others", "--exclude-standard").splitlines()
+    return changed
+
+
 def main():
     print(run(sys.executable, "scripts/test_check.py"), end="")
     if not SPECQ.exists():
@@ -112,13 +125,7 @@ def main():
     print(run("git", "diff", "--check"), end="")
     print(run("git", "diff", "--cached", "--check"), end="")
     print("Contract and whitespace checks passed.")
-    try:
-        changed = run("git", "diff", "--name-only", "HEAD^", "HEAD").splitlines()
-    except subprocess.CalledProcessError:
-        changed = ["unknown-base"]
-    changed += run("git", "diff", "--name-only", "HEAD").splitlines()
-    changed += run("git", "ls-files", "--others", "--exclude-standard").splitlines()
-    if needs_rust(changed):
+    if needs_rust(changed_paths()):
         rust_checks()
     else:
         print("Docs-only candidate: Rust implementation unchanged.")

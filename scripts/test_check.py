@@ -37,6 +37,39 @@ class GateTrust(unittest.TestCase):
         for paths in [[], ["Cargo.lock"], ["src/api.rs", "README.md"], ["scripts/check.py"], [".github/workflows/tests.yml"]]:
             self.assertTrue(check.needs_rust(paths), paths)
 
+    def test_final_docs_commit_cannot_hide_branch_implementation(self):
+        # R8: select the complete candidate, not only its final commit.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            check.run("git", "init", str(root))
+            def commit(name):
+                (root / name).write_text("invented fixture\n")
+                check.run("git", "add", name, cwd=root)
+                check.run("git", "-c", "user.name=Fixture", "-c",
+                          "user.email=fixture@example.invalid", "commit", "-m", "fixture", cwd=root)
+            commit("base.md")
+            check.run("git", "update-ref", "refs/remotes/origin/main", "HEAD", cwd=root)
+            original_run = check.run
+            commit("docs.md")
+            with patch.object(check, "run", side_effect=lambda *args: original_run(*args, cwd=root)):
+                self.assertFalse(check.needs_rust(check.changed_paths()))
+            commit("Cargo.lock")
+            commit("evidence.md")
+            with patch.object(check, "run", side_effect=lambda *args: original_run(*args, cwd=root)):
+                self.assertTrue(check.needs_rust(check.changed_paths()))
+                self.assertIn("Cargo.lock", check.changed_paths())
+            check.run("git", "update-ref", "refs/remotes/origin/main", "HEAD", cwd=root)
+            with patch.object(check, "run", side_effect=lambda *args: original_run(*args, cwd=root)):
+                self.assertEqual(check.changed_paths(), ["evidence.md"])
+            (root / "staged.rs").write_text("invented fixture\n")
+            check.run("git", "add", "staged.rs", cwd=root)
+            (root / "untracked.rs").write_text("invented fixture\n")
+            with patch.object(check, "run", side_effect=lambda *args: original_run(*args, cwd=root)):
+                self.assertTrue({"staged.rs", "untracked.rs"}.issubset(check.changed_paths()))
+            check.run("git", "update-ref", "-d", "refs/remotes/origin/main", cwd=root)
+            with patch.object(check, "run", side_effect=lambda *args: original_run(*args, cwd=root)):
+                self.assertIn("unknown-base", check.changed_paths())
+
     def test_modified_checker_is_refused_before_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

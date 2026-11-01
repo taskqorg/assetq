@@ -2,6 +2,8 @@
 
 The canonical gate is `python3 scripts/check.py` (R8): pinned contract lint, whitespace and the selected deterministic Rust checks within 600 seconds on `ubuntu-latest`, including setup. Changes containing only Markdown run the document checks; unknown impact runs the Rust core and all isolated service fixtures. Real provider and managed-host qualification remain separate.
 
+Select changes across the candidate branch from its merge base with `origin/main`, including staged, unstaged and untracked files. On the published main revision, compare its first parent. A missing comparison base has unknown impact and runs implementation checks. A final documentation commit cannot hide earlier implementation or dependency changes in the same candidate.
+
 ## Development
 
 Run only the affected check while editing:
