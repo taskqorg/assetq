@@ -64,6 +64,8 @@ Until the composed protected worker and its current image capability are qualifi
 
 Provide one bounded non-generating qualification command through the same protected transport as the image runner. The existing PM supplies a slot bound to its actual consumer incarnation and independently read expected identities. Pin the qualified host adapter artifact in the build; task, environment and receipt text cannot select another authority.
 
+An adapter refresh first qualifies an isolated build from reviewed immutable TaskQ source against the existing policy and host boundary. Record the final staged binary digest after signing. Only then review and compile that digest into AssetQ and repeat composed qualification. Preserve the prior adapter and receipts; no temporary trust override or grant edit is permitted.
+
 Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.

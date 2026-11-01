@@ -9,6 +9,8 @@ Task [#4](https://github.com/taskqorg/assetq/issues/4), A1-A6; applied AssetQ R1
 - The current source removes the direct `AppServer::start` path. Both the prepared image runner and qualification use `image_worker::protected::launch`, then the same protected `send`/`exchange` functions. AgentQ verifies the fresh host receipt and the host revalidates input delivery.
 - Original asset `2c887345-9f66-491f-8a0c-81d81cf0c4af`, SHA-256 `fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa`, remains unchanged. Immutable specification fixtures guard original versions 2 and 3; version 4 declares the corrected protected pipeline. Old runtime receipts remain observable, never permission to relaunch them. Owner acceptance and the historical real native receipt remain [separate evidence](README.md).
 
+The old adapter now refuses the current mixed-runtime policy before launch; see the [reviewed adapter refresh candidate and two-stage qualification order](taskq-adapter-candidate.md). Its replacement Mac digest is unknown until PM builds/signs/stages and qualifies the exact artifact. The current AssetQ binary must reject that replacement digest until reviewed compile-time promotion. Do not use this composed command as a way to bypass the first adapter-qualification stage.
+
 ## Existing PM channel and bounded command
 
 Build the exact AssetQ candidate in an isolated checkout on the existing approved Mac host. Preserve ordinary installations, active sessions, grants, model/account/effort, capacity and optional optimization. No new host access or Windows Workspace enablement is part of this handoff.
@@ -74,6 +76,8 @@ Check the actually resolved native image tool/catalogue and original artifact pa
 ## Acceptance and remaining work
 
 PM executed exact source `0c257a82f4ddc14eabadbe234026e937ee701ab0` on Mac: build PASS, composed qualification FAIL before handshake ([note 6561661669](https://github.com/taskqorg/assetq/issues/4#issuecomment-6561661669)). The independently corrected profile matched actual authority, but the old runtime still refused. Both operations were reconciled/released by PM without model calls or crate replay. The [AgentQ wire-mismatch evidence](../../blockers/4-agentq-receipt-wire.md) records the defect, isolated failing-before/passing-after proof and now-accepted upstream publication. The corrected published pin is adopted; current consumer/process bindings and the later observe timeout still require native qualification. Do not reuse either reconciled operation or infer expected identities from its receipt.
+
+PM subsequently built corrected source `1111fe6b66fbdcfb2eaec1a96db65f97dd4be2e2` on Mac: build PASS, old adapter policy-read FAIL before durable intent/native creation ([note 6562586802](https://github.com/taskqorg/assetq/issues/4#issuecomment-6562586802)). The original slot was released after verifying absence. This is a stale adapter's `unknown grant antigravity workspace` refusal, not a grant change request or another runtime wire failure. Its [replacement candidate](taskq-adapter-candidate.md) preserves the existing policy and separates native adapter qualification from later composed qualification.
 
 Portable checks cover non-generating method/command bounds, refusal before native launch on unsupported platforms, unchanged legacy method specification, duplicate/uncertain effects, original PNG validation/retrieval and absent optimization. These are adapter/consumer checks, not Mac enforcement evidence. Record exact commands and results below before handoff.
 

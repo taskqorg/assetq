@@ -6,7 +6,7 @@ Upstream resolution: AgentQ #186/PR188 is published as `6585656b5966f6f5912f504b
 
 ## Goal and owner
 
-The API extraction above is published, but composed Mac qualification exposed an [AgentQ receipt wire mismatch](4-agentq-receipt-wire.md). That single focused follow-up owns the current PM intake; the original API-gap analysis below remains historical.
+The API extraction and [AgentQ receipt wire correction](4-agentq-receipt-wire.md) are published. The current [TaskQ adapter refresh candidate](../evidence/4/taskq-adapter-candidate.md) addresses an old staged binary's inability to read the existing mixed-runtime policy. Native qualification remains with PM; the original API-gap analysis below is historical.
 
 Publish a supported AgentQ app-server launch path that consumes the existing operator-controlled project grant, reuses the approved host boundary and CoreQ infrastructure, and returns authority readback bound to the launched native operation.
 
