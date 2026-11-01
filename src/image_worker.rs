@@ -22,7 +22,7 @@ use std::{
 
 pub mod protected;
 
-pub const PIN: &str = "aab1a190ab76f1e932578520d7a8787ef1d4b660";
+pub const PIN: &str = "8427bba6145aac0239cd16a8dae0caf8efa00695";
 pub const PROVIDER: &str = "agentq.codex-image";
 const LOG_LIMIT: u64 = 32 << 20;
 const IMAGE_LIMIT: u64 = 64 << 20;
@@ -36,7 +36,7 @@ fn dispatch_authority() -> Res<()> {
 
 pub fn method() -> Value {
     json!({"operation":"image.generate","inputs":["text","verified PNG attachment IDs"],"outputs":["image/png","application/json"],
-        "provider":PROVIDER,"model":"native-inherited","api_revision":PIN,"pipeline_revision":"3",
+        "provider":PROVIDER,"model":"native-inherited","api_revision":PIN,"pipeline_revision":"4",
         "parameters":{"max_width":{"type":"integer","min":64,"max":4096},"max_height":{"type":"integer","min":64,"max":4096}},
         "capabilities":["codex.image_generation","native.savedPath","protected project/profile grant"],"limitations":["New dispatch refused pending composed protected consumer and current image-tool qualification; one PNG; no paid API fallback."],
         "provenance":"assetq.md image.worker.v1; docs/image-worker.md","validation":["native terminal image tool","full PNG decode","dimensions","sha256 re-read"],
@@ -49,6 +49,13 @@ pub fn legacy_method() -> Value {
     value["api_revision"] = json!("513193c8a96f3de1c71a86291a679230817ce0b2");
     value["pipeline_revision"] = json!("2");
     value["limitations"] = json!(["New dispatch refused pending protected host-authority integration; one PNG; no paid API fallback."]);
+    value
+}
+
+pub fn protected_method_v3() -> Value {
+    let mut value = method();
+    value["api_revision"] = json!("aab1a190ab76f1e932578520d7a8787ef1d4b660");
+    value["pipeline_revision"] = json!("3");
     value
 }
 
@@ -156,7 +163,12 @@ impl Provider for ImageWorker {
             return Ok(Some(effect.into()));
         }
         let receipt = read_json(&dir.join("request.json"))?;
-        if receipt["effect"] != effect || !matches!(receipt["runtime"].as_str(), Some(PIN | "513193c8a96f3de1c71a86291a679230817ce0b2")) {
+        if receipt["effect"] != effect
+            || !matches!(
+                receipt["runtime"].as_str(),
+                Some(PIN | "513193c8a96f3de1c71a86291a679230817ce0b2" | "aab1a190ab76f1e932578520d7a8787ef1d4b660")
+            )
+        {
             return Err("worker receipt mismatch; no replay".into());
         }
         Ok(Some(effect.into()))
@@ -601,9 +613,12 @@ mod tests {
         let again = ImageWorker::new(cfg.clone(), dir.clone()).unwrap();
         assert_eq!(again.lookup(&op).unwrap(), Some(op.clone()));
         let mut retained = read_json(&spool.join("request.json")).unwrap();
-        retained["runtime"] = json!("513193c8a96f3de1c71a86291a679230817ce0b2");
-        fs::write(spool.join("request.json"), retained.to_string()).unwrap();
-        assert_eq!(again.lookup(&op).unwrap(), Some(op.clone()), "original runtime operation must reconcile after upgrade");
+        for runtime in ["513193c8a96f3de1c71a86291a679230817ce0b2", "aab1a190ab76f1e932578520d7a8787ef1d4b660"] {
+            retained["runtime"] = json!(runtime);
+            fs::write(spool.join("request.json"), retained.to_string()).unwrap();
+            assert_eq!(again.lookup(&op).unwrap(), Some(op.clone()), "retained runtime operation must reconcile after upgrade");
+            assert!(again.reserve(&op, &json!({})).is_err());
+        }
         retained["runtime"] = json!("unrecognized-runtime");
         fs::write(spool.join("request.json"), retained.to_string()).unwrap();
         assert!(again.lookup(&op).unwrap_err().contains("no replay"));
@@ -628,7 +643,11 @@ mod tests {
         let original: Value = serde_json::from_str(include_str!("../tests/fixtures/image-worker-v2.json")).unwrap();
         assert_eq!(legacy_method(), original);
         assert_ne!(method()["api_revision"], original["api_revision"]);
-        assert_eq!(method()["pipeline_revision"], "3");
+        assert_eq!(protected_method_v3()["pipeline_revision"], "3");
+        let prior: Value = serde_json::from_str(include_str!("../tests/fixtures/image-worker-v3.json")).unwrap();
+        assert_eq!(protected_method_v3(), prior);
+        assert_eq!(method()["pipeline_revision"], "4");
+        assert_eq!(method()["api_revision"], PIN);
     }
 
     // R3: a writable workspace and request cannot authorize a native launch.

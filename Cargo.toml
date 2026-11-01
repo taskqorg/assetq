@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-agentq-runtime = { git = "https://github.com/taskqorg/agentq", rev = "aab1a190ab76f1e932578520d7a8787ef1d4b660" }
+agentq-runtime = { git = "https://github.com/taskqorg/agentq", rev = "8427bba6145aac0239cd16a8dae0caf8efa00695" }
 coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.18.0" }
 hex = "0.4.3"
 image = { version = "0.25", default-features = false, features = ["png"] }

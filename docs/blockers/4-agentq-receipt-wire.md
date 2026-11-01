@@ -2,6 +2,8 @@
 
 One focused AgentQ follow-up draft for PM intake, applying AssetQ R3-R5/R8 and AgentQ M12.8. Task [#4](https://github.com/taskqorg/assetq/issues/4) remains incomplete. This document creates no task, grant, alternate resolver or native launch.
 
+Resolution: [AgentQ #193](https://github.com/taskqorg/agentq/issues/193) is accepted and PR195 published the fix as `8427bba6145aac0239cd16a8dae0caf8efa00695`; [merge-group Test run 41336656270](https://github.com/taskqorg/agentq/actions/runs/41336656270) passed on that exact merge result. AssetQ adopts this immutable pin as method version 4, retaining versions 2 and 3 and all original receipts. The diagnosis below is historical; its local diagnostic fix was not used as a dependency override. The remaining gate is the [existing composed Mac qualification](../evidence/4/protected-consumer.md), current native tool/output capability and durable slot integration. Publication of this upstream fix is not native acceptance.
+
 ## Goal
 
 Make AgentQ's protected app-server validator consume the published TaskQ authority receipt without weakening authority, process-identity or no-replay checks. Publish a corrected immutable runtime pin for AssetQ to consume.
