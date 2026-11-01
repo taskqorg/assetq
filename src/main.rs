@@ -74,7 +74,7 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "migrate" => {
             let cfg = Config::from_env()?;
-            db::migrate(&mut db::connect(&cfg.database_url).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            db::migrate(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
             println!("schema version 1 applied; built-in methods registered");
             Ok(())
         }
@@ -83,8 +83,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let id = pos(rest, 0)?;
             let budget: i64 = opt(rest, "--budget").unwrap_or("0".into()).parse().map_err(|_| "--budget must be an integer")?;
             let max: i32 = opt(rest, "--max-active").unwrap_or("4".into()).parse().map_err(|_| "--max-active must be an integer")?;
-            db::create_project(&mut db::connect(&cfg.database_url).map_err(|e| e.to_string())?, &id, budget, max)
-                .map_err(|e| e.to_string())?;
+            db::create_project(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?, &id, budget, max).map_err(|e| e.to_string())?;
             print(&json!({"project": id, "budget_credits": budget, "max_active_jobs": max}));
             Ok(())
         }
@@ -92,22 +91,22 @@ fn run(args: &[String]) -> Result<(), String> {
             let cfg = Config::from_env()?;
             let project = pos(rest, 0)?;
             let role = opt(rest, "--role").unwrap_or("member".into());
-            let t = db::create_token(&mut db::connect(&cfg.database_url).map_err(|e| e.to_string())?, &project, &role)
-                .map_err(|e| e.to_string())?;
+            let t =
+                db::create_token(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?, &project, &role).map_err(|e| e.to_string())?;
             println!("{t}");
             Ok(())
         }
         "restore-check" => {
             let cfg = Config::from_env()?;
             let store = store::Store::existing(&cfg.data_root).map_err(|e| e.to_string())?;
-            let mut c = db::connect(&cfg.database_url).map_err(|e| e.to_string())?;
+            let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
             print(&db::restore_check(&mut c, &store).map_err(|e| e.to_string())?);
             Ok(())
         }
         "audit" => {
             let cfg = Config::from_env()?;
-            let job = db::audit_job(&mut db::connect(&cfg.database_url).map_err(|e| e.to_string())?, &pos(rest, 0)?)
-                .map_err(|e| e.to_string())?;
+            let job =
+                db::audit_job(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?, &pos(rest, 0)?).map_err(|e| e.to_string())?;
             print(&json!({"replay": "matches stored state", "job": job}));
             Ok(())
         }
@@ -121,7 +120,7 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn check_schema(cfg: &Config) -> Result<(), String> {
-    let mut c = db::connect(&cfg.database_url).map_err(|e| e.to_string())?;
+    let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
     let ok = c
         .query_opt("SELECT 1 FROM schema_version HAVING count(*) = 1 AND min(version) = 1", &[])
         .map_err(|_| "schema missing: run `assetq migrate`".to_string())?;
@@ -170,15 +169,21 @@ fn selftest(database: bool) -> Result<(), String> {
     let put = s.put(&mut &b"assetq selftest"[..], 1024, 1024).map_err(|e| e.to_string())?;
     s.verify(&put.sha256, put.size).map_err(|e| e.to_string())?;
     let full = matches!(s.put(&mut &[0u8; 64][..], 1024, 10), Err(store::StoreError::Full(_)));
+    let floor = s.clone().with_bounds(u64::MAX, u64::MAX, i64::MAX as u64);
+    let floor_refused = matches!(floor.put(&mut &b"x"[..], 1024, 1024), Err(store::StoreError::Full(_)));
     std::fs::remove_dir_all(&dir).ok();
     if !full {
         return Err("store quota did not refuse an oversized write".into());
     }
+    if !floor_refused {
+        return Err("store free-space floor did not refuse a write".into());
+    }
+    checks.push(json!({"check": "filesystem free-space floor", "outcome": "pass"}));
     checks.push(json!({"check": "object store hash, verify and quota", "outcome": "pass"}));
     if database {
         let cfg = Config::from_env()?;
         check_schema(&cfg)?;
-        let mut c = db::connect(&cfg.database_url).map_err(|e| e.to_string())?;
+        let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
         let methods: i64 = c.query_one("SELECT count(*) FROM methods", &[]).map_err(|e| e.to_string())?.get(0);
         checks.push(json!({"check": "database schema and method registry", "methods": methods, "outcome": "pass"}));
         let root = assetq::store::Store::open(&cfg.data_root).map_err(|e| format!("data root: {e}"))?;

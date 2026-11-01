@@ -14,7 +14,7 @@ tar -xzf assetq-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz
 
 Match the full `candidate.json` source SHA to the reviewed PR/CI revision and obtain the archive checksum from that immutable CI run. Inside the extracted directory, also run `sha256sum -c SHA256SUMS`.
 
-`selftest` without `--database` replays the lifecycle traces and checks store hashing and quota in a temporary directory. It uses only a new temporary directory.
+`selftest` without `--database` replays the lifecycle traces and checks store hashing, quota and free-space-floor refusal in a new temporary directory.
 
 ## Host requirements
 
@@ -31,7 +31,10 @@ Match the full `candidate.json` source SHA to the reviewed PR/CI revision and ob
 | `ASSETQ_DATA_ROOT` | Data root owned by `assetq` |
 | `ASSETQ_QUOTA_BYTES` | Store quota (default 50 GiB) |
 | `ASSETQ_TEMP_QUOTA_BYTES` | Temporary-byte quota (default 1 GiB); crash leftovers count |
-| `ASSETQ_METADATA_QUOTA_BYTES` | Dedicated database admission quota (default 1 GiB), with 4 MiB reserved headroom per admitting operation |
+| `ASSETQ_FREE_SPACE_FLOOR_BYTES` | Minimum observed filesystem free space (default 1 GiB), plus 64 KiB write overhead; host-specific values stay in private configuration |
+| `ASSETQ_METADATA_QUOTA_BYTES` | Measured dedicated database capacity ceiling (default 1 GiB), including indexes and TOAST |
+| `ASSETQ_METADATA_ADMISSION_HEADROOM_BYTES` | Per-transaction allocation/payload allowance (default and minimum 4 MiB) |
+| `ASSETQ_METADATA_RECOVERY_HEADROOM_BYTES` | Additional reserve unavailable to new admission and migration (default 16 MiB) |
 | `ASSETQ_MAX_EXECUTION_MS` | Elapsed job deadline (default 86400000 ms); uncertainty remains reconciliable |
 | `ASSETQ_MAX_UPLOAD_BYTES` | Per-object limit (default 512 MiB) |
 | `ASSETQ_CONTENT_TYPES` | Comma-separated upload allowlist |
@@ -40,6 +43,8 @@ Match the full `candidate.json` source SHA to the reviewed PR/CI revision and ob
 | `ASSETQ_FAKE_PROVIDER_DIR` | Only for qualification of the synthetic method; leave unset in production |
 
 ## Additive install
+
+Verify private values for all bounds before preparing activation. All service/executor/admin processes sharing a database/store must use the same protected configuration. Require the data root, objects and temp directories on one filesystem with working process file locks. Qualify the actual mount, service-user free-space observation, PostgreSQL disk capacity and WAL protection separately; source/CI fixtures do not prove these host properties. The metadata guard is a measured admission bound, not a filesystem hard quota. Account for allocations retained after aborted writes and unrelated cluster activity.
 
 1. Prepare an isolated candidate directory, for example `/opt/assetq/releases/<version>`, and verify `SHA256SUMS` and `selftest`.
 2. Create the role, database, user and data root without touching other databases, services or the existing Langfuse object store.
@@ -54,6 +59,7 @@ Match the full `candidate.json` source SHA to the reviewed PR/CI revision and ob
 - Stop the unit, point `current` at the previous release, start the unit. Jobs, events, effects and objects stay in PostgreSQL and the data root; executors resume from stored state.
 - The first activation rolls back by stopping and disabling the unit. Keep the database and data root for inspection; remove them only through a separate reviewed decision.
 - Schema version 1 is the only schema. A later schema change must ship with its own forward-compatible migration and rollback notes.
+- This candidate adds no schema version or destructive migration. Rollback to a foundation executable removes the new resource protections; keep the service stopped until its capacity policy is reviewed. Do not reduce quotas, delete retained evidence or replay an uncertain provider effect to clear exhaustion. Restore capacity through the separately authorized host procedure, then reconcile retained jobs on the same candidate.
 
 ## Backup
 

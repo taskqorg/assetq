@@ -58,6 +58,7 @@ impl From<store::StoreError> for Error {
             Full(_) => Error::new(507, "store_full", e.to_string()),
             TooLarge(_) => Error::new(413, "too_large", e.to_string()),
             Source(_) => Error::new(400, "upload_interrupted", e.to_string()),
+            Unknown(_) => Error::new(503, "store_unknown", e.to_string()),
             Io(_) | Corrupt(_) => Error::new(500, "store_io", e.to_string()),
         }
     }
@@ -75,6 +76,9 @@ pub struct Config {
     pub max_upload_bytes: u64,
     pub temp_quota_bytes: u64,
     pub metadata_quota_bytes: u64,
+    pub free_space_floor_bytes: u64,
+    pub metadata_admission_headroom_bytes: u64,
+    pub metadata_recovery_headroom_bytes: u64,
     pub max_execution_ms: u64,
     pub content_types: Vec<String>,
     pub executors: usize,
@@ -108,6 +112,9 @@ impl Config {
             max_upload_bytes: env_num("ASSETQ_MAX_UPLOAD_BYTES", 512 << 20)?,
             temp_quota_bytes: env_num("ASSETQ_TEMP_QUOTA_BYTES", 1 << 30)?,
             metadata_quota_bytes: env_num("ASSETQ_METADATA_QUOTA_BYTES", 1 << 30)?,
+            free_space_floor_bytes: env_num("ASSETQ_FREE_SPACE_FLOOR_BYTES", 1 << 30)?,
+            metadata_admission_headroom_bytes: env_num("ASSETQ_METADATA_ADMISSION_HEADROOM_BYTES", 4 << 20)?,
+            metadata_recovery_headroom_bytes: env_num("ASSETQ_METADATA_RECOVERY_HEADROOM_BYTES", 16 << 20)?,
             max_execution_ms: env_num("ASSETQ_MAX_EXECUTION_MS", 86_400_000)?,
             content_types: std::env::var("ASSETQ_CONTENT_TYPES")
                 .unwrap_or_else(|_| DEFAULT_TYPES.into())

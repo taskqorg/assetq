@@ -48,7 +48,7 @@ fn json_response(status: u16, v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
 
 fn handle(ctx: &Ctx, client: &mut Option<Client>, mut req: Request) {
     if client.as_ref().is_none_or(|c| c.is_closed()) {
-        *client = db::connect(&ctx.cfg.database_url).ok();
+        *client = db::connect_config(&ctx.cfg).ok();
     }
     let result = match client.as_mut() {
         Some(c) => {
@@ -227,7 +227,15 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
                 Err(_) => json!({"state": "unknown", "reason": "physical inventory unavailable"}),
             };
             status["admission"] = json!({"writers": 1, "temp_quota_bytes": ctx.cfg.temp_quota_bytes,
-                "metadata_quota_bytes": ctx.cfg.metadata_quota_bytes, "max_execution_ms": ctx.cfg.max_execution_ms});
+                "metadata_quota_bytes": ctx.cfg.metadata_quota_bytes, "max_execution_ms": ctx.cfg.max_execution_ms,
+                "free_space_floor_bytes": ctx.cfg.free_space_floor_bytes});
+            status["admission"]["metadata"] = db::metadata_status(c);
+            status["store"]["free_space"] = match ctx.store.available() {
+                Ok(bytes) => json!({"state": "observed", "available_bytes": bytes, "floor_bytes": ctx.cfg.free_space_floor_bytes,
+                    "write_overhead_bytes": 64 << 10,
+                    "admission": if bytes.saturating_sub(ctx.cfg.free_space_floor_bytes) > 64 << 10 { "available" } else { "exhausted" }}),
+                Err(_) => json!({"state": "unknown", "reason": "filesystem free-space observation unavailable"}),
+            };
             ok(status)
         }
         _ => Err(Error::new(404, "no_route", format!("{method} {path}"))),
@@ -247,9 +255,10 @@ fn upload(ctx: &Ctx, c: &mut Client, p: &Principal, req: &mut Request) -> Result
     }
     // A caller-supplied name is metadata only; storage keys stay server-owned.
     let name = header(req, "X-Asset-Name").map(|n| n.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
+    let _writer = ctx.store.writer_lock()?;
     let room = ctx.room()?;
-    let stored = ctx.store.put(req.as_reader(), ctx.cfg.max_upload_bytes, room)?;
-    let mut tx = c.transaction()?;
+    let stored = ctx.store.put_locked(req.as_reader(), ctx.cfg.max_upload_bytes, room)?;
+    let mut tx = db::write_tx(c, false)?;
     let id = db::insert_object(
         &mut tx,
         &NewObject {
@@ -265,6 +274,6 @@ fn upload(ctx: &Ctx, c: &mut Client, p: &Principal, req: &mut Request) -> Result
             retention_days: Some(ctx.cfg.retention_days),
         },
     )?;
-    tx.commit()?;
+    db::commit_write(tx)?;
     Ok(Reply::Json(201, db::get_object(c, &p.project, &id)?))
 }

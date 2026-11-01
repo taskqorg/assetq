@@ -45,6 +45,9 @@ impl Fixture {
             max_upload_bytes: 1 << 20,
             temp_quota_bytes: 1 << 30,
             metadata_quota_bytes: 1 << 30,
+            free_space_floor_bytes: 0,
+            metadata_admission_headroom_bytes: 4 << 20,
+            metadata_recovery_headroom_bytes: 16 << 20,
             max_execution_ms: 86_400_000,
             content_types: assetq::DEFAULT_TYPES.split(',').map(String::from).collect(),
             executors: 1,
@@ -191,7 +194,7 @@ fn manifest_commit_is_atomic_and_fenced() {
     assert_eq!(job["submissions"], 1);
     let fence = job["fence"].as_i64().unwrap();
     // A stale executor's manifest write rolls back with its rejected event.
-    let mut tx = c.transaction().unwrap();
+    let mut tx = db::write_tx(&mut c, true).unwrap();
     tx.execute("DELETE FROM manifests WHERE job_id = $1", &[&id]).unwrap();
     let stale = assetq::model::Event::ManifestCommitted { fence: fence - 1, items: 1 };
     assert_eq!(db::apply_event(&mut tx, id, &stale, 1000, 0).unwrap_err().code, "invalid_transition");
@@ -213,10 +216,10 @@ fn crash_after_intent_reconciles_before_one_resubmission() {
     let (j, _) = db::submit_job(&mut c, &p, &req("c", json!({})), &limits(), FAKE).unwrap();
     let id = j["id"].as_str().unwrap();
     // A dead executor persisted dispatch intent and never called the provider.
-    let mut tx = c.transaction().unwrap();
+    let mut tx = db::write_tx(&mut c, true).unwrap();
     db::apply_event(&mut tx, id, &assetq::model::Event::Claimed { owner: "dead".into(), fence: 1 }, 60_000, 0).unwrap();
     db::apply_event(&mut tx, id, &assetq::model::Event::DispatchIntended { fence: 1, effect_id: "dead-effect".into() }, 60_000, 0).unwrap();
-    tx.commit().unwrap();
+    db::commit_write(tx).unwrap();
     c.execute("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", &[&id]).unwrap();
     let job = drive(&mut c, &ctx, "eps", id, phase("succeeded"));
     assert_eq!(f.fake().submissions(), 1, "exactly one provider submission after confirmed absence");
@@ -411,7 +414,7 @@ fn uncertain_cancellation_retains_capacity_until_terminal_observation() {
         // New context/session observes the persisted operation after restart.
         let mut c = f.client();
         if outcome == "confirmed" {
-            let mut tx = c.transaction().unwrap();
+            let mut tx = db::write_tx(&mut c, true).unwrap();
             db::apply_event(
                 &mut tx,
                 id,
@@ -420,7 +423,7 @@ fn uncertain_cancellation_retains_capacity_until_terminal_observation() {
                 0,
             )
             .unwrap();
-            tx.commit().unwrap();
+            db::commit_write(tx).unwrap();
         } else {
             exec::tick(&mut c, &f.ctx(1 << 30), "restarted-observer").unwrap();
         }
@@ -602,11 +605,11 @@ fn registry_scope_and_expired_fences() {
     // R6: the deadline, not only a successor's claim, fences a stale writer.
     let (j, _) = db::submit_job(&mut c, &a, &req("expired", json!({})), &limits(), FAKE).unwrap();
     let id = j["id"].as_str().unwrap();
-    let mut tx = c.transaction().unwrap();
+    let mut tx = db::write_tx(&mut c, true).unwrap();
     db::apply_event(&mut tx, id, &assetq::model::Event::Claimed { owner: "old".into(), fence: 1 }, 60_000, 0).unwrap();
-    tx.commit().unwrap();
+    db::commit_write(tx).unwrap();
     c.execute("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", &[&id]).unwrap();
-    let mut tx = c.transaction().unwrap();
+    let mut tx = db::write_tx(&mut c, true).unwrap();
     assert_eq!(
         db::apply_event(&mut tx, id, &assetq::model::Event::DispatchIntended { fence: 1, effect_id: "stale".into() }, 1000, 0)
             .unwrap_err()
@@ -759,6 +762,224 @@ fn start(f: &Fixture) -> Service {
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
     let addr = line.trim().strip_prefix("assetq listening on ").unwrap_or_else(|| panic!("unexpected: {line}")).to_string();
     Service { child, url: format!("http://{addr}") }
+}
+
+// R7: configured bounds must reach the native service and administrative paths.
+#[test]
+fn resource_bounds_floor_refuses_native_upload() {
+    let f = fixture();
+    let (_, token) = project(&mut f.client(), "floor", 10, 4);
+    let mut child = env_cmd(&f)
+        .env("ASSETQ_FREE_SPACE_FLOOR_BYTES", i64::MAX.to_string())
+        .args(["serve", "--listen", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("assetq listening on ").unwrap()) };
+    let r = http()
+        .post(format!("{}/v1/uploads", s.url))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "text/plain")
+        .send(b"preserve floor")
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 507, "R7: native service must enforce configured free-space floor");
+    assert_eq!(f.client().query_one("SELECT count(*) FROM objects", &[]).unwrap().get::<_, i64>(0), 0);
+}
+
+#[test]
+fn resource_bounds_migration_refuses_exhaustion() {
+    let f = fixture();
+    let out = env_cmd(&f).env("ASSETQ_METADATA_QUOTA_BYTES", "0").arg("migrate").output().unwrap();
+    assert!(!out.status.success(), "R7: even repeat migrations must enforce metadata bounds");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("metadata_full"));
+    let name = format!("assetq_m_{}", uuid::Uuid::new_v4().simple());
+    let mut c = f.client();
+    c.batch_execute(&format!("CREATE DATABASE {name}")).unwrap();
+    let url = format!("{} dbname={name}", std::env::var("ASSETQ_TEST_PG").unwrap());
+    let out = env_cmd(&f).env("ASSETQ_DATABASE_URL", &url).env("ASSETQ_METADATA_QUOTA_BYTES", "0").arg("migrate").output().unwrap();
+    assert!(!out.status.success());
+    let mut empty = db::connect(&url).unwrap();
+    assert_eq!(empty.query_one("SELECT to_regclass('schema_version')::text", &[]).unwrap().get::<_, Option<String>>(0), None);
+    db::migrate(&mut empty).unwrap();
+    assert_eq!(empty.query_one("SELECT version FROM schema_version", &[]).unwrap().get::<_, i32>(0), 1);
+}
+
+// R7: a native process cannot stream while a surviving OS reservation is held,
+// even after the reserving database session has ended.
+#[test]
+fn resource_bounds_native_process_respects_surviving_store_lock() {
+    let f = fixture();
+    let (_, token) = project(&mut f.client(), "process", 10, 4);
+    let ctx = f.ctx(1 << 30);
+    let session = f.client();
+    let lock = ctx.store.writer_lock().unwrap();
+    drop(session);
+    let service = start(&f);
+    let upload = || {
+        http()
+            .post(format!("{}/v1/uploads", service.url))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "text/plain")
+            .send(b"process lock")
+            .unwrap()
+    };
+    assert_eq!(upload().status().as_u16(), 507);
+    drop(lock);
+    assert_eq!(upload().status().as_u16(), 201);
+    drop(service);
+    let mut cfg = f.config(1 << 30);
+    cfg.free_space_floor_bytes = i64::MAX as u64;
+    let blocked = Ctx::new(cfg).unwrap();
+    let mut c = f.client();
+    let p = db::authenticate(&mut c, &token).unwrap();
+    let (job, _) = db::submit_job(&mut c, &p, &req("dispatch-floor", json!({})), &limits(), FAKE).unwrap();
+    exec::tick(&mut c, &blocked, "floor").unwrap();
+    assert_eq!(db::get_job(&mut c, &p.project, job["id"].as_str().unwrap()).unwrap()["submissions"], 0);
+    assert_eq!(c.query_one("SELECT count(*) FROM effects", &[]).unwrap().get::<_, i64>(0), 0);
+}
+
+#[test]
+fn resource_bounds_recovery_refuses_exhaustion() {
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "recovery", 10, 4);
+    db::submit_job(&mut c, &p, &req("recover", json!({})), &limits(), FAKE).unwrap();
+    let mut cfg = f.config(1 << 30);
+    cfg.metadata_quota_bytes = 0;
+    let ctx = Ctx::new(cfg).unwrap();
+    assert_eq!(exec::tick(&mut c, &ctx, "bounded").unwrap_err().code, "metadata_full");
+    assert_eq!(c.query_one("SELECT count(*) FROM attempts", &[]).unwrap().get::<_, i64>(0), 0);
+}
+
+// R7/R4: admission closure cannot spend recovery capacity on repeated claims,
+// and cancellation/reconciliation retain the original operation until terminal.
+#[test]
+fn resource_bounds_recovery_reserve_preserves_operations() {
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "reserve", 10, 4);
+    let (job, _) = db::submit_job(&mut c, &p, &req("paid", json!({"polls": 50})), &limits(), FAKE).unwrap();
+    let id = job["id"].as_str().unwrap();
+    let waiting = drive(&mut c, &f.ctx(1 << 30), &p.project, id, phase("waiting"));
+    let (queued, _) = db::submit_job(&mut c, &p, &req("queued", json!({})), &limits(), FAKE).unwrap();
+    let mut cfg = f.config(1 << 30);
+    cfg.metadata_quota_bytes =
+        db::metadata_bytes(&mut c).unwrap() + cfg.metadata_admission_headroom_bytes + cfg.metadata_recovery_headroom_bytes / 2;
+    db::configure(&mut c, &cfg).unwrap();
+    assert_eq!(db::create_token(&mut c, &p.project, "member").unwrap_err().code, "metadata_full");
+    assert_eq!(db::observe(&mut c, "health", "test", &json!({})).unwrap_err().code, "metadata_full");
+    assert_eq!(db::migrate(&mut c).unwrap_err().code, "metadata_full");
+    assert_eq!(db::metadata_status(&mut c)["admission"], "exhausted");
+    assert_eq!(db::metadata_status(&mut c)["recovery"], "available");
+    let before: i64 = c.query_one("SELECT count(*) FROM attempts", &[]).unwrap().get(0);
+    let ctx = Ctx::new(cfg.clone()).unwrap();
+    for _ in 0..5 {
+        exec::tick(&mut c, &ctx, "reserve").unwrap();
+    }
+    assert_eq!(c.query_one("SELECT count(*) FROM attempts", &[]).unwrap().get::<_, i64>(0), before);
+    db::cancel_job(&mut c, &p.project, id).unwrap();
+    let cancelled = drive(&mut c, &ctx, &p.project, id, phase("cancelled"));
+    assert_eq!(cancelled["provider_operation"], waiting["provider_operation"]);
+    assert_eq!(cancelled["submissions"], 1);
+    db::audit_job(&mut c, id).unwrap();
+    cfg.metadata_quota_bytes = 0;
+    db::configure(&mut c, &cfg).unwrap();
+    let queued_id = queued["id"].as_str().unwrap();
+    assert_eq!(db::cancel_job(&mut c, &p.project, queued_id).unwrap_err().code, "metadata_full");
+    assert_eq!(db::metadata_status(&mut c)["recovery"], "exhausted");
+    cfg.metadata_quota_bytes = 1 << 30;
+    let restored = Ctx::new(cfg).unwrap();
+    drive(&mut c, &restored, &p.project, queued_id, phase("succeeded"));
+    db::audit_job(&mut c, queued_id).unwrap();
+}
+
+// R7: a second session must remeasure physical indexes/TOAST after the first
+// writer commits, rather than reuse a pre-lock admission observation.
+#[test]
+fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
+    let f = fixture();
+    let mut c = f.client();
+    project(&mut c, "physical", 10, 4);
+    let mut cfg = f.config(1 << 30);
+    let before = db::metadata_bytes(&mut c).unwrap();
+    cfg.metadata_quota_bytes = before + cfg.metadata_admission_headroom_bytes + cfg.metadata_recovery_headroom_bytes;
+    db::configure(&mut c, &cfg).unwrap();
+    let mut tx = db::write_tx(&mut c, false).unwrap();
+    let value = json!({"data": (0..1024).map(|i| db::sha256_hex(format!("invented fixture {i}").as_bytes())).collect::<String>()});
+    db::charge(&mut tx, value.to_string().len()).unwrap();
+    tx.execute("INSERT INTO observations (kind, subject, value) VALUES ('fixture', 'toast', $1)", &[&value]).unwrap();
+    let (ready, started) = std::sync::mpsc::channel();
+    let (send, recv) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let mut other = db::connect_config(&cfg).unwrap();
+        ready.send(()).unwrap();
+        send.send(db::create_token(&mut other, "physical", "member").unwrap_err().code).unwrap();
+    });
+    started.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(recv.recv_timeout(Duration::from_millis(50)).is_err(), "concurrent metadata writer bypassed reservation");
+    db::commit_write(tx).unwrap();
+    assert_eq!(recv.recv_timeout(Duration::from_secs(5)).unwrap(), "metadata_full");
+    worker.join().unwrap();
+    assert!(db::metadata_bytes(&mut c).unwrap() > before);
+    let toast: i64 =
+        c.query_one("SELECT pg_total_relation_size(reltoastrelid) FROM pg_class WHERE oid = 'observations'::regclass", &[]).unwrap().get(0);
+    assert!(toast > 8192, "fixture must create real TOAST and index allocations");
+    assert_eq!(c.query_one("SELECT count(*) FROM tokens", &[]).unwrap().get::<_, i64>(0), 1);
+    db::configure(&mut c, &f.config(1 << 30)).unwrap();
+    assert_eq!(db::observe(&mut c, "fixture", "oversized", &json!({"data": "x".repeat(1 << 20)})).unwrap_err().code, "metadata_full");
+    assert_eq!(c.query_one("SELECT count(*) FROM observations", &[]).unwrap().get::<_, i64>(0), 1);
+}
+
+// R6/R7: local generation has no provider effect identity; persisted progress
+// must still finish using recovery headroom after admission closes.
+#[test]
+fn resource_bounds_local_progress_resumes_at_admission_ceiling() {
+    use assetq::model::Event;
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "local", 10, 4);
+    let owner = Principal { project: p.project.clone(), role: "owner".into() };
+    let mut spec = db::builtin_methods()[0].3.clone();
+    spec["steps"] = json!(["synthetic.generate", "validate"]);
+    db::create_method_version(&mut c, &owner, &json!({"id": "local.fixture", "spec": spec})).unwrap();
+    let mut request = req("local-recovery", json!({}));
+    request["method"] = json!("local.fixture");
+    let (job, _) = db::submit_job(&mut c, &p, &request, &limits(), FAKE).unwrap();
+    let id = job["id"].as_str().unwrap();
+    let ctx = f.ctx(1 << 30);
+    let stored = ctx.store.put(&mut &b"retained local output"[..], 100, 100).unwrap();
+    let mut tx = db::write_tx(&mut c, true).unwrap();
+    db::apply_event(&mut tx, id, &Event::Claimed { owner: "fixture".into(), fence: 1 }, 60_000, 0).unwrap();
+    db::insert_object(
+        &mut tx,
+        &db::NewObject {
+            project: &p.project,
+            sha256: &stored.sha256,
+            size: stored.size,
+            content_type: "application/x-assetq-synthetic",
+            kind: "output",
+            job_id: Some(id),
+            import_key: Some("output-0"),
+            provenance: json!({"import_key": "output-0"}),
+            synthetic: true,
+            retention_days: None,
+        },
+    )
+    .unwrap();
+    db::apply_event(&mut tx, id, &Event::ObjectImported { fence: 1, key: "output-0".into() }, 60_000, 0).unwrap();
+    db::apply_event(&mut tx, id, &Event::StepCompleted { fence: 1, step: 0 }, 60_000, 0).unwrap();
+    db::apply_event(&mut tx, id, &Event::Paused { fence: 1, reason: "invented restart fixture".into() }, 60_000, 0).unwrap();
+    db::commit_write(tx).unwrap();
+    let mut cfg = f.config(1 << 30);
+    cfg.metadata_quota_bytes =
+        db::metadata_bytes(&mut c).unwrap() + cfg.metadata_admission_headroom_bytes + cfg.metadata_recovery_headroom_bytes / 2;
+    let resumed = Ctx::new(cfg).unwrap();
+    let done = drive(&mut c, &resumed, &p.project, id, phase("succeeded"));
+    assert_eq!(done["submissions"], 0);
+    db::audit_job(&mut c, id).unwrap();
 }
 
 fn cli(f: &Fixture, s: &Service, token: &str, args: &[&str]) -> Value {

@@ -20,7 +20,7 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn new(cfg: Config) -> std::io::Result<Ctx> {
-        let store = Store::open(&cfg.data_root)?;
+        let store = Store::open(&cfg.data_root)?.with_bounds(cfg.quota_bytes, cfg.temp_quota_bytes, cfg.free_space_floor_bytes);
         let mut providers: Vec<Arc<dyn Provider>> = vec![];
         if let Some(dir) = &cfg.fake_provider_dir {
             providers.push(Arc::new(crate::provider::FakeProvider::new(dir.clone())?));
@@ -37,15 +37,14 @@ impl Ctx {
             .ok_or_else(|| Error::new(503, "capability_unavailable", format!("provider {name} is not configured")))
     }
     pub fn room(&self) -> Result<u64> {
-        let (objects, temp) = self.store.inventory().map_err(|_| Error::new(503, "store_unknown", "physical inventory unavailable"))?;
-        Ok(self.cfg.quota_bytes.saturating_sub(objects.saturating_add(temp)).min(self.cfg.temp_quota_bytes.saturating_sub(temp)))
+        self.store.room().map_err(Error::from)
     }
 }
 
 fn event(c: &mut Client, ctx: &Ctx, id: &str, e: &Event, wake_ms: u64) -> Result<Job> {
-    let mut tx = c.transaction()?;
+    let mut tx = db::write_tx(c, true)?;
     let j = db::apply_event(&mut tx, id, e, ctx.cfg.lease_ms, wake_ms)?;
-    tx.commit()?;
+    db::commit_write(tx)?;
     Ok(j)
 }
 
@@ -54,7 +53,7 @@ pub fn run_loop(ctx: Arc<Ctx>, owner: String, stop: Arc<AtomicBool>) {
     let mut client: Option<Client> = None;
     while !stop.load(Ordering::Relaxed) {
         if client.as_ref().is_none_or(|c| c.is_closed()) {
-            client = db::connect(&ctx.cfg.database_url).map_err(|e| eprintln!("executor {owner}: {e}")).ok();
+            client = db::connect_config(&ctx.cfg).map_err(|e| eprintln!("executor {owner}: {e}")).ok();
         }
         let busy = match client.as_mut() {
             Some(c) => tick(c, &ctx, &owner).unwrap_or_else(|e| {
@@ -71,9 +70,10 @@ pub fn run_loop(ctx: Arc<Ctx>, owner: String, stop: Arc<AtomicBool>) {
 
 /// One unit of work: a claimed job or one provider observation.
 pub fn tick(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<bool> {
+    db::configure(c, &ctx.cfg)?;
     if let Some((id, job)) = claim(c, ctx, owner)? {
         let result = (|| {
-            let mut heartbeat = db::connect(&ctx.cfg.database_url)?;
+            let mut heartbeat = db::connect_config(&ctx.cfg)?;
             renew(&mut heartbeat, ctx, &id, &job)?;
             let leased_job = job.clone();
             std::thread::scope(|scope| {
@@ -103,11 +103,19 @@ pub fn tick(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<bool> {
 }
 
 fn claim(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<Option<(String, Job)>> {
-    let mut tx = c.transaction()?;
+    let mut tx = db::write_tx(c, true)?;
+    let admission = match db::metadata_check(&mut tx, false) {
+        Ok(()) => true,
+        Err(e) if e.code == "metadata_full" => false,
+        Err(e) => return Err(e),
+    };
     let row = tx.query_opt(
         "SELECT id, lease_owner IS NOT NULL FROM jobs WHERE phase IN ('queued', 'active') AND wake_at <= now()
-           AND (lease_owner IS NULL OR lease_until < now()) ORDER BY wake_at LIMIT 1 FOR UPDATE SKIP LOCKED",
-        &[],
+           AND (lease_owner IS NULL OR lease_until < now())
+           AND ($1 OR state->>'effect' <> 'none' OR state->>'cancel' <> 'none'
+                OR (phase = 'active' AND ((state->>'step')::int > 0 OR state->'imported' <> '[]'::jsonb)))
+           ORDER BY wake_at LIMIT 1 FOR UPDATE SKIP LOCKED",
+        &[&admission],
     )?;
     let Some(row) = row else { return Ok(None) };
     let id: String = row.get(0);
@@ -120,7 +128,7 @@ fn claim(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<Option<(String, Job)>
         }
         let fence = db::load_job(&mut tx, &id)?.fence + 1;
         let job = db::apply_event(&mut tx, &id, &Event::Claimed { owner: owner.into(), fence }, ctx.cfg.lease_ms, 0)?;
-        tx.commit()?;
+        db::commit_write(tx)?;
         Ok(Some((id.clone(), job)))
     })();
     if result.is_err() {
@@ -130,11 +138,13 @@ fn claim(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<Option<(String, Job)>
 }
 
 fn renew(c: &mut Client, ctx: &Ctx, id: &str, job: &Job) -> Result<()> {
-    let n = c.execute(
+    let mut tx = db::write_tx(c, true)?;
+    db::charge(&mut tx, 0)?;
+    let n = tx.execute(
         "UPDATE jobs SET lease_until = clock_timestamp() + make_interval(secs => $3::bigint / 1000.0) WHERE id = $1 AND fence = $2 AND lease_owner IS NOT NULL AND lease_until > clock_timestamp()",
         &[&id, &job.fence, &(ctx.cfg.lease_ms as i64)],
     )?;
-    if n == 0 { Err(Error::new(409, "stale_fence", "lease lost")) } else { Ok(()) }
+    if n == 0 { Err(Error::new(409, "stale_fence", "lease lost")) } else { db::commit_write(tx) }
 }
 
 struct JobInfo {
@@ -274,19 +284,25 @@ fn submit_admitted(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInf
     };
     let effect_id = db::new_id();
     // Persist dispatch intent before the external effect (R2 durable execution).
-    let mut tx = c.transaction()?;
+    let mut tx = db::write_tx(c, false)?;
+    db::charge(&mut tx, info.request.to_string().len())?;
     tx.execute(
         "INSERT INTO effects (id, job_id, provider, request, attempt_id) SELECT $1, $2, $3, $4, id FROM attempts WHERE job_id = $2 AND fence = $5",
         &[&effect_id, &id, &provider.name(), &info.request, &f],
     )?;
     db::apply_event(&mut tx, id, &Event::DispatchIntended { fence: f, effect_id: effect_id.clone() }, ctx.cfg.lease_ms, 0)?;
-    tx.commit()?;
+    db::commit_write(tx)?;
     renew(c, ctx, id, job)?;
+    db::metadata_check(c, false)?;
+    if ctx.room()? == 0 {
+        return Err(Error::new(
+            507,
+            "store_full",
+            "free-space floor exhausted before provider dispatch; intent retained for reconciliation",
+        ));
+    }
     let e = match provider.submit(&effect_id, &info.request) {
-        Submit::Accepted(op) => {
-            c.execute("UPDATE effects SET op_id = $2, updated_at = now() WHERE id = $1", &[&effect_id, &op])?;
-            Event::SubmitAcked { fence: f, effect_id, op_id: op }
-        }
+        Submit::Accepted(op) => Event::SubmitAcked { fence: f, effect_id, op_id: op },
         Submit::Uncertain(reason) => Event::SubmitUncertain { fence: f, effect_id, reason },
         Submit::Refused(reason) => Event::SubmitRefused { fence: f, effect_id, reason },
     };
@@ -332,9 +348,10 @@ fn put_output(
     src: &mut dyn std::io::Read,
     op: Option<&str>,
 ) -> Result<Option<Job>> {
-    let result = db::with_admission(c, ctx.cfg.metadata_quota_bytes, |c| {
+    let result = db::with_recovery(c, ctx.cfg.metadata_quota_bytes, |c| {
+        let _writer = ctx.store.writer_lock()?;
         let room = ctx.room()?;
-        let stored = match ctx.store.put(src, ctx.cfg.max_upload_bytes, room) {
+        let stored = match ctx.store.put_locked(src, ctx.cfg.max_upload_bytes, room) {
             Ok(s) => s,
             Err(e) => {
                 event(c, ctx, id, &Event::Paused { fence: job.fence, reason: format!("import of {key} failed: {e}") }, ctx.cfg.poll_ms)?;
@@ -346,7 +363,7 @@ fn put_output(
             "job_id": id, "method": job.method, "provider": info.spec["provider"], "provider_operation": op,
             "parents": info.request["attachments"], "request": info.request, "import_key": key, "synthetic": synthetic,
         });
-        let mut tx = c.transaction()?;
+        let mut tx = db::write_tx(c, true)?;
         db::insert_object(
             &mut tx,
             &NewObject {
@@ -363,7 +380,7 @@ fn put_output(
             },
         )?;
         let j = db::apply_event(&mut tx, id, &Event::ObjectImported { fence: job.fence, key: key.into() }, ctx.cfg.lease_ms, 0)?;
-        tx.commit()?;
+        db::commit_write(tx)?;
         Ok(Some(j))
     });
     match result {
@@ -392,17 +409,18 @@ fn commit_manifest(c: &mut Client, ctx: &Ctx, id: &str, fence: i64) -> Result<()
             })
         })
         .collect();
-    let mut tx = c.transaction()?;
+    let mut tx = db::write_tx(c, true)?;
+    db::charge(&mut tx, serde_json::to_string(&items).unwrap().len())?;
     db::load_job(&mut tx, id)?;
     tx.execute("INSERT INTO manifests (job_id, items) VALUES ($1, $2)", &[&id, &Value::Array(items.clone())])?;
     db::apply_event(&mut tx, id, &Event::ManifestCommitted { fence, items: items.len() }, ctx.cfg.lease_ms, 0)?;
-    tx.commit()?;
+    db::commit_write(tx)?;
     Ok(())
 }
 
 /// Observe one due provider operation: reconcile, poll or cancel.
 fn poll_due(c: &mut Client, ctx: &Ctx) -> Result<bool> {
-    let mut tx = c.transaction()?;
+    let mut tx = db::write_tx(c, true)?;
     let row = tx.query_opt(
         "SELECT id FROM jobs WHERE phase = 'waiting' AND wake_at <= now() ORDER BY wake_at LIMIT 1 FOR UPDATE SKIP LOCKED",
         &[],
@@ -413,12 +431,13 @@ fn poll_due(c: &mut Client, ctx: &Ctx) -> Result<bool> {
         return Ok(false);
     }
     let job = (|| -> Result<Job> {
+        db::charge(&mut tx, 0)?;
         tx.execute(
             "UPDATE jobs SET wake_at = now() + make_interval(secs => $2::bigint / 1000.0) WHERE id = $1",
             &[&id, &(ctx.cfg.poll_ms as i64)],
         )?;
         let job = db::load_job(&mut tx, &id)?;
-        tx.commit()?;
+        db::commit_write(tx)?;
         Ok(job)
     })();
     let result = job.and_then(|job| observe(c, ctx, &id, job));
@@ -439,12 +458,7 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
         EffectState::Intended | EffectState::Uncertain => {
             let effect_id = job.effect_id.clone().unwrap();
             match provider.lookup(&effect_id) {
-                Ok(op) => {
-                    if let Some(op) = &op {
-                        c.execute("UPDATE effects SET op_id = $2, updated_at = now() WHERE id = $1", &[&effect_id, op])?;
-                    }
-                    Event::Reconciled { effect_id, op_id: op }
-                }
+                Ok(op) => Event::Reconciled { effect_id, op_id: op },
                 Err(_) => return Ok(true), // still uncertain; never replay blindly
             }
         }
