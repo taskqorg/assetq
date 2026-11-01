@@ -31,7 +31,7 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant integration requires composed Mac consumer and current image-tool qualification; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant preparation and native/descendant completion APIs unavailable; current image tool unqualified; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
@@ -435,23 +435,31 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     })();
     // The host cancels its verified native incarnation; terminal/usage truth
     // still comes from the protocol, never from the supervisor exit code.
-    let cancel = server.cancel(Instant::now() + Duration::from_secs(5))?;
-    save(&dir.join("host-cancel.json"), &cancel)?;
-    let until = Instant::now() + Duration::from_secs(5);
-    let mut exited = false;
-    while Instant::now() < until {
-        if server.poll()?.is_some() {
-            exited = true;
-            break;
+    let cleanup = (|| -> Res<bool> {
+        let cancel = server.cancel(Instant::now() + Duration::from_secs(5))?;
+        save(&dir.join("host-cancel.json"), &cancel)?;
+        let until = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < until {
+            if server.poll()?.is_some() {
+                return Ok(true);
+            }
+            std::thread::sleep(Duration::from_millis(20));
         }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let mut value = observed?;
-    value["exit_confirmed"] = json!(exited);
-    if !exited {
-        return Err("native worker process exit unconfirmed".into());
-    }
-    Ok(value)
+        Ok(false)
+    })();
+    finish_native_observation(dir, observed, cleanup)
+}
+
+fn finish_native_observation(dir: &Path, observed: Res<Value>, cleanup: Res<bool>) -> Res<Value> {
+    // AgentQ poll observes only the supervisor, never whole-operation completion.
+    let reason = "protected native/descendant completion unknown; original operation retained; no replay";
+    save(
+        &dir.join("native-observation.json"),
+        &json!({"turn":observed.as_ref().ok(),"turn_unknown":observed.as_ref().err(),
+            "supervisor_exit_confirmed":cleanup.as_ref().ok(),"supervisor_unknown":cleanup.as_ref().err(),
+            "exit_confirmed":false,"reason":reason}),
+    )?;
+    Err(reason.into())
 }
 
 fn send(server: &mut AppServer, log: &mut File, message: &Value, until: Instant) -> Res<()> {
@@ -660,6 +668,34 @@ mod tests {
             matches!(worker.submit(&op, &json!({"grant":"full","permissions":"dangerFullAccess"})), Submit::Refused(reason) if reason.contains("protected project/profile grant"))
         );
         assert!(!worker.dir(&op).unwrap().exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    // R2/R4/R6/R7: transport exit cannot publish a terminal result or free capacity.
+    #[test]
+    fn image_worker_supervisor_exit_retains_unknown_native_completion() {
+        let (dir, _cfg, worker) = fixture();
+        for (observation, cleanup) in [
+            (Ok(json!({"status":"completed","usage":{"input":17}})), Ok(true)),
+            (Ok(json!({"status":"cancelled","usage":{"unknown":"not reported"}})), Ok(true)),
+            (Ok(json!({"status":"completed"})), Ok(false)),
+            (Ok(json!({"status":"cancelled"})), Err("host cancellation/readback unknown".into())),
+            (Err("native terminal observation missing".into()), Ok(true)),
+        ] {
+            let op = db::new_id();
+            let spool = worker.reserve(&op, &json!({})).unwrap();
+            let reason = finish_native_observation(&spool, observation.clone(), cleanup.clone()).unwrap_err();
+            assert!(reason.contains("native/descendant completion unknown"));
+            let retained = read_json(&spool.join("native-observation.json")).unwrap();
+            assert_eq!(retained["turn"], json!(observation.as_ref().ok()));
+            assert_eq!(retained["turn_unknown"], json!(observation.as_ref().err()));
+            assert_eq!(retained["supervisor_exit_confirmed"], json!(cleanup.as_ref().ok()));
+            assert_eq!(retained["supervisor_unknown"], json!(cleanup.as_ref().err()));
+            assert_eq!(retained["exit_confirmed"], false);
+            assert_eq!(fs::metadata(spool.join("reservation")).unwrap().len(), RESERVATION);
+            assert!(!spool.join("result.json").exists());
+            assert_eq!(worker.lookup(&op).unwrap(), Some(op.clone()));
+            assert!(worker.reserve(&op, &json!({})).is_err());
+        }
         fs::remove_dir_all(dir).unwrap();
     }
     // R5/R6: these invented PNG/tool fixtures test validation, not generation.
