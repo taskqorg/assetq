@@ -595,7 +595,9 @@ fn registry_recommendations_and_comparisons() {
     let owner_token = db::create_token(&mut c, "kappa", "owner").unwrap();
     let owner = db::authenticate(&mut c, &owner_token).unwrap();
     let methods = db::list_methods(&mut c, "kappa").unwrap();
-    assert_eq!(methods.as_array().unwrap().len(), 4);
+    assert_eq!(methods.as_array().unwrap().len(), 5);
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, assetq::image_worker::legacy_method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, assetq::image_worker::method());
     let mut spec = db::builtin_methods()[0].3.clone();
     spec["pipeline_revision"] = json!("2");
     let body = json!({"id": "synthetic.fake", "status": "experimental", "spec": spec});
@@ -668,7 +670,7 @@ fn registry_scope_and_expired_fences() {
     let body = json!({"id": "private-method", "spec": db::builtin_methods()[0].3});
     db::create_method_version(&mut c, &owner_a, &body).unwrap();
     assert!(db::resolve_method(&mut c, &b.project, "private-method@1").is_err());
-    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 4);
+    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 5);
     let rec = db::propose_recommendation(
         &mut c,
         &a,
@@ -1155,7 +1157,7 @@ fn service_restart_recovers_job_through_cli() {
     let audit = admin(&["audit", &id]);
     assert!(audit.contains("matches stored state"));
     let methods = cli(&f, &s, &token, &["methods"]);
-    assert_eq!(methods.as_array().unwrap().len(), 4);
+    assert_eq!(methods.as_array().unwrap().len(), 5);
     let rec = cli(&f, &s, &token, &["recommend", "prop image"]);
     assert_eq!(rec["recommended"], Value::Null);
     // A corrupted download is refused and leaves no output file.

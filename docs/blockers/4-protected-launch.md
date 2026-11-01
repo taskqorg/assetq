@@ -2,6 +2,8 @@
 
 One focused blocker draft for PM intake under AssetQ R3, R4 and R6. AssetQ #4 remains incomplete and new dispatch remains refused. This document creates no task, grant or executable authority.
 
+Upstream resolution: AgentQ #186/PR188 is published as `6585656b5966f6f5912f504b6bf30f5bc576acaa` with green merge-result CI. AssetQ now consumes its immutable source pin `aab1a190ab76f1e932578520d7a8787ef1d4b660`. The API-gap analysis below is historical. The next boundary is the [composed AssetQ qualification](../evidence/4/protected-consumer.md), followed by durable slot integration and current tool/output qualification; the original task remains incomplete.
+
 ## Goal and owner
 
 Publish a supported AgentQ app-server launch path that consumes the existing operator-controlled project grant, reuses the approved host boundary and CoreQ infrastructure, and returns authority readback bound to the launched native operation.

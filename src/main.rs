@@ -19,6 +19,8 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   restore-check                                        verify isolated restored metadata, manifests and payloads
   audit <job-id>                                       replay a stored job's events
   selftest [--database]                                offline checks; --database adds DB checks
+  image-qualify <new-private-workspace-dir>             protected non-generating PM qualification over private stdio
+  image-observe <private-workspace-dir> [--cancel]      reconcile original protected operation; never launch or release
 
 Client (ASSETQ_URL, default http://127.0.0.1:8740; ASSETQ_TOKEN):
   submit --method M --operation O --key K --budget N [--text T] [--attach ID].. [--set k=JSON]..
@@ -61,6 +63,11 @@ fn run(args: &[String]) -> Result<(), String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     let rest = &args[args.len().min(1)..];
     match cmd {
+        "image-qualify" => assetq::image_worker::protected::qualify(std::path::Path::new(&pos(rest, 0)?)),
+        "image-observe" => {
+            print(&assetq::image_worker::protected::observe(std::path::Path::new(&pos(rest, 0)?), rest.iter().any(|s| s == "--cancel"))?);
+            Ok(())
+        }
         "image-turn" => assetq::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
         "serve" => serve(rest),
         "work" => {

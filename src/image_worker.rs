@@ -5,9 +5,11 @@ use crate::{
     Config, db,
     store::{Store, durable_rename},
 };
+#[cfg(test)]
+use agentq_runtime::optimization;
 use agentq_runtime::{
-    agent::{self, AppServer, AppSession, Client, Spec},
-    optimization::{self, Intent},
+    agent::{self, AppSession, Client, ProtectedAppServer as AppServer, Spec},
+    optimization::Intent,
 };
 use serde_json::{Value, json};
 use std::{
@@ -18,7 +20,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const PIN: &str = "513193c8a96f3de1c71a86291a679230817ce0b2";
+pub mod protected;
+
+pub const PIN: &str = "aab1a190ab76f1e932578520d7a8787ef1d4b660";
 pub const PROVIDER: &str = "agentq.codex-image";
 const LOG_LIMIT: u64 = 32 << 20;
 const IMAGE_LIMIT: u64 = 64 << 20;
@@ -27,16 +31,25 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant readback and effective host-boundary qualification are unavailable; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant integration requires composed Mac consumer and current image-tool qualification; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
     json!({"operation":"image.generate","inputs":["text","verified PNG attachment IDs"],"outputs":["image/png","application/json"],
-        "provider":PROVIDER,"model":"native-inherited","api_revision":PIN,"pipeline_revision":"2",
+        "provider":PROVIDER,"model":"native-inherited","api_revision":PIN,"pipeline_revision":"3",
         "parameters":{"max_width":{"type":"integer","min":64,"max":4096},"max_height":{"type":"integer","min":64,"max":4096}},
-        "capabilities":["codex.image_generation","native.savedPath","protected project/profile grant"],"limitations":["New dispatch refused pending protected host-authority integration; one PNG; no paid API fallback."],
+        "capabilities":["codex.image_generation","native.savedPath","protected project/profile grant"],"limitations":["New dispatch refused pending composed protected consumer and current image-tool qualification; one PNG; no paid API fallback."],
         "provenance":"assetq.md image.worker.v1; docs/image-worker.md","validation":["native terminal image tool","full PNG decode","dimensions","sha256 re-read"],
         "steps":["provider.submit","provider.import","validate"],"max_credits":0,"billing":"existing_subscription_only","synthetic":false})
+}
+
+// Existing registry versions and the accepted crate keep their original method.
+pub fn legacy_method() -> Value {
+    let mut value = method();
+    value["api_revision"] = json!("513193c8a96f3de1c71a86291a679230817ce0b2");
+    value["pipeline_revision"] = json!("2");
+    value["limitations"] = json!(["New dispatch refused pending protected host-authority integration; one PNG; no paid API fallback."]);
+    value
 }
 
 pub struct ImageWorker {
@@ -143,7 +156,7 @@ impl Provider for ImageWorker {
             return Ok(Some(effect.into()));
         }
         let receipt = read_json(&dir.join("request.json"))?;
-        if receipt["effect"] != effect || receipt["runtime"] != PIN {
+        if receipt["effect"] != effect || !matches!(receipt["runtime"].as_str(), Some(PIN | "513193c8a96f3de1c71a86291a679230817ce0b2")) {
             return Err("worker receipt mismatch; no replay".into());
         }
         Ok(Some(effect.into()))
@@ -328,13 +341,11 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
         request["constraints"], request["text"]
     );
     input.insert(0, json!({"type":"text","text":prompt}));
-    let mut spec = spec(cfg.image_worker_root.as_deref().unwrap());
-    let opt = optimization::prepare(Intent::Inherit, "assetq", &mut spec, optimization::install_root().as_deref());
-    let home = spec.home.clone().or_else(|| agent::base_home(Client::Codex)).ok_or("native Codex home unknown")?;
+    let control = serde_json::from_value(read_json(&dir.join("control.json"))?).map_err(|_| "protected worker control invalid")?;
     let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-    let mut base = Command::new(agent::executable(Client::Codex)?);
-    base.env_remove("TASKQ_TASK").env_remove("TASKQ_ATTEMPT");
-    let mut server = AppServer::start(base, &spec, Path::new(if cfg!(windows) { "NUL" } else { "/dev/null" }))?;
+    let (mut server, spec) = protected::launch(cfg.image_worker_root.as_deref().unwrap(), dir, control)?;
+    let opt = server.optimization();
+    let home = spec.home.clone().ok_or("native Codex home unknown")?;
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let observed = (|| -> Res<Value> {
         let mut session = AppSession::new(&spec)?;
@@ -410,9 +421,10 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
             }
         }
     })();
-    // Only this runner's direct child is stopped; terminal/usage truth still
-    // comes from the native protocol, never from the process exit code.
-    server.kill()?;
+    // The host cancels its verified native incarnation; terminal/usage truth
+    // still comes from the protocol, never from the supervisor exit code.
+    let cancel = server.cancel(Instant::now() + Duration::from_secs(5))?;
+    save(&dir.join("host-cancel.json"), &cancel)?;
     let until = Instant::now() + Duration::from_secs(5);
     let mut exited = false;
     while Instant::now() < until {
@@ -588,6 +600,15 @@ mod tests {
         // Reopening the adapter preserves the same identity, including no-start.
         let again = ImageWorker::new(cfg.clone(), dir.clone()).unwrap();
         assert_eq!(again.lookup(&op).unwrap(), Some(op.clone()));
+        let mut retained = read_json(&spool.join("request.json")).unwrap();
+        retained["runtime"] = json!("513193c8a96f3de1c71a86291a679230817ce0b2");
+        fs::write(spool.join("request.json"), retained.to_string()).unwrap();
+        assert_eq!(again.lookup(&op).unwrap(), Some(op.clone()), "original runtime operation must reconcile after upgrade");
+        retained["runtime"] = json!("unrecognized-runtime");
+        fs::write(spool.join("request.json"), retained.to_string()).unwrap();
+        assert!(again.lookup(&op).unwrap_err().contains("no replay"));
+        retained["runtime"] = json!(PIN);
+        fs::write(spool.join("request.json"), retained.to_string()).unwrap();
         save(&spool.join("unknown.json"), &json!({"reason":"runner interrupted; native outcome unknown; no replay"})).unwrap();
         assert!(matches!(again.poll(&op),Err(reason) if reason.contains("interrupted")));
         assert!(again.reserve(&op, &json!({})).is_err());
@@ -601,6 +622,15 @@ mod tests {
         assert!(spool.join("request.json").exists());
         fs::remove_dir_all(dir).unwrap();
     }
+    // R5: a runtime upgrade must not change the accepted crate's immutable method.
+    #[test]
+    fn image_worker_retains_original_method_when_registering_protected_version() {
+        let original: Value = serde_json::from_str(include_str!("../tests/fixtures/image-worker-v2.json")).unwrap();
+        assert_eq!(legacy_method(), original);
+        assert_ne!(method()["api_revision"], original["api_revision"]);
+        assert_eq!(method()["pipeline_revision"], "3");
+    }
+
     // R3: a writable workspace and request cannot authorize a native launch.
     #[test]
     fn image_worker_refuses_unverified_host_authority_before_any_launch() {

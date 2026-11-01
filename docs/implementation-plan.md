@@ -11,7 +11,7 @@ The owner request is preserved in [intake](intake/2026-11-01-owner-request.md). 
 | PilotQ adoption | [pilotq#294](https://github.com/taskqorg/pilotq/issues/294) | AgentQ runtime; existing [pilotq#281](https://github.com/taskqorg/pilotq/issues/281) qualification |
 | CoreQ runtime retirement | [coreq#112](https://github.com/taskqorg/coreq/issues/112) | Runtime and both verified consumer adoptions |
 | Durable service, registry and object API | [assetq#3](https://github.com/taskqorg/assetq/issues/3) | Bootstrap contract and CI |
-| Real image-worker method | [assetq#4](https://github.com/taskqorg/assetq/issues/4) | Foundation and AgentQ runtime |
+| Real image-worker method | [assetq#4](https://github.com/taskqorg/assetq/issues/4) | Foundation, published [agentq#186](https://github.com/taskqorg/agentq/issues/186) protected runtime and composed native qualification |
 | Image-to-3D prop method | [assetq#5](https://github.com/taskqorg/assetq/issues/5) | Image-worker method |
 | Managed-store connected live journeys | [assetq#6](https://github.com/taskqorg/assetq/issues/6) | Both methods and reviewed private host activation receipts |
 | Method comparisons and guidance | [assetq#7](https://github.com/taskqorg/assetq/issues/7) | Real generation and storage receipts |
@@ -39,7 +39,7 @@ The PM created a ten-minute heartbeat in the existing owner chat. It follows thi
 
 1. Build the durable AssetQ request/job/effect model, method registry, immutable object API and first service/CLI, with recovery/fencing/idempotency tests. An initial filesystem object store avoids introducing another storage service.
 2. Prepare pds18 deployment with a dedicated identity, PostgreSQL role/database and data root; verify capacity, streaming upload/download, additive activation and rollback. Defer new backup work and local/external backup-restore qualification without blocking initial functionality. Preserve existing backups and keep unproved backup/restore states unknown; no backup-driven stop/restart, cold-backup timer, rotation or new platform. Host changes belong to the private host repository and concrete deployment plan.
-3. Implement and qualify the Codex image-worker route through AgentQ. A real image-generation capability is required; never substitute a procedural drawing or silently use a direct paid API. Expose a precise capability gap when the selected runtime lacks the tool.
+3. Implement and qualify the Codex image-worker route through AgentQ. Consume the immutable protected runtime and provide PM one [composed, non-generating consumer](evidence/4/protected-consumer.md) under the existing Mac grant. Qualify current authority/tool/output paths before enabling durable slot-backed dispatch. Preserve the accepted crate and operation without generation/replay. A real image-generation capability is required; never substitute a procedural drawing or silently use a direct paid API. Expose a precise capability gap when the selected runtime lacks the tool.
 4. Implement image-to-3D with the csgo Meshy prop baseline, explicit parameters, provider reconciliation and headless Blender validation. Consume the first image, retain source GLB/textures and render views.
 5. Run the connected real journey on the managed store, record generated image/3D asset IDs, methods, actual costs, recovery and download verification, and present outputs for owner visual acceptance.
 6. Expose shared controls and comparison/recommendation records to humans and agents. Seed the two methods without calling either universally best.

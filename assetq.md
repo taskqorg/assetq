@@ -50,13 +50,19 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 **Image worker (`image.worker.v1`).** A capable Codex worker receives text, attachments and output constraints through AgentQ and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-The worker uses `agentq-runtime` 0.1.0 at immutable revision `513193c8a96f3de1c71a86291a679230817ce0b2`. Its native app-server path inherits the existing account, model, permissions and optional optimization.
+New worker builds use `agentq-runtime` 0.1.0 at immutable revision `aab1a190ab76f1e932578520d7a8787ef1d4b660`, published by AgentQ PR188. Existing method versions and operation receipts retain their original runtime pin. Its protected app-server path inherits the existing account, model, permissions and optional optimization.
+
+The protected pipeline is method version 3; version 2 retains the original runtime and validation recipe. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
 
 New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
 
 Consume protected launch through AgentQ and shared CoreQ infrastructure, using the operator-controlled host authority path and its existing grants. Do not add an AssetQ policy store or trust grant text from a task, request or environment. Resolve and record the effective boundary before native effects; unavailable enforcement refuses launch.
 
-Until the supported grant interface is qualified, refuse new native launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
+Until the composed protected worker and its current image capability are qualified, refuse new generation launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
+
+Provide one bounded non-generating qualification command through the same protected transport as the image runner. The existing PM supplies a slot bound to its actual consumer incarnation and independently read expected identities. Pin the qualified host adapter artifact in the build; task, environment and receipt text cannot select another authority.
+
+Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
 
