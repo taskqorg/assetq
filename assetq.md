@@ -84,15 +84,17 @@ Bound each transaction and check its physical growth before commit; exhaustion s
 
 Project-scoped APIs provide authenticated uploads and downloads, checksums, size/type limits, pagination and bounded retention. Permanent asset IDs are independent of expiring transport URLs. Do not automatically publish private inputs or expose storage directories as a public web root.
 
-Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback/restore procedure. Additive activation uses existing host mechanisms and preserves other workloads.
+Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback procedure. Backup/restore qualification follows the initial-delivery deferral below. Additive activation uses existing host mechanisms and preserves other workloads.
 
 Publish the approved `assets.ufobe.com` name through the existing Caddy HTTPS entry on pds18, proxying to the loopback-only AssetQ service. Change only this named DNS/site configuration after verifying its current ownership and target; preserve apex/wildcard records, other sites and existing access guards. Verify TLS, browser/API authentication and rollback on the exact candidate.
 
 Another public hostname, firewall change, destructive migration or unrelated service restart requires separate concrete approval. The website does not authorize direct public storage listeners or directory listing.
 
-For initial delivery, reuse the managed host's existing backup mechanism for consistent snapshots of objects, manifests, job state and registry revisions. Prove an isolated local restore with hashes and authenticated retrieval.
+For initial delivery, defer new backup work and both local and independent external backup/restore qualification. Preserve existing host backups and report deferred or unobserved backup/restore evidence as unknown; these gaps do not block initial functionality.
 
-Independent external retrieval and restoration remain Open/unknown until observed; they do not block initial image, 3D or site delivery. Provider URLs and RAID alone are not backup evidence.
+AssetQ must not be stopped or restarted for backup. No cold-backup timer, backup-driven outage, rotation or additional backup platform is authorized for initial delivery.
+
+Any backup verification claim requires consistent object/metadata snapshots, including manifests, job state and registry revisions, plus isolated restore/hash and authenticated retrieval evidence for its named scope. A local receipt never proves independent external restoration. Provider URLs and RAID alone are not backup evidence.
 
 Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
 

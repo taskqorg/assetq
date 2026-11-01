@@ -8,7 +8,9 @@ Read-only `taskq service permissions` resolved the existing Codex full-host gran
 
 ![Original crate preview](crate-preview.png)
 
-The original is [crate-original.png](crate-original.png), 1254 by 1254 pixels, 1,936,663 bytes. Its SHA-256 is `fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa`. Original asset ID for image-to-3D: `2c887345-9f66-491f-8a0c-81d81cf0c4af`; job `0e1fdfd2-9f45-46a0-ae27-0b4ba6558968`, method `image.worker.v1@2`. Technical decoding/import/retrieval passed; owner visual acceptance remains pending.
+The original is [crate-original.png](crate-original.png), 1254 by 1254 pixels, 1,936,663 bytes. Its SHA-256 is `fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa`. Original asset ID for image-to-3D: `2c887345-9f66-491f-8a0c-81d81cf0c4af`; job `0e1fdfd2-9f45-46a0-ae27-0b4ba6558968`, method `image.worker.v1@2`. Technical decoding/import/retrieval passed.
+
+The owner subsequently accepted this existing crate for image-to-3D, recorded in [Task #4 note 6558009015](https://github.com/taskqorg/assetq/issues/4#issuecomment-6558009015). The native qualification receipt remains immutable with `pending` at its capture time; this later decision is separate evidence for the exact asset/hash. No managed-catalog acceptance readback is claimed. Both retained PNG copies still match the original hash; no regeneration or replay occurred.
 
 ## Native evidence
 
@@ -40,4 +42,4 @@ The first complete Windows gate failed four service fixtures under parallel load
 
 The portable gate separately checks PNG decoding/limits, forged artifact paths, unchanged original bytes, native early/duplicate events, absent optimization and interrupted receipts. Fifteen lifecycle traces include the new observation-unknown recovery path. Linux CI and merge-result CI remain publication gates; this document does not manufacture their receipts.
 
-The retained local store is qualification evidence. It is not deployed pds18 storage, an off-host backup, browser acceptance, hostile-input filesystem isolation, Claude qualification or owner visual approval. Task #6 owns the connected managed-store journey. Task #13 owns the separate free-space/metadata admission work.
+The retained local store is qualification evidence. It is not deployed pds18 storage, an off-host backup, browser acceptance, hostile-input filesystem isolation, Claude qualification or a managed-catalog acceptance readback. The owner's later crate decision does not qualify reusable protected launch or the method generally. Task #6 owns the connected managed-store journey; new backup/restore qualification is deferred under the current storage contract. Task #13 owns the separate free-space/metadata admission work.

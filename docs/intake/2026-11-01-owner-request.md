@@ -32,3 +32,12 @@ The canonical management application and API belong at `https://assets.ufobe.com
 > не заморачивайся, сделай как-то там сейчас, как у нас в других проектах сделано по дефолту. И давай дальше продолжай.
 
 Task #4 steering note 6557600407 retains this owner direction: reuse the managed host's existing backup mechanism, consistent object/metadata snapshots and a verified isolated local restore. Independent external retrieval/restoration remains Open/unknown and does not block initial release or image/3D/site work. Data integrity, scoped access, paired snapshots and local restore/hash checks remain required; native image-tool and original bitmap acceptance is unchanged.
+
+## Initial functionality without backup outages
+
+> Ничего он останавливаться не должен.
+> Пока сейчас надо функционал быстрее запустить, про протестировать.
+
+Task #4 steering note 6558009015 records the newer direct owner decision, superseding the earlier initial backup gate: install and test functionality now; defer new backup work and both local and external backup/restore qualification. Preserve existing host backups and keep unproved backup/restore evidence unknown. No backup-driven AssetQ stop/restart, cold-backup timer, outage, rotation or new backup platform is authorized. Data integrity, authentication, resource limits and durable job recovery remain required.
+
+The same note records owner acceptance of the existing crate for image-to-3D. Preserve that exact asset and original operation; do not regenerate it. Reusable protected launch and current-source native qualification remain separate open requirements.
