@@ -6,6 +6,8 @@ Upstream resolution: AgentQ #186/PR188 is published as `6585656b5966f6f5912f504b
 
 ## Goal and owner
 
+The API extraction above is published, but composed Mac qualification exposed an [AgentQ receipt wire mismatch](4-agentq-receipt-wire.md). That single focused follow-up owns the current PM intake; the original API-gap analysis below remains historical.
+
 Publish a supported AgentQ app-server launch path that consumes the existing operator-controlled project grant, reuses the approved host boundary and CoreQ infrastructure, and returns authority readback bound to the launched native operation.
 
 Proposed intake repository: **taskqorg/agentq**, which owns the runtime consumer API. CoreQ supplies generic process/transport primitives; TaskQ retains its operator grant store, resolver and qualified boundary adapter. AssetQ consumes the published API and retains its own jobs/effects. Do not copy TaskQ policy into AssetQ or make CoreQ depend upward on AgentQ.
