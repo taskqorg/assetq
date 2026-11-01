@@ -995,7 +995,8 @@ fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
     cfg.metadata_quota_bytes = before + cfg.metadata_admission_headroom_bytes + cfg.metadata_recovery_headroom_bytes;
     db::configure(&mut c, &cfg).unwrap();
     let mut tx = db::write_tx(&mut c, false).unwrap();
-    let value = json!({"data": (0..1024).map(|i| db::sha256_hex(format!("invented fixture {i}").as_bytes())).collect::<String>()});
+    // Grow beyond the relcache init file; its removal must not cancel this fixture's net physical growth.
+    let value = json!({"data": (0..3072).map(|i| db::sha256_hex(format!("invented fixture {i}").as_bytes())).collect::<String>()});
     db::charge(&mut tx, value.to_string().len()).unwrap();
     tx.execute("INSERT INTO observations (kind, subject, value) VALUES ('fixture', 'toast', $1)", &[&value]).unwrap();
     let (ready, started) = std::sync::mpsc::channel();
@@ -1010,7 +1011,8 @@ fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
     db::commit_write(tx).unwrap();
     assert_eq!(recv.recv_timeout(Duration::from_secs(5)).unwrap(), "metadata_full");
     worker.join().unwrap();
-    assert!(db::metadata_bytes(&mut c).unwrap() > before);
+    let after = db::metadata_bytes(&mut c).unwrap();
+    assert!(after > before, "physical fixture before={before} after={after}");
     let toast: i64 =
         c.query_one("SELECT pg_total_relation_size(reltoastrelid) FROM pg_class WHERE oid = 'observations'::regclass", &[]).unwrap().get(0);
     assert!(toast > 8192, "fixture must create real TOAST and index allocations");
