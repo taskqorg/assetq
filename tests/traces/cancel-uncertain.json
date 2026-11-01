@@ -1,0 +1,8 @@
+{"name":"cancel not confirmed","covers":"an unconfirmed provider cancel stays explicit with unknown charge","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"cancel_uncertain","reason":"provider did not confirm the cancel"}}
+],"expect":{"phase":"cancelled","cancel":"uncertain","usage_credits":null,"usage_note":"charge unknown: provider did not confirm the cancel"}}

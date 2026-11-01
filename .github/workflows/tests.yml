@@ -17,3 +17,15 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 scripts/check.py
+  candidate:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/candidate.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: assetq-candidate
+          path: dist/
+          if-no-files-found: error

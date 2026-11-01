@@ -1,0 +1,13 @@
+{"name":"crash after dispatch intent","covers":"executor crash between intent and reply; no blind replay; reconcile adopts the original operation","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"lease_expired"}},
+{"event":{"type":"claimed","owner":"x2","fence":2}},
+{"event":{"type":"dispatch_intended","fence":2,"effect_id":"e2"},"reject":"invalid"},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"},"reject":"stale"},
+{"event":{"type":"submit_uncertain","fence":2,"effect_id":"e1","reason":"executor stopped before recording the provider reply"}},
+{"event":{"type":"failed","fence":2,"reason":"give up"},"reject":"stale"},
+{"event":{"type":"reconciled","effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":null}}
+],"expect":{"phase":"active","effect":"done","submissions":1,"op_id":"op1","usage_credits":null,"usage_note":"provider did not report usage","step":1}}

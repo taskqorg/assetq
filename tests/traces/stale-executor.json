@@ -1,0 +1,14 @@
+{"name":"stale executor fenced out","covers":"an expired executor cannot import, complete steps or commit after a newer claim","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"claimed","owner":"x1","fence":2}},
+{"event":{"type":"lease_expired"}},
+{"event":{"type":"claimed","owner":"x2","fence":3}},
+{"event":{"type":"claimed","owner":"x3","fence":4},"reject":"invalid"},
+{"event":{"type":"object_imported","fence":2,"key":"output-0"},"reject":"stale"},
+{"event":{"type":"manifest_committed","fence":2,"items":1},"reject":"stale"},
+{"event":{"type":"object_imported","fence":3,"key":"output-0"}}
+],"expect":{"phase":"active","fence":3,"lease":"x2","imported":["output-0"],"manifest":false}}

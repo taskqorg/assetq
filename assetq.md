@@ -87,5 +87,7 @@ Langfuse can receive correlated traces and evaluation records; its outage cannot
 - [Architecture](docs/architecture.md): dependency direction, runtime extraction and service boundaries.
 - [Acceptance](docs/acceptance.md): real user journeys and recovery evidence.
 - [Meshy baseline](docs/meshy-baseline.md): source pipeline and scope limitations.
+- [Service](docs/service.md): lifecycle model, API, limits and immutable storage.
+- [Deployment](docs/deploy.md): candidate verification, host requirements, additive install and rollback.
 
 <!-- contract-budget: bytes=61440 lines=300 -->

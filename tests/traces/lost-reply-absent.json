@@ -1,0 +1,11 @@
+{"name":"lost reply, provider confirms absent","covers":"uncertain submission reconciled as absent before exactly one safe resubmission","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_uncertain","fence":1,"effect_id":"e1","reason":"timeout"}},
+{"event":{"type":"claimed","owner":"x1","fence":2},"reject":"invalid"},
+{"event":{"type":"reconciled","effect_id":"e1","op_id":null}},
+{"event":{"type":"claimed","owner":"x1","fence":2}},
+{"event":{"type":"dispatch_intended","fence":2,"effect_id":"e2"}},
+{"event":{"type":"submit_acked","fence":2,"effect_id":"e2","op_id":"op2"}}
+],"expect":{"phase":"waiting","effect":"submitted","submissions":2,"op_id":"op2","effect_id":"e2","lease":null}}

@@ -1,0 +1,10 @@
+{"name":"cancel during remote work","covers":"requested then provider-confirmed cancel; late completion is ignored","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"cancel_stopped_locally"},"reject":"invalid"},
+{"event":{"type":"cancel_confirmed","op_id":"op1"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}}
+],"expect":{"phase":"cancelled","cancel":"provider_confirmed","usage_credits":null}}

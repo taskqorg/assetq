@@ -1,0 +1,7 @@
+{"name":"execution deadline stops unpaid work","covers":"R7 elapsed limit requests cancellation without dispatch","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@1","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"executor","fence":1}},
+{"event":{"type":"deadline_expired"}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"late"},"reject":"invalid"},
+{"event":{"type":"cancel_stopped_locally"}}
+],"expect":{"phase":"cancelled","cancel":"locally_stopped","reason":"execution deadline exceeded","submissions":0,"manifest":false}}
