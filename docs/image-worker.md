@@ -8,6 +8,8 @@ The existing scoped job API admits `image.worker.v1@2`, an experimental method. 
 
 Requests cannot choose executable, account, model, permissions, environment, output paths or optimization. The prepared native app-server path uses inherited settings, with AgentQ optimization intent `inherit`; absent optimization remains a plain native worker. Its tool/output path has one bounded owner-authorized qualification; reusable project dispatch remains incomplete.
 
+The missing dependency is a supported protected app-server launch API, not a new Windows grant. AgentQ's current `AppServer::start` accepts a caller-built command; CoreQ's published pin supplies process primitives, while TaskQ's grant resolver and Seatbelt wrapper remain private to its binary. The [focused blocker draft](blockers/4-protected-launch.md) records exact sources, ownership, acceptance and coordination with the existing TaskQ runtime writer. Existing Mac Workspace evidence is an investigation lead, not executable authority or current-source qualification.
+
 The worker resolves attachment IDs through the job's project, verifies store hashes, and accepts PNG image references only. It passes these verified immutable files as native local-image inputs. Parameters are bounded `max_width` and `max_height` (64..4096, default 4096); one original PNG of at most 16 million pixels and the configured upload-byte limit is supported. Preview PNGs fit 512 by 512. Unsupported input or absent native image generation is an explicit `capability_unavailable` refusal; no paid API or Claude fallback is selected.
 
 ## Durable operation

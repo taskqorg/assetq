@@ -54,6 +54,8 @@ The worker uses `agentq-runtime` 0.1.0 at immutable revision `513193c8a96f3de1c7
 
 New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
 
+Consume protected launch through AgentQ and shared CoreQ infrastructure, using the operator-controlled host authority path and its existing grants. Do not add an AssetQ policy store or trust grant text from a task, request or environment. Resolve and record the effective boundary before native effects; unavailable enforcement refuses launch.
+
 Until the supported grant interface is qualified, refuse new native launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
