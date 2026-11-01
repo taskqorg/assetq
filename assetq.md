@@ -50,7 +50,9 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 **Image worker (`image.worker.v1`).** A capable Codex worker receives text, attachments and output constraints through AgentQ and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-New worker builds use `agentq-runtime` 0.1.0 at immutable revision `8427bba6145aac0239cd16a8dae0caf8efa00695`, published by AgentQ PR195. Its protected validator consumes the host's `authority.resolved.effective` without relaxing authority or process-identity checks. Existing operation receipts retain their original runtime pin and remain observable without replay. Its protected app-server path inherits the existing account, model, permissions and optional optimization.
+New worker builds use `agentq-runtime` 0.1.0 at immutable revision `8427bba6145aac0239cd16a8dae0caf8efa00695`, published by AgentQ PR195. Its protected validator consumes the host's `authority.resolved.effective` without relaxing authority or process-identity checks.
+
+Existing operation receipts retain their original runtime pin and remain observable without replay. The protected app-server path inherits the existing account, model, permissions and optional optimization.
 
 The corrected protected pipeline is method version 4; versions 2 and 3 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
 
