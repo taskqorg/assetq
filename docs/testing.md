@@ -18,8 +18,8 @@ The last command starts a disposable PostgreSQL cluster and filters Rust tests b
 ## Protected risks
 
 - R3/R5: project-scoped jobs, attachment/download access, method versions, comparisons and recommendation promotion; caller names never become storage paths.
-- R5/R6: manifest/state transaction atomicity, expired and stale fences, event replay, original provider operation adoption and sealed absence before a new dispatch.
-- R7: typed constraints, idempotency under concurrency, credit reservations, executor release during waits, metadata admission reservation, full object/temp stores and preservation of existing payloads.
+- R5/R6: manifest/state transaction atomicity, expired and stale fences (including refusal to revive an expired lease during a slow import), renewal through blocking fetch/stream work, event replay, original provider operation adoption and sealed absence before a new dispatch.
+- R7: typed constraints, idempotency under concurrency, credit reservations, executor release during waits, uncertain-cancel admission reservations until terminal provider observation, metadata admission reservation, full object/temp stores and preservation of existing payloads.
 - A7/A8: real PostgreSQL transactions, a killed/restarted service through the CLI, streamed SHA-verified retrieval, genuine SQL dump/restore followed by API checks, and refusal of corrupt/missing restored payloads.
 
 `synthetic.fake` proves service semantics only. It never qualifies real image/3D generation, provider cost, native worker output, public browser authentication or the managed store.

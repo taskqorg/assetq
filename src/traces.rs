@@ -8,6 +8,7 @@ pub const TRACES: &[(&str, &str)] = &[
     ("cancel-during-wait.json", include_str!("../tests/traces/cancel-during-wait.json")),
     ("cancel-queued.json", include_str!("../tests/traces/cancel-queued.json")),
     ("cancel-uncertain-submission.json", include_str!("../tests/traces/cancel-uncertain-submission.json")),
+    ("cancel-uncertain-completed.json", include_str!("../tests/traces/cancel-uncertain-completed.json")),
     ("cancel-uncertain.json", include_str!("../tests/traces/cancel-uncertain.json")),
     ("crash-after-intent.json", include_str!("../tests/traces/crash-after-intent.json")),
     ("duplicate-events.json", include_str!("../tests/traces/duplicate-events.json")),

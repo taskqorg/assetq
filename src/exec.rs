@@ -72,7 +72,27 @@ pub fn run_loop(ctx: Arc<Ctx>, owner: String, stop: Arc<AtomicBool>) {
 /// One unit of work: a claimed job or one provider observation.
 pub fn tick(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<bool> {
     if let Some((id, job)) = claim(c, ctx, owner)? {
-        let result = run_claimed(c, ctx, &id, job);
+        let result = (|| {
+            let mut heartbeat = db::connect(&ctx.cfg.database_url)?;
+            renew(&mut heartbeat, ctx, &id, &job)?;
+            let leased_job = job.clone();
+            std::thread::scope(|scope| {
+                let (stop, done) = std::sync::mpsc::channel::<()>();
+                let id = &id;
+                scope.spawn(move || {
+                    let interval = Duration::from_millis((ctx.cfg.lease_ms / 3).max(1));
+                    while done.recv_timeout(interval) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+                        if let Err(e) = renew(&mut heartbeat, ctx, &id, &leased_job) {
+                            eprintln!("job {id} heartbeat: {e}");
+                            break;
+                        }
+                    }
+                });
+                let result = run_claimed(c, ctx, &id, job);
+                let _ = stop.send(());
+                result
+            })
+        })();
         db::unlock_job(c, &id)?;
         if let Err(e) = result {
             eprintln!("job {id}: {e}");
@@ -111,7 +131,7 @@ fn claim(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<Option<(String, Job)>
 
 fn renew(c: &mut Client, ctx: &Ctx, id: &str, job: &Job) -> Result<()> {
     let n = c.execute(
-        "UPDATE jobs SET lease_until = now() + make_interval(secs => $3::bigint / 1000.0) WHERE id = $1 AND fence = $2 AND lease_owner IS NOT NULL AND lease_until > clock_timestamp()",
+        "UPDATE jobs SET lease_until = clock_timestamp() + make_interval(secs => $3::bigint / 1000.0) WHERE id = $1 AND fence = $2 AND lease_owner IS NOT NULL AND lease_until > clock_timestamp()",
         &[&id, &job.fence, &(ctx.cfg.lease_ms as i64)],
     )?;
     if n == 0 { Err(Error::new(409, "stale_fence", "lease lost")) } else { Ok(()) }
@@ -357,10 +377,9 @@ fn put_output(
 
 /// Manifest rows and the success transition commit in one transaction (R6).
 fn commit_manifest(c: &mut Client, ctx: &Ctx, id: &str, fence: i64) -> Result<()> {
-    let mut tx = c.transaction()?;
-    db::load_job(&mut tx, id)?;
-    let rows = tx
-        .query("SELECT id, sha256, size, content_type, import_key, synthetic FROM objects WHERE job_id = $1 ORDER BY import_key", &[&id])?;
+    // Hash immutable bytes before locking the job, so renewal can continue.
+    let rows =
+        c.query("SELECT id, sha256, size, content_type, import_key, synthetic FROM objects WHERE job_id = $1 ORDER BY import_key", &[&id])?;
     for r in &rows {
         ctx.store.verify(&r.get::<_, String>(1), r.get::<_, i64>(2) as u64)?;
     }
@@ -373,6 +392,8 @@ fn commit_manifest(c: &mut Client, ctx: &Ctx, id: &str, fence: i64) -> Result<()
             })
         })
         .collect();
+    let mut tx = c.transaction()?;
+    db::load_job(&mut tx, id)?;
     tx.execute("INSERT INTO manifests (job_id, items) VALUES ($1, $2)", &[&id, &Value::Array(items.clone())])?;
     db::apply_event(&mut tx, id, &Event::ManifestCommitted { fence, items: items.len() }, ctx.cfg.lease_ms, 0)?;
     tx.commit()?;

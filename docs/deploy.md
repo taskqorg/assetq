@@ -20,6 +20,7 @@ Match the full `candidate.json` source SHA to the reviewed PR/CI revision and ob
 
 - Linux x86_64 with glibc at least the version recorded in `candidate.json`; inspect the candidate target before activation.
 - PostgreSQL 13 or newer reachable over a local socket, loopback or a separately protected tunnel. This build uses `NoTls`; it does not provide transport encryption. A dedicated role owns one dedicated database.
+- Allow two PostgreSQL connections per active executor (work and lease renewal), plus API and administration connections. Provider waits release the renewal connection with the executor lease.
 - A dedicated `assetq` Unix user that owns the data root, for example `/srv/assetq`. The data root needs room for the configured quota plus a safety margin.
 - A protected environment file (mode 0600, owned by root or `assetq`) with the variables below. Credentials never go into Git, arguments or telemetry.
 - The API binds to loopback. This task performs no DNS, HTTPS, firewall or live-host activation. The separate host task owns the approved canonical origin.

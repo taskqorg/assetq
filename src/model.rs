@@ -378,7 +378,7 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
             n.effect = EffectState::Done;
             n.outputs = Some(*outputs);
             set_usage(&mut n, *credits);
-            if s.cancel == CancelState::Requested {
+            if matches!(s.cancel, CancelState::Requested | CancelState::Uncertain) {
                 // Work finished before the cancel reached the provider.
                 n.phase = Phase::Cancelled;
                 n.cancel = CancelState::LocallyStopped;
@@ -459,7 +459,7 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
             }
         }
         Event::CancelConfirmed { op_id } => {
-            if s.cancel != CancelState::Requested || !op_matches(op_id) {
+            if !matches!(s.cancel, CancelState::Requested | CancelState::Uncertain) || !op_matches(op_id) {
                 return bad("no provider cancel outstanding");
             }
             n.cancel = CancelState::ProviderConfirmed;
@@ -478,11 +478,11 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
             n.lease = None;
         }
         Event::CancelUncertain { reason } => {
-            if s.cancel != CancelState::Requested {
+            if s.cancel != CancelState::Requested || s.effect != EffectState::Submitted {
                 return bad("cancel not requested");
             }
             n.cancel = CancelState::Uncertain;
-            n.phase = Phase::Cancelled;
+            n.phase = Phase::Waiting;
             n.lease = None;
             n.reason = Some(reason.clone());
             if n.usage_credits.is_none() {

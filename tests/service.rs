@@ -7,7 +7,7 @@
 
 use assetq::db::{self, Principal};
 use assetq::exec::{self, Ctx};
-use assetq::provider::FakeProvider;
+use assetq::provider::{FakeProvider, Output, Poll, Provider, Submit};
 use assetq::{Config, api};
 use postgres::Client;
 use serde_json::{Value, json};
@@ -295,6 +295,150 @@ fn partial_import_resumes_and_full_store_preserves_work() {
     drive(&mut c, &roomy, "eta", id3, phase("succeeded"));
 }
 
+// R6: blocking fetch/read must outlive a lease without starving import;
+// an actually expired lease must still refuse metadata and manifest commits.
+#[test]
+fn slow_import_renews_live_leases_without_reviving_expired_ones() {
+    struct SlowProvider {
+        fake: FakeProvider,
+        expire: Option<String>,
+    }
+    struct SlowRead {
+        inner: Box<dyn std::io::Read + Send>,
+        expire: Option<String>,
+        op: String,
+        first: bool,
+    }
+    impl std::io::Read for SlowRead {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.first {
+                self.first = false;
+                if let Some(url) = &self.expire {
+                    db::connect(url)
+                        .unwrap()
+                        .execute(
+                            "UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' WHERE state->>'op_id' = $1",
+                            &[&self.op],
+                        )
+                        .unwrap();
+                }
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            self.inner.read(buf)
+        }
+    }
+    impl Provider for SlowProvider {
+        fn name(&self) -> &str {
+            self.fake.name()
+        }
+        fn submit(&self, effect: &str, request: &Value) -> Submit {
+            self.fake.submit(effect, request)
+        }
+        fn lookup(&self, effect: &str) -> Result<Option<String>, String> {
+            self.fake.lookup(effect)
+        }
+        fn poll(&self, op: &str) -> Result<Poll, String> {
+            self.fake.poll(op)
+        }
+        fn cancel(&self, op: &str) -> Result<bool, String> {
+            self.fake.cancel(op)
+        }
+        fn fetch(&self, op: &str, index: usize) -> Result<Output, String> {
+            std::thread::sleep(Duration::from_millis(400));
+            let out = self.fake.fetch(op, index)?;
+            Ok(Output {
+                content_type: out.content_type,
+                reader: Box::new(SlowRead { inner: out.reader, expire: self.expire.clone(), op: op.into(), first: true }),
+            })
+        }
+    }
+    for expire in [false, true] {
+        let f = fixture();
+        let mut c = f.client();
+        let (p, _) = project(&mut c, "slow", 10, 1);
+        let mut ctx = f.ctx(1 << 30);
+        ctx.cfg.lease_ms = 250;
+        ctx.providers = vec![Arc::new(SlowProvider { fake: f.fake(), expire: expire.then(|| f.url.clone()) })];
+        let (j, _) = db::submit_job(&mut c, &p, &req("slow", json!({})), &limits(), FAKE).unwrap();
+        let id = j["id"].as_str().unwrap();
+        drive(&mut c, &ctx, &p.project, id, phase("active"));
+        exec::tick(&mut c, &ctx, "slow-importer").unwrap();
+        let j = db::get_job(&mut c, &p.project, id).unwrap();
+        if expire {
+            assert_eq!(j["phase"], "active");
+            let objects: i64 = c.query_one("SELECT count(*) FROM objects WHERE job_id = $1", &[&id]).unwrap().get(0);
+            assert_eq!(objects, 0, "an expired lease cannot commit imported metadata");
+            assert_eq!(db::job_result(&mut c, &p.project, id).unwrap()["status"], "incomplete");
+        } else {
+            assert_eq!(j["phase"], "succeeded", "fetch and stream each exceed the 250ms lease");
+            assert_eq!(j["attempts"], 2);
+            let result = db::job_result(&mut c, &p.project, id).unwrap();
+            let item = &result["manifest"]["items"][0];
+            ctx.store.verify(item["sha256"].as_str().unwrap(), item["size"].as_u64().unwrap()).unwrap();
+        }
+        assert_eq!(j["submissions"], 1);
+        assert_eq!(f.fake().submissions(), 1);
+        db::audit_job(&mut c, id).unwrap();
+    }
+}
+
+// R4/R7: an uncertain cancel is still external work, so a max-one project
+// cannot admit a replacement until the same operation is observed terminal.
+#[test]
+fn uncertain_cancellation_retains_capacity_until_terminal_observation() {
+    for outcome in ["done", "failed", "confirmed"] {
+        let f = fixture();
+        let ctx = f.ctx(1 << 30);
+        let mut c = f.client();
+        let (p, _) = project(&mut c, "bounded", 10, 1);
+        let (j, _) = db::submit_job(&mut c, &p, &req("first", json!({"fail": outcome == "failed"})), &limits(), FAKE).unwrap();
+        let id = j["id"].as_str().unwrap();
+        drive(&mut c, &ctx, &p.project, id, phase("waiting"));
+        f.fault("cancel_unconfirmed");
+        db::cancel_job(&mut c, &p.project, id).unwrap();
+        exec::tick(&mut c, &ctx, "cancel-observer").unwrap();
+        assert_eq!(db::get_job(&mut c, &p.project, id).unwrap()["cancel"], "uncertain");
+        let replacement = req("replacement", json!({}));
+        assert_eq!(db::submit_job(&mut c, &p, &replacement, &limits(), FAKE).unwrap_err().code, "concurrency_limit");
+        c.execute("UPDATE projects SET max_active_jobs = 2, budget_credits = 1 WHERE id = $1", &[&p.project]).unwrap();
+        assert_eq!(db::submit_job(&mut c, &p, &replacement, &limits(), FAKE).unwrap_err().code, "budget_exhausted");
+        c.execute("UPDATE projects SET max_active_jobs = 1, budget_credits = 10 WHERE id = $1", &[&p.project]).unwrap();
+        let j = db::get_job(&mut c, &p.project, id).unwrap();
+        assert_eq!(j["phase"], "waiting");
+        assert_eq!(j["leased"], false);
+        assert_eq!(j["usage"]["credits"], Value::Null);
+        let op = j["provider_operation"].clone();
+        // New context/session observes the persisted operation after restart.
+        let mut c = f.client();
+        if outcome == "confirmed" {
+            let mut tx = c.transaction().unwrap();
+            db::apply_event(
+                &mut tx,
+                id,
+                &assetq::model::Event::CancelConfirmed { op_id: op.as_str().unwrap().into() },
+                ctx.cfg.lease_ms,
+                0,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        } else {
+            exec::tick(&mut c, &f.ctx(1 << 30), "restarted-observer").unwrap();
+        }
+        let j = db::get_job(&mut c, &p.project, id).unwrap();
+        assert_eq!(j["phase"], if outcome == "failed" { "failed" } else { "cancelled" });
+        assert_eq!(j["provider_operation"], op);
+        assert_eq!(j["submissions"], 1);
+        if outcome == "done" {
+            assert_eq!(j["cancel"], "locally_stopped");
+            assert_eq!(j["usage"]["credits"], 1);
+        }
+        assert!(db::job_result(&mut c, &p.project, id).unwrap()["manifest"].is_null());
+        assert_eq!(f.fake().submissions(), 1);
+        assert!(db::submit_job(&mut c, &p, &replacement, &limits(), FAKE).unwrap().1);
+        db::audit_job(&mut c, id).unwrap();
+    }
+}
+
 #[test]
 fn cancellation_states_and_unknown_charges() {
     let f = fixture();
@@ -319,7 +463,7 @@ fn cancellation_states_and_unknown_charges() {
     let id = j["id"].as_str().unwrap();
     drive(&mut c, &ctx, "theta", id, phase("waiting"));
     db::cancel_job(&mut c, "theta", id).unwrap();
-    let job = drive(&mut c, &ctx, "theta", id, phase("cancelled"));
+    let job = drive(&mut c, &ctx, "theta", id, |j| j["cancel"] == "uncertain");
     assert_eq!(job["cancel"], "uncertain");
     assert_eq!(job["usage"]["credits"], Value::Null);
     assert!(job["usage"]["unknown_reason"].as_str().unwrap().starts_with("charge unknown"));
