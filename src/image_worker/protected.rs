@@ -5,8 +5,8 @@ use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::sync::mpsc;
 
-// PM-qualified signed Mac artifact from TaskQ e990d889; receipt: docs/evidence/4/taskq-adapter-candidate.md.
-pub const ADAPTER_SHA256: &str = "f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4";
+// Installed signed TaskQ 4.6.66 candidate for non-generating qualification; native proof remains open.
+pub const ADAPTER_SHA256: &str = "bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

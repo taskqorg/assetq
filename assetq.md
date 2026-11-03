@@ -70,7 +70,9 @@ Provide one bounded non-generating qualification command through the same protec
 
 An adapter refresh first qualifies an isolated build from reviewed immutable TaskQ source against the existing policy and host boundary. Record the final staged binary digest after signing. Only then review and compile that digest into AssetQ and repeat composed qualification. Preserve the prior adapter and receipts; no temporary trust override or grant edit is permitted.
 
-The qualified TaskQ adapter source is `e990d88943e95abd8d182d8157bfe84a94343a07`; its staged signed Mac artifact SHA-256 is `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4`. This pin qualifies the adapter only; AssetQ's composed consumer and current image capability remain separate gates.
+The selected installed TaskQ `4.6.66-261103-26` artifact is an explicit exception to that compilation order: pin its verified signed bytes solely for bounded non-generating qualification. Its SHA-256 is `bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42`. Native qualification remains required; installation, signature and policy parsing alone do not qualify launch.
+
+The prior qualified adapter source `e990d88943e95abd8d182d8157bfe84a94343a07` and digest `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4` remain historical evidence. Preserve its original binaries for recovery. The refreshed build accepts only the new digest; it cannot use the prior artifact as a fallback.
 
 Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot.
 
