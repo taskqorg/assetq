@@ -53,3 +53,7 @@ for line in sys.stdin:
     else:
         continue
     emit({"id": message["id"], "result": result})
+
+marker = Path(trace + ".eof.tmp")
+marker.write_text("invented transport EOF", encoding="utf-8")
+marker.rename(trace + ".eof")

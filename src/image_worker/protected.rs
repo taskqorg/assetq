@@ -20,6 +20,18 @@ pub(super) struct Launch {
     approver: String,
 }
 
+/// Both consumers must observe owned host cancellation before closing native stdin.
+pub(super) fn with_run<T>(
+    mut opened: Res<Run>,
+    work: impl FnOnce(&mut Run) -> Res<T>,
+    cleanup: impl FnOnce() -> Res<Value>,
+) -> (Res<T>, Res<Value>) {
+    let result = opened.as_mut().map_err(|e| e.clone()).and_then(work);
+    let cleanup = cleanup();
+    drop(opened);
+    (result, cleanup)
+}
+
 pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedAppServer, PathBuf)> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected Workspace adapter is qualified on Mac only; no Windows grant or fallback".into());
@@ -196,57 +208,59 @@ pub fn qualify(dir: &Path) -> Res<()> {
         let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
         let (server, home) = launch(&root, &dir, requirements)?;
         let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
-        let work = (|| -> Res<()> {
-            let mut run = server.open(None, &runtime_launch(&root, &home, until))?;
-            let messages = runtime_progress(runtime, &mut run, &mut log)?;
-            save(&dir.join("handshake.json"), &json!({"progress":messages}))?;
-            emit(&json!({"state":"initialized","image_tool":"unknown: no current native image-tool capability receipt"}))?;
-            let mut catalogue = None;
-            loop {
-                let frame = next_frame(&rx, until)?;
-                match frame["action"].as_str() {
-                    Some("cancel") => break,
-                    Some("verify") => {
-                        let receipt = observe(&dir, false)?;
-                        journal(&mut log, "authority-observation", &receipt)?;
-                        emit(&receipt)?;
-                    }
-                    Some("receive") => {
-                        let events = if let Some(id) = catalogue.take() {
-                            catalogue_progress(runtime, &mut run, &mut log, &id, until)?
-                        } else {
-                            runtime_progress(runtime, &mut run, &mut log)?
-                        };
-                        emit(&json!({"events":events}))?;
-                    }
-                    Some("request") => {
-                        let method = non_generating(&frame)?;
-                        if method == "account/read" {
-                            let account = runtime.account(&mut run).map_err(|e| e.to_string())?;
-                            emit(&json!({"login":format!("{:?}",account.login),"plan":account.plan}))?;
-                        } else {
-                            // Runtime owns the allowed catalogue reads; unsupported probes refuse before write.
-                            journal(&mut log, "runtime-intent", &frame)?;
-                            runtime.send(&mut run, &json!({"method":method,"params":frame["params"]}))?;
-                            let checkpoint = runtime.checkpoint(&run).map_err(|e| e.to_string())?;
-                            journal(&mut log, "runtime-checkpoint", &checkpoint)?;
-                            if method == "model/list" {
-                                // Observe the pinned Runtime's allocated ID; never allocate or override a native ID.
-                                let pending = &checkpoint["app"]["pending"];
-                                if pending[1] != method || !pending[0].is_u64() {
-                                    return Err("catalogue request identity unknown; no resend".into());
-                                }
-                                catalogue = Some(pending[0].clone());
-                            }
-                            emit(&json!({"state":"read-submitted"}))?;
+        let (work, cancelled) = with_run(
+            server.open(None, &runtime_launch(&root, &home, until)),
+            |run| {
+                let messages = runtime_progress(runtime, run, &mut log)?;
+                save(&dir.join("handshake.json"), &json!({"progress":messages}))?;
+                emit(&json!({"state":"initialized","image_tool":"unknown: no current native image-tool capability receipt"}))?;
+                let mut catalogue = None;
+                loop {
+                    let frame = next_frame(&rx, until)?;
+                    match frame["action"].as_str() {
+                        Some("cancel") => break,
+                        Some("verify") => {
+                            let receipt = observe(&dir, false)?;
+                            journal(&mut log, "authority-observation", &receipt)?;
+                            emit(&receipt)?;
                         }
+                        Some("receive") => {
+                            let events = if let Some(id) = catalogue.take() {
+                                catalogue_progress(runtime, run, &mut log, &id, until)?
+                            } else {
+                                runtime_progress(runtime, run, &mut log)?
+                            };
+                            emit(&json!({"events":events}))?;
+                        }
+                        Some("request") => {
+                            let method = non_generating(&frame)?;
+                            if method == "account/read" {
+                                let account = runtime.account(run).map_err(|e| e.to_string())?;
+                                emit(&json!({"login":format!("{:?}",account.login),"plan":account.plan}))?;
+                            } else {
+                                // Runtime owns the allowed catalogue reads; unsupported probes refuse before write.
+                                journal(&mut log, "runtime-intent", &frame)?;
+                                runtime.send(run, &json!({"method":method,"params":frame["params"]}))?;
+                                let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
+                                journal(&mut log, "runtime-checkpoint", &checkpoint)?;
+                                if method == "model/list" {
+                                    // Observe the pinned Runtime's allocated ID; never allocate or override a native ID.
+                                    let pending = &checkpoint["app"]["pending"];
+                                    if pending[1] != method || !pending[0].is_u64() {
+                                        return Err("catalogue request identity unknown; no resend".into());
+                                    }
+                                    catalogue = Some(pending[0].clone());
+                                }
+                                emit(&json!({"state":"read-submitted"}))?;
+                            }
+                        }
+                        _ => return Err("unknown qualification action".into()),
                     }
-                    _ => return Err("unknown qualification action".into()),
                 }
-            }
-            Ok(())
-        })();
-        let cancelled = observe(&dir, true);
+                Ok(())
+            },
+            || observe(&dir, true),
+        );
         let supervisor_exit = json!({"unknown":"Runtime owns transport; supervisor exit is not whole-operation completion"});
         save(
             &dir.join("cancel.json"),
@@ -269,6 +283,67 @@ pub fn qualify(dir: &Path) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // R3/R4/R6: dropping Run closes native stdin, so even a work error must keep
+    // the original transport until host cancellation can observe the live operation.
+    #[test]
+    fn image_worker_cancel_readback_precedes_native_eof() {
+        for outcome in ["success", "work-error", "cleanup-error"] {
+            let dir = std::env::temp_dir().join(format!("assetq-cleanup-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&dir).unwrap();
+            let trace = dir.join("wire.jsonl");
+            let eof = PathBuf::from(format!("{}.eof", trace.display()));
+            let mut launch = runtime_launch(&dir, &dir, Instant::now() + Duration::from_secs(10));
+            launch.install = Some(dir.join("absent-optimizer"));
+            launch.command = vec![
+                if cfg!(windows) { "python" } else { "python3" }.into(),
+                "-u".into(),
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-runtime.py").into_os_string(),
+                trace.clone().into_os_string(),
+                "chatgpt".into(),
+                "openai".into(),
+                "wait".into(),
+            ];
+            let runtime = agent::runtime("codex").unwrap();
+            let (work, cleanup) = with_run(
+                runtime.launch(&launch),
+                |run| {
+                    assert_eq!(runtime.account(run).unwrap().login, Login::Subscription);
+                    if outcome == "work-error" { Err("invented work error".into()) } else { Ok(()) }
+                },
+                || {
+                    let until = Instant::now() + Duration::from_secs(1);
+                    while Instant::now() < until {
+                        if eof.exists() {
+                            return Err("native EOF before cancel readback".into());
+                        }
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    if outcome == "cleanup-error" {
+                        Err("invented cancellation unknown".into())
+                    } else {
+                        Ok(json!({"state":"cancel-requested"}))
+                    }
+                },
+            );
+            let until = Instant::now() + Duration::from_secs(3);
+            while !eof.exists() && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(eof.exists(), "owned fixture input did not close after cleanup");
+            fs::remove_dir_all(&dir).unwrap();
+            assert_eq!(work.is_err(), outcome == "work-error");
+            if outcome == "cleanup-error" {
+                assert_eq!(cleanup.unwrap_err(), "invented cancellation unknown");
+            } else {
+                assert_eq!(cleanup.unwrap()["state"], "cancel-requested");
+            }
+        }
+        let (work, cleanup) =
+            with_run::<()>(Err("invented open failure".into()), |_| panic!("failed open ran work"), || Ok(json!("cleanup attempted")));
+        assert_eq!(work.unwrap_err(), "invented open failure");
+        assert_eq!(cleanup.unwrap(), json!("cleanup attempted"));
+    }
 
     // R3/R4/R8: delayed catalogue replies need a matching ID; notifications, foreign
     // replies and empty reads cannot complete qualification or authorize a resend.

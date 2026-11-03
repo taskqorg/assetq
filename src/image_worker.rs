@@ -367,55 +367,57 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
     let launch = runtime_launch(cfg.image_worker_root.as_deref().unwrap(), &home, deadline);
     // Empty launch input: subscription and inherited provider are checked before Runtime::input.
-    let observed = (|| -> Res<Value> {
-        let mut run = server.open(None, &launch)?;
-        if let Some(refusal) = runtime_start(runtime, &mut run, dir, &mut log, &input)? {
-            return Ok(refusal);
-        }
-        let mut interrupt_at = None;
-        loop {
-            runtime.poll(&mut run)?;
-            runtime_progress(runtime, &mut run, &mut log)?;
-            if let Ok(report) = runtime.report(&run) {
-                let checkpoint = runtime.checkpoint(&run).map_err(|e| e.to_string())?;
-                let turn = checkpoint["app"]["turn"].as_str();
-                let mut result = agentq_runtime::cli::report_json(&report);
-                result["optimization"] = opt.json();
-                result["thread"] = json!(runtime.session_id(&run));
-                result["turn"] = json!(turn);
-                if report.outcome == "cancelled" {
-                    result["status"] = json!("cancelled");
-                    return Ok(result);
+    let (observed, cleanup) = protected::with_run(
+        server.open(None, &launch),
+        |run| {
+            if let Some(refusal) = runtime_start(runtime, run, dir, &mut log, &input)? {
+                return Ok(refusal);
+            }
+            let mut interrupt_at = None;
+            loop {
+                runtime.poll(run)?;
+                runtime_progress(runtime, run, &mut log)?;
+                if let Ok(report) = runtime.report(run) {
+                    let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
+                    let turn = checkpoint["app"]["turn"].as_str();
+                    let mut result = agentq_runtime::cli::report_json(&report);
+                    result["optimization"] = opt.json();
+                    result["thread"] = json!(runtime.session_id(run));
+                    result["turn"] = json!(turn);
+                    if report.outcome == "cancelled" {
+                        result["status"] = json!("cancelled");
+                        return Ok(result);
+                    }
+                    if report.outcome != "ok" {
+                        result["status"] = json!("failed");
+                        result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
+                        return Ok(result);
+                    }
+                    let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
+                        result["status"] = json!("refused");
+                        result["reason"] = json!(
+                            "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
+                        );
+                        return Ok(result);
+                    };
+                    return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
                 }
-                if report.outcome != "ok" {
-                    result["status"] = json!("failed");
-                    result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
-                    return Ok(result);
+                if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
+                    journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
+                    runtime.cancel(run)?;
+                    interrupt_at = Some(Instant::now());
                 }
-                let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
-                    result["status"] = json!("refused");
-                    result["reason"] = json!(
-                        "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
-                    );
-                    return Ok(result);
-                };
-                return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
+                if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
+                    return Err("native interrupt unconfirmed; original operation retained; no replay".into());
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
-            if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
-                journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
-                runtime.cancel(&mut run)?;
-                interrupt_at = Some(Instant::now());
-            }
-            if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
-                return Err("native interrupt unconfirmed; original operation retained; no replay".into());
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    })();
+        },
+        || protected::observe(dir, true),
+    );
     // Runtime owns the transport. Exact host cancellation remains observation-only;
     // neither its receipt nor a turn report establishes whole-operation completion.
-    let cleanup = protected::observe(dir, true)
-        .and_then(|_| Err("supervisor exit unobserved through Runtime; native completion remains unknown".into()));
+    let cleanup = cleanup.and_then(|_| Err("supervisor exit unobserved through Runtime; native completion remains unknown".into()));
     finish_native_observation(dir, observed, cleanup)
 }
 

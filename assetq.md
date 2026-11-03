@@ -24,6 +24,8 @@ Cancellation distinguishes requested, provider-confirmed, locally stopped and un
 
 A protected worker's supervisor exit proves only transport termination. Without verified original-operation native and descendant completion, retain turn observations as evidence, keep completion unknown and preserve capacity reservations.
 
+Keep the Runtime transport alive until the original host cancellation readback finishes, including after work errors. Opening or cancellation failures remain unknown; cancellation acknowledgment alone never confirms descendant completion or releases capacity.
+
 The first implementation supports a registered bounded sequence of steps, including external waiting and local validation. It does not require a general workflow editor. Executors can run on qualified hosts distinct from the storage/control host.
 
 ## Web management and API

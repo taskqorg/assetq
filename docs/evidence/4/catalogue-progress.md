@@ -20,6 +20,8 @@ Command: `cargo test --locked --lib image_worker_qualification_waits_for_catalog
 
 ## Native follow-up
 
+The subsequent `1f0f2e7` native attempt's first stdout event batch does contain the matching catalogue response: eight models, followed by an empty later batch. The [fresh readback and cancellation correction](cancel-readback.md) distinguish that delivered response from the initial PM summary. The catalogue wait was not changed again on the basis of that summary.
+
 PM must reserve a new slot for the refreshed exact consumer and use the retained adapter bytes and independent pre-launch preparation in the [existing recipe](protected-consumer.md). No old operation, receipt-derived authority, grant change, role bypass, paid API or crate replay is authorized. The worker cannot reserve or control an external app server through its current host role.
 
 The previous initialize/verify/account observations do not qualify the corrected candidate. Native catalogue delivery, current image-tool/output path and durable runner-bound slot/completion integration remain open. The owner-accepted crate and its original provenance are untouched; task #4 is incomplete.
