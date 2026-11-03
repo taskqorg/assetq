@@ -20,7 +20,7 @@ A method version declares a bounded step list (at most 16) from `synthetic.gener
 
 Executors claim fenced work with `FOR UPDATE SKIP LOCKED`. A submission persists dispatch intent and the effect row, calls the provider, records the receipt, and releases the lease. Waiting jobs hold no executor capacity; pollers reconcile, poll and cancel provider operations through the same idempotent events that a webhook would use. On restart, expired leases are reclaimed and waiting operations continue from their stored IDs. No step needs the originating chat.
 
-`synthetic.fake@1` is the only enabled method. Its provider keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers to refuse delayed stale submissions, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@1` and `model.meshy-prop.v1@1` are registered as disabled; a request for them is refused.
+`synthetic.fake@1` is the only enabled method. Its provider keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers to refuse delayed stale submissions, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@1` (`agentq.image`, capability `image_generation`) and `model.meshy-prop.v1@1` are registered as disabled; a request for them is refused. Startup migration rewrites a built-in row from an earlier seed only when it is disabled and no job or recommendation references it.
 
 ## API
 
