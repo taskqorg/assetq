@@ -28,6 +28,8 @@ Commands: `cargo test --locked --lib image_worker`, `python3 scripts/check.py --
 
 ## Acceptance still open
 
+The [Mac preflight](mac-runtime-v020.md) records the exact candidate's successful build and the installed host's external-slot worker refusal. It does not claim account/progress, current image-tool or slot-completion receipts.
+
 A1/A2 have the published runtime and consumer migration, but runner-bound slot acquisition, protected preparation/reconciliation and current-source native qualification remain incomplete. A3/current image-tool availability and original artifact path remain unknown. A4 retains explicit refusal on both generation entry points; there is no direct paid API or alternate-worker fallback.
 
 A5 preserves original asset `2c887345-9f66-491f-8a0c-81d81cf0c4af` and SHA-256 `fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa`; the accepted crate was not accessed, regenerated or replayed in this continuation. Its prior native bitmap and managed-import receipts remain separate from the new runtime's qualification.
