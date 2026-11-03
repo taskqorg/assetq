@@ -27,6 +27,7 @@ impl Ctx {
         }
         if let Some(root) = &cfg.image_worker_root {
             providers.push(Arc::new(crate::image_worker::ImageWorker::new(cfg.clone(), root.clone())?));
+            providers.push(Arc::new(crate::image_worker::ImageWorker::legacy(cfg.clone(), root.clone())?));
         }
         Ok(Ctx { cfg, store, providers })
     }

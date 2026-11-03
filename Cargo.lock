@@ -10,10 +10,11 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentq-runtime"
-version = "0.1.0"
-source = "git+https://github.com/taskqorg/agentq?rev=8427bba6145aac0239cd16a8dae0caf8efa00695#8427bba6145aac0239cd16a8dae0caf8efa00695"
+version = "0.2.0"
+source = "git+https://github.com/taskqorg/agentq?tag=runtime-v0.2.0#70f85434546bd1c303ccdb7b0dd71866421627e2"
 dependencies = [
  "coreq",
+ "libc",
  "ring",
  "serde_json",
 ]

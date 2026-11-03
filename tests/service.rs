@@ -89,6 +89,32 @@ fn limits() -> db::Limits {
     db::Limits { quota_bytes: 1 << 30 }
 }
 
+// R3/R5: the capability-named provider and retained legacy versions both reach
+// the same pre-launch refusal, without rewriting old method/provider identities.
+#[test]
+fn image_worker_provider_names_retain_versions_and_refuse_dispatch() {
+    let f = fixture();
+    let mut config = f.config(1 << 30);
+    config.image_worker_root = Some(f.dir.clone());
+    let ctx = Ctx::new(config).unwrap();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "worker-names", 1, 1);
+    for version in [2, 3, 4, 5] {
+        let mut request = req(&format!("version-{version}"), json!({}));
+        request["project"] = json!(p.project);
+        request["method"] = json!(format!("image.worker.v1@{version}"));
+        request["operation"] = json!("image.generate");
+        request["budget"]["max_credits"] = json!(0);
+        let (job, _) = db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap();
+        let id = job["id"].as_str().unwrap();
+        let done = drive(&mut c, &ctx, &p.project, id, phase("failed"));
+        assert!(done["reason"].as_str().unwrap().contains("capability_unavailable: protected project/profile grant"));
+        assert_eq!(db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap().0["id"], id);
+        db::audit_job(&mut c, id).unwrap();
+    }
+    assert_eq!(std::fs::read_dir(f.dir.join("data/tmp/image-worker")).unwrap().count(), 0);
+}
+
 // R4/R6/R7: an observation outage must remain visible and reserve capacity;
 // terminal interruption distinguishes an API cancel from a worker failure.
 #[test]
@@ -595,10 +621,11 @@ fn registry_recommendations_and_comparisons() {
     let owner_token = db::create_token(&mut c, "kappa", "owner").unwrap();
     let owner = db::authenticate(&mut c, &owner_token).unwrap();
     let methods = db::list_methods(&mut c, "kappa").unwrap();
-    assert_eq!(methods.as_array().unwrap().len(), 6);
+    assert_eq!(methods.as_array().unwrap().len(), 7);
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, assetq::image_worker::legacy_method());
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, assetq::image_worker::protected_method_v3());
-    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, assetq::image_worker::method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, assetq::image_worker::protected_method_v4());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@5").unwrap().2, assetq::image_worker::method());
     let mut spec = db::builtin_methods()[0].3.clone();
     spec["pipeline_revision"] = json!("2");
     let body = json!({"id": "synthetic.fake", "status": "experimental", "spec": spec});
@@ -671,7 +698,7 @@ fn registry_scope_and_expired_fences() {
     let body = json!({"id": "private-method", "spec": db::builtin_methods()[0].3});
     db::create_method_version(&mut c, &owner_a, &body).unwrap();
     assert!(db::resolve_method(&mut c, &b.project, "private-method@1").is_err());
-    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 6);
+    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 7);
     let rec = db::propose_recommendation(
         &mut c,
         &a,
@@ -1160,7 +1187,7 @@ fn service_restart_recovers_job_through_cli() {
     let audit = admin(&["audit", &id]);
     assert!(audit.contains("matches stored state"));
     let methods = cli(&f, &s, &token, &["methods"]);
-    assert_eq!(methods.as_array().unwrap().len(), 6);
+    assert_eq!(methods.as_array().unwrap().len(), 7);
     let rec = cli(&f, &s, &token, &["recommend", "prop image"]);
     assert_eq!(rec["recommended"], Value::Null);
     // A corrupted download is refused and leaves no output file.

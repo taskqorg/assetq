@@ -20,7 +20,7 @@ pub(super) struct Launch {
     approver: String,
 }
 
-pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedAppServer, Spec)> {
+pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedAppServer, PathBuf)> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected Workspace adapter is qualified on Mac only; no Windows grant or fallback".into());
     }
@@ -28,7 +28,7 @@ pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedA
     if launch.request["slot"]["binding"]["root"] != json!(root) {
         return Err("protected consumer project differs from slot; no native launch".into());
     }
-    let host = ProtectedHost::taskq(&launch.adapter, ADAPTER_SHA256)?;
+    let host = ProtectedHost::new(&launch.adapter, ADAPTER_SHA256)?;
     let expected = ProtectedIdentity {
         profile_sha256: launch.profile_sha256,
         executable: launch.executable,
@@ -36,8 +36,7 @@ pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedA
         account_home: launch.account_home,
         approver: launch.approver,
     };
-    let mut spec = super::spec(&root);
-    spec.home = Some(expected.account_home.clone());
+    let home = expected.account_home.clone();
     // Match requirements are retained for recovery, never accepted as a grant.
     let marker = OpenOptions::new()
         .create_new(true)
@@ -71,7 +70,7 @@ pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedA
             Err(error) => format!("{reason}; cancellation receipt persistence unknown: {error}"),
         });
     }
-    Ok((server, spec))
+    Ok((server, home))
 }
 
 /// Recovery uses the original operation; a dead consumer never authorizes replay/release.
@@ -84,7 +83,7 @@ pub fn observe(dir: &Path, cancel: bool) -> Res<Value> {
     if read_json(&dir.join("host-request.json"))? != control.request {
         return Err("protected recovery request differs from original operation".into());
     }
-    let host = ProtectedHost::taskq(&control.adapter, ADAPTER_SHA256)?;
+    let host = ProtectedHost::new(&control.adapter, ADAPTER_SHA256)?;
     let until = Instant::now() + Duration::from_secs(5);
     let receipt = if cancel { host.cancel(&control.request, until)? } else { host.observe(&control.request, until)? };
     save(&dir.join(if cancel { "recovery-cancel.json" } else { "recovery-observe.json" }), &receipt)?;
@@ -177,72 +176,44 @@ pub fn qualify(dir: &Path) -> Res<()> {
         let requirements: Launch = serde_json::from_value(control.clone()).map_err(|_| "invalid protected launch match requirements")?;
         save(&dir.join("control.json"), &control)?;
         let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-        let (mut server, spec) = launch(&root, &dir, requirements)?;
+        let (server, home) = launch(&root, &dir, requirements)?;
+        let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
         let work = (|| -> Res<()> {
-            let mut session = AppSession::new(&spec)?;
-            let init = session.initialize(
-                json!({"clientInfo":{"name":"assetq","version":env!("CARGO_PKG_VERSION")},"capabilities":{"experimentalApi":true}}),
-            )?;
-            let reply = exchange(&mut server, &mut session, &mut log, init, until.min(Instant::now() + Duration::from_secs(10)))?;
-            send(&mut server, &mut log, &session.initialized()?, until)?;
-            save(&dir.join("handshake.json"), &reply)?;
-            emit(&json!({"state":"initialized","reply":reply,"image_tool":"unknown: no current native image-tool capability receipt"}))?;
-            let mut probes = std::collections::HashSet::new();
+            let mut run = server.open(None, &runtime_launch(&root, &home, until))?;
+            let messages = runtime_progress(runtime, &mut run, &mut log)?;
+            save(&dir.join("handshake.json"), &json!({"progress":messages}))?;
+            emit(&json!({"state":"initialized","image_tool":"unknown: no current native image-tool capability receipt"}))?;
             loop {
                 let frame = next_frame(&rx, until)?;
                 match frame["action"].as_str() {
                     Some("cancel") => break,
                     Some("verify") => {
-                        let receipt = server.verify(until.min(Instant::now() + Duration::from_secs(5)))?;
-                        journal(&mut log, "authority", &receipt)?;
+                        let receipt = observe(&dir, false)?;
+                        journal(&mut log, "authority-observation", &receipt)?;
                         emit(&receipt)?;
                     }
                     Some("receive") => {
-                        let event = server.receive(until.min(Instant::now() + Duration::from_millis(200)))?;
-                        if let Some(ref event) = event {
-                            journal(&mut log, "received", event)?;
-                            session.observe(event)?;
-                        }
-                        emit(&json!({"event":event}))?;
+                        let events = runtime_progress(runtime, &mut run, &mut log)?;
+                        emit(&json!({"events":events}))?;
                     }
                     Some("request") => {
                         let method = non_generating(&frame)?;
-                        if method == "command/exec" {
-                            let id = format!("assetq-probe-{}", probes.len());
-                            if !probes.insert(frame["params"]["processId"].as_str().unwrap().to_owned()) {
-                                return Err("probe process identity already submitted; no replay".into());
-                            }
-                            // Keep the probe asynchronous so its exact native command can be interrupted.
-                            let message = json!({"id":id,"method":method,"params":frame["params"]});
-                            send(&mut server, &mut log, &message, until)?;
-                            emit(&json!({"state":"probe-submitted","request_id":id}))?;
-                            continue;
+                        if method == "account/read" {
+                            let account = runtime.account(&mut run).map_err(|e| e.to_string())?;
+                            emit(&json!({"login":format!("{:?}",account.login),"plan":account.plan}))?;
+                        } else {
+                            // Runtime owns the allowed catalogue reads; unsupported probes refuse before write.
+                            runtime.send(&mut run, &json!({"method":method,"params":frame["params"]}))?;
+                            emit(&json!({"state":"read-submitted"}))?;
                         }
-                        if method == "command/exec/terminate"
-                            && !frame["params"]["processId"].as_str().is_some_and(|id| probes.contains(id))
-                        {
-                            return Err("qualification can interrupt only its submitted probe identities".into());
-                        }
-                        let message = session.request(method, frame["params"].clone())?;
-                        let reply =
-                            exchange(&mut server, &mut session, &mut log, message, until.min(Instant::now() + Duration::from_secs(15)))?;
-                        emit(&reply)?;
                     }
                     _ => return Err("unknown qualification action".into()),
                 }
             }
             Ok(())
         })();
-        let cancelled = server.cancel(Instant::now() + Duration::from_secs(5));
-        let stopped_until = Instant::now() + Duration::from_secs(5);
-        let supervisor_exit = loop {
-            match server.poll() {
-                Ok(Some(exit)) => break json!({"exit_code":exit}),
-                Err(reason) => break json!({"unknown":reason}),
-                _ if Instant::now() >= stopped_until => break json!({"unknown":"supervisor exit not observed"}),
-                _ => std::thread::sleep(Duration::from_millis(50)),
-            }
-        };
+        let cancelled = observe(&dir, true);
+        let supervisor_exit = json!({"unknown":"Runtime owns transport; supervisor exit is not whole-operation completion"});
         save(
             &dir.join("cancel.json"),
             &json!({"receipt":cancelled.as_ref().ok(),"unknown":cancelled.as_ref().err(),"supervisor_exit":supervisor_exit,"slot_release":"not attempted; PM must reconcile all probe descendants"}),

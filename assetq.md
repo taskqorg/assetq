@@ -50,13 +50,13 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 ## Initial generation methods
 
-**Image worker (`image.worker.v1`).** A capable Codex worker receives text, attachments and output constraints through AgentQ and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
+**Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-New worker builds use `agentq-runtime` 0.1.0 at immutable revision `8427bba6145aac0239cd16a8dae0caf8efa00695`, published by AgentQ PR195. Its protected validator consumes the host's `authority.resolved.effective` without relaxing authority or process-identity checks.
+New worker builds use `agentq-runtime` 0.2.0, published as `runtime-v0.2.0` at immutable revision `70f85434546bd1c303ccdb7b0dd71866421627e2` by AgentQ PR218. Cargo.lock retains the resolved revision. The runtime owns structured text/image forwarding and read-only account identity; AssetQ verifies attachment ownership, hashes and PNG limits before `Runtime::input`, and requires subscription login through `Runtime::account` before any turn. No raw account request or credential refresh supplies an alternative path.
 
 Existing operation receipts retain their original runtime pin and remain observable without replay. The protected app-server path inherits the existing account, model, permissions and optional optimization.
 
-The corrected protected pipeline is method version 4; versions 2 and 3 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
+The structured runtime pipeline is method version 5; versions 2, 3 and 4 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
 
 New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
 
@@ -70,7 +70,7 @@ An adapter refresh first qualifies an isolated build from reviewed immutable Tas
 
 The qualified TaskQ adapter source is `e990d88943e95abd8d182d8157bfe84a94343a07`; its staged signed Mac artifact SHA-256 is `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4`. This pin qualifies the adapter only; AssetQ's composed consumer and current image capability remain separate gates.
 
-Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot.
+Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot. The runtime-trait qualification command exposes read-only account identity and catalogue progress; native probe methods unsupported by the selected runtime refuse explicitly. Historical boundary-probe receipts retain their exact original candidate.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
 
