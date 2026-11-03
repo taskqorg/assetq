@@ -78,6 +78,8 @@ Retain private launch intent, authority, native journal and cancellation/reconci
 
 The runtime-trait qualification command exposes read-only account identity and catalogue progress; native probe methods unsupported by the selected runtime refuse explicitly. Historical boundary-probe receipts retain their exact original candidate.
 
+Catalogue qualification retains the Runtime-assigned request ID and waits for its matching response for at most ten seconds within the session deadline. Notifications and an empty progress read do not complete it. A missing response stays unknown; never resend the original request to obtain evidence.
+
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
 
 Native terminal image-tool evidence, an allowed original artifact path and full PNG decoding are required before import. Preserve a bounded preview, dimensions, input identities, runtime/tool evidence and actual or explicitly unknown usage. Exact worker limits, capability refusal and recovery are specified in [image worker](docs/image-worker.md).

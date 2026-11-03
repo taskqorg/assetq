@@ -121,6 +121,24 @@ fn non_generating(frame: &Value) -> Res<&'static str> {
     }
 }
 
+fn catalogue_progress(runtime: &dyn Runtime, run: &mut Run, log: &mut File, id: &Value, until: Instant) -> Res<Vec<Value>> {
+    let until = until.min(Instant::now() + Duration::from_secs(10));
+    let mut events = vec![];
+    loop {
+        if Instant::now() >= until {
+            return Err("catalogue response unobserved before deadline; original request retained; no resend".into());
+        }
+        events.extend(runtime_progress(runtime, run, log)?);
+        if events
+            .iter()
+            .any(|m| m.get("id") == Some(id) && m.get("method").is_none() && (m.get("result").is_some() || m.get("error").is_some()))
+        {
+            return Ok(events);
+        }
+        std::thread::sleep(Duration::from_millis(20).min(until.saturating_duration_since(Instant::now())));
+    }
+}
+
 /// PM drives this one real consumer over private stdio; no development-board task
 /// is created for its native operation and no slot is released by this command.
 pub fn qualify(dir: &Path) -> Res<()> {
@@ -183,6 +201,7 @@ pub fn qualify(dir: &Path) -> Res<()> {
             let messages = runtime_progress(runtime, &mut run, &mut log)?;
             save(&dir.join("handshake.json"), &json!({"progress":messages}))?;
             emit(&json!({"state":"initialized","image_tool":"unknown: no current native image-tool capability receipt"}))?;
+            let mut catalogue = None;
             loop {
                 let frame = next_frame(&rx, until)?;
                 match frame["action"].as_str() {
@@ -193,7 +212,11 @@ pub fn qualify(dir: &Path) -> Res<()> {
                         emit(&receipt)?;
                     }
                     Some("receive") => {
-                        let events = runtime_progress(runtime, &mut run, &mut log)?;
+                        let events = if let Some(id) = catalogue.take() {
+                            catalogue_progress(runtime, &mut run, &mut log, &id, until)?
+                        } else {
+                            runtime_progress(runtime, &mut run, &mut log)?
+                        };
                         emit(&json!({"events":events}))?;
                     }
                     Some("request") => {
@@ -203,7 +226,18 @@ pub fn qualify(dir: &Path) -> Res<()> {
                             emit(&json!({"login":format!("{:?}",account.login),"plan":account.plan}))?;
                         } else {
                             // Runtime owns the allowed catalogue reads; unsupported probes refuse before write.
+                            journal(&mut log, "runtime-intent", &frame)?;
                             runtime.send(&mut run, &json!({"method":method,"params":frame["params"]}))?;
+                            let checkpoint = runtime.checkpoint(&run).map_err(|e| e.to_string())?;
+                            journal(&mut log, "runtime-checkpoint", &checkpoint)?;
+                            if method == "model/list" {
+                                // Observe the pinned Runtime's allocated ID; never allocate or override a native ID.
+                                let pending = &checkpoint["app"]["pending"];
+                                if pending[1] != method || !pending[0].is_u64() {
+                                    return Err("catalogue request identity unknown; no resend".into());
+                                }
+                                catalogue = Some(pending[0].clone());
+                            }
                             emit(&json!({"state":"read-submitted"}))?;
                         }
                     }
@@ -235,6 +269,66 @@ pub fn qualify(dir: &Path) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // R3/R4/R8: delayed catalogue replies need a matching ID; notifications, foreign
+    // replies and empty reads cannot complete qualification or authorize a resend.
+    #[test]
+    fn image_worker_qualification_waits_for_catalogue_response() {
+        for outcome in ["catalogue", "catalogue-empty", "catalogue-error", "catalogue-missing"] {
+            let dir = std::env::temp_dir().join(format!("assetq-catalogue-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&dir).unwrap();
+            let trace = dir.join("wire.jsonl");
+            let log_path = dir.join("native.jsonl");
+            let mut log = File::create(&log_path).unwrap();
+            let mut launch = runtime_launch(&dir, &dir, Instant::now() + Duration::from_secs(10));
+            launch.install = Some(dir.join("absent-optimizer"));
+            launch.command = vec![
+                if cfg!(windows) { "python" } else { "python3" }.into(),
+                "-u".into(),
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-runtime.py").into_os_string(),
+                trace.clone().into_os_string(),
+                "chatgpt".into(),
+                "openai".into(),
+                outcome.into(),
+            ];
+            let runtime = agent::runtime("codex").unwrap();
+            let mut run = runtime.launch(&launch).unwrap();
+            runtime_progress(runtime, &mut run, &mut log).unwrap();
+            runtime.send(&mut run, &json!({"method":"model/list","params":{}})).unwrap();
+            let id = runtime.checkpoint(&run).unwrap()["app"]["pending"][0].clone();
+            let release = format!("{}.release", trace.display());
+            let releaser = std::thread::spawn(move || {
+                let until = Instant::now() + Duration::from_secs(2);
+                while !fs::read_to_string(&log_path).unwrap().contains("fixture/catalogue-waiting") && Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                fs::write(release, b"invented release").unwrap();
+            });
+            let result = catalogue_progress(runtime, &mut run, &mut log, &id, Instant::now() + Duration::from_secs(3));
+            releaser.join().unwrap();
+            runtime.cancel(&mut run).unwrap();
+            let messages: Vec<Value> = fs::read_to_string(&trace).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+            assert_eq!(messages.iter().filter(|m| m["method"] == "model/list").count(), 1);
+            assert!(!messages.iter().any(|m| m["method"] == "turn/start"));
+            drop(log);
+            fs::remove_dir_all(&dir).unwrap();
+            if outcome == "catalogue-missing" {
+                assert!(result.unwrap_err().contains("catalogue response unobserved"));
+            } else {
+                let events = result.unwrap();
+                let reply =
+                    events.iter().find(|m| m["id"] == id && m.get("method").is_none()).expect("matching catalogue response missing");
+                assert!(events.iter().any(|m| m["method"] == "fixture/catalogue-waiting"));
+                if outcome == "catalogue-error" {
+                    assert!(reply.get("error").is_some());
+                } else if outcome == "catalogue-empty" {
+                    assert_eq!(reply["result"]["data"], json!([]));
+                } else {
+                    assert_eq!(reply["result"]["data"][0]["id"], "invented-inherited-model");
+                }
+            }
+        }
+    }
     // R3/R4: qualification cannot become a model turn, config write or unbounded command.
     #[test]
     fn image_worker_qualification_refuses_generation_and_unbounded_probes() {

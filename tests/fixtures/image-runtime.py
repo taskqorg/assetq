@@ -1,6 +1,8 @@
 """Invented native protocol fixture: no credentials, image tool or provider effects."""
 import json
 import sys
+import time
+from pathlib import Path
 
 trace, login, provider, outcome = sys.argv[1:5]
 
@@ -26,6 +28,20 @@ for line in sys.stdin:
                   "model": "invented-inherited-model"}
     elif method == "account/read":
         result = {"account": None if login == "none" else {"type": login}}
+    elif method == "model/list":
+        emit({"id": message["id"] + 99, "result": {"data": ["invented-unrelated"]}})
+        emit({"method": "fixture/catalogue-waiting", "params": {}})
+        until = time.monotonic() + 5
+        while not Path(trace + ".release").exists():
+            if time.monotonic() >= until:
+                sys.exit("invented catalogue release missing")
+            time.sleep(.005)
+        if outcome == "catalogue-missing":
+            continue
+        if outcome == "catalogue-error":
+            emit({"id": message["id"], "error": {"code": -32603, "message": "invented catalogue refusal"}})
+            continue
+        result = {"data": [] if outcome == "catalogue-empty" else [{"id": "invented-inherited-model"}], "nextCursor": None}
     elif method == "turn/start":
         # Terminal-before-ack is deliberate: consumer must preserve runtime progress.
         if outcome == "complete":
