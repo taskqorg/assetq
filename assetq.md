@@ -72,15 +72,29 @@ Provide one bounded non-generating qualification command through the same protec
 
 An adapter refresh first qualifies an isolated build from reviewed immutable TaskQ source against the existing policy and host boundary. Record the final staged binary digest after signing. Only then review and compile that digest into AssetQ and repeat composed qualification. Preserve the prior adapter and receipts; no temporary trust override or grant edit is permitted.
 
-The selected installed TaskQ `4.6.66-261103-26` artifact is an explicit exception to that compilation order: pin its verified signed bytes solely for bounded non-generating qualification. Its SHA-256 is `bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42`. Native qualification remains required; installation, signature and policy parsing alone do not qualify launch.
+The selected installed TaskQ `4.6.66-261103-26` artifact is an explicit exception to that compilation order: pin its verified signed bytes for bounded non-generating qualification and the single image qualification below. Its SHA-256 is `bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42`.
+
+Native qualification remains required; installation, signature and policy parsing alone do not qualify launch.
 
 The prior qualified adapter source `e990d88943e95abd8d182d8157bfe84a94343a07` and digest `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4` remain historical evidence. Preserve its original binaries for recovery. The refreshed build accepts only the new digest; it cannot use the prior artifact as a fallback.
 
-Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. Qualification cannot start a model turn or release an uncertain slot.
+Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. The non-generating qualification command cannot start a model turn. No qualification may release an uncertain slot.
 
 The runtime-trait qualification command exposes read-only account identity and catalogue progress; native probe methods unsupported by the selected runtime refuse explicitly. Historical boundary-probe receipts retain their exact original candidate.
 
 Catalogue qualification retains the Runtime-assigned request ID and waits for its matching response for at most ten seconds within the session deadline. Notifications and an empty progress read do not complete it. A missing response stays unknown; never resend the original request to obtain evidence.
+
+One isolated local durable-API qualification job may generate an original stylized blue wooden wedge, with one verified invented blue-swatch attachment, one PNG requested within 1024 by 1024 pixels and zero paid-API credits. An operator-only command binds the exact already accepted job ID before dispatch; API requests and environment strings cannot enable this path.
+
+General dispatch remains refused. Preserve the accepted crate and its initial 3D-input identity; never replay it.
+
+The qualification runner acquires its own existing-host slot for its actual incarnation, persists its independent AgentQ preparation before launch, and submits at most one Runtime input. It inherits subscription, model, effort and optional optimization without edits.
+
+One concurrent job has at most 600 seconds generating plus 30 seconds observing interruption, a 64 MiB original PNG and 32 MiB native journal under existing resource guards. Report unreported usage/charge as unknown; no direct paid API, replacement submission, new grants, ordinary configuration change or deployment is authorized.
+
+The runner retains Runtime through cancellation, then uses AgentQ original-operation reconciliation before terminal publication and slot release. A restart observes retained preparation/turn receipts without relaunch; missing terminal or descendant evidence preserves unknown and reservations. The executable job model remains the lifecycle owner.
+
+Qualification requires duplicate-request, control-service interruption, original-tool/path, immutable import and authenticated retrieval evidence; a missing tool refuses precisely.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
 

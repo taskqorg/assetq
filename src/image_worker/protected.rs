@@ -1,11 +1,11 @@
 //! R3/R4: one protected consumer path, including non-generating qualification.
 use super::*;
-use agentq_runtime::agent::{ProtectedAppServer, ProtectedHost, ProtectedIdentity};
+use agentq_runtime::agent::{ProtectedAppServer, ProtectedHost, ProtectedIdentity, ProtectedPreparation};
 use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::sync::mpsc;
 
-// Installed signed TaskQ 4.6.66 candidate for non-generating qualification; native proof remains open.
+// Pinned signed TaskQ 4.6.66; bounded image qualification is separate from general dispatch.
 pub const ADAPTER_SHA256: &str = "bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42";
 
 #[derive(Deserialize)]
@@ -83,6 +83,177 @@ pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedA
         });
     }
     Ok((server, home))
+}
+
+pub(super) fn check_adapter(adapter: &Path) -> Res<()> {
+    ProtectedHost::new(adapter, ADAPTER_SHA256).map(|_| ())
+}
+
+fn slot_read(adapter: &Path, args: &[&str]) -> Res<Value> {
+    check_adapter(adapter)?;
+    let mut command = Command::new(adapter);
+    command.args(["service", "slots"]).args(args).arg("--json");
+    let output = coreq::process::output("assetq.image.slot", &mut command, Duration::from_secs(5))
+        .map_err(|e| format!("original slot readback unknown: {}; retain operation", e.class()))?;
+    serde_json::from_slice(&output.stdout).map_err(|_| "original slot readback invalid; retain operation".into())
+}
+
+fn slot_exchange(adapter: &Path, dir: &Path, action: &str, until: Instant) -> Res<Value> {
+    slot_exchange_with(dir, action, until, |action, slot| slot_read(adapter, &["--action", action, "--request", &slot.to_string()]))
+}
+
+fn slot_exchange_with(dir: &Path, action: &str, until: Instant, mut read: impl FnMut(&str, &Value) -> Res<Value>) -> Res<Value> {
+    let slot = read_json(&dir.join("slot-request.json"))?;
+    let mut action = action;
+    loop {
+        let receipt = read(action, &slot)?;
+        save(&dir.join(format!("slot-{action}.json")), &receipt)?;
+        if receipt["schema"] != "taskq.slots/1"
+            || receipt["caller"] != slot["binding"]["caller"]
+            || receipt["op_id"] != slot["binding"]["op_id"]
+        {
+            return Err("original slot receipt identity differs; retain operation".into());
+        }
+        let desired = if dir.join("slot-release-intent").exists() { "released" } else { "reserved" };
+        if receipt["state"] == desired && receipt["occupied"] == (desired == "reserved") {
+            return Ok(receipt);
+        }
+        if !matches!(receipt["state"].as_str(), Some("queued" | "busy" | "unknown" | "releasing" | "cancelling")) || Instant::now() >= until
+        {
+            return Err("original slot admission/release unconfirmed; retain operation; no new slot".into());
+        }
+        action = "observe";
+        std::thread::sleep(Duration::from_millis(250).min(until.saturating_duration_since(Instant::now())));
+    }
+}
+
+pub(super) fn prepare_launch(root: &Path, dir: &Path, op: &str, adapter: &Path) -> Res<(ProtectedAppServer, PathBuf)> {
+    let host = ProtectedHost::new(adapter, ADAPTER_SHA256)?;
+    let owner = coreq::process::identity(std::process::id()).map_err(|_| "runner identity unknown")?.ok_or("runner absent")?;
+    save(&dir.join("runner.json"), &json!({"pid":owner.pid,"started":owner.started}))?;
+    let identity = slot_read(adapter, &["--identity", &owner.pid.to_string()])?;
+    if identity["schema"] != "taskq.slots/1"
+        || identity["pid"] != owner.pid
+        || identity["started"] != owner.started
+        || identity["boot"].as_i64().is_none_or(|n| n <= 0)
+    {
+        return Err("runner slot incarnation unknown; no reservation".into());
+    }
+    let root = root.canonicalize().map_err(|_| "qualification project unavailable")?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| "slot clock unknown")?.as_secs();
+    let slot = json!({"binding":{"schema":"taskq.slots/1","caller":"assetq-image-qualification","op_id":op,"root":root,"runtime":"codex",
+        "pid":owner.pid,"started":owner.started,"boot":identity["boot"],"expires_at":at+120},
+        "key":format!("{}{}",uuid::Uuid::new_v4().simple(),uuid::Uuid::new_v4().simple())});
+    seal(&dir.join("slot-request.json"), &slot)?;
+    slot_exchange(adapter, dir, "reserve", Instant::now() + Duration::from_secs(60))?;
+    let preparation = host.prepare(&slot, Instant::now() + Duration::from_secs(5))?;
+    save(&dir.join("preparation.json"), &preparation.checkpoint())?;
+    save(&dir.join("host-request.json"), preparation.request())?;
+    // Prepared authority is resolved by the pinned host before launch, never copied from an operation observation.
+    let home = PathBuf::from(
+        preparation.checkpoint()["receipt"]["prepared"]["authority"]["account_home"].as_str().ok_or("prepared account home unknown")?,
+    );
+    let marker = private_file(&dir.join("protected-launch")).map_err(|_| "protected launch already attempted; no replay")?;
+    marker.sync_all().map_err(|e| e.to_string())?;
+    sync_spool(dir)?;
+    let mut server = host.launch_prepared(&preparation, Intent::Inherit, Path::new("/dev/null"))?;
+    let until = Instant::now() + Duration::from_secs(10);
+    let verified = loop {
+        match server.verify(until) {
+            Ok(receipt) => break Ok(receipt),
+            Err(_) if Instant::now() < until => std::thread::sleep(Duration::from_millis(50)),
+            Err(reason) => break Err(reason),
+        }
+    };
+    match verified {
+        Ok(receipt) => {
+            if let Err(error) = save(&dir.join("authority.json"), &receipt) {
+                let _ = cancel_prepared(dir);
+                return Err(error);
+            }
+        }
+        Err(error) => {
+            let _ = cancel_prepared(dir);
+            return Err(error);
+        }
+    }
+    Ok((server, home))
+}
+
+fn prepared(dir: &Path) -> Res<(ProtectedHost, ProtectedPreparation)> {
+    let scope = read_json(&dir.join("qualification.json"))?;
+    let adapter = Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?);
+    let host = ProtectedHost::new(adapter, ADAPTER_SHA256)?;
+    let preparation = host.recover_preparation(&read_json(&dir.join("preparation.json"))?)?;
+    if *preparation.request() != read_json(&dir.join("host-request.json"))?
+        || preparation.request()["slot"] != read_json(&dir.join("slot-request.json"))?
+    {
+        return Err("original preparation/request/slot mismatch; no replay or release".into());
+    }
+    Ok((host, preparation))
+}
+
+pub(super) fn cancel_prepared(dir: &Path) -> Res<Value> {
+    let (host, preparation) = prepared(dir)?;
+    let receipt = host.cancel(preparation.request(), Instant::now() + Duration::from_secs(5))?;
+    save(&dir.join("host-cancel.json"), &receipt)?;
+    Ok(receipt)
+}
+
+pub(super) fn release_unlaunched(dir: &Path) -> Res<()> {
+    if dir.join("protected-launch").exists() {
+        return Err("launch may have occurred; reconcile original preparation".into());
+    }
+    seal(&dir.join("slot-release-intent"), &json!(true))?;
+    let scope = read_json(&dir.join("qualification.json"))?;
+    slot_exchange(
+        Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?),
+        dir,
+        "release",
+        Instant::now() + Duration::from_secs(10),
+    )?;
+    Ok(())
+}
+
+pub(super) fn reconcile_release(dir: &Path) -> Res<()> {
+    let (host, preparation) = prepared(dir)?;
+    reconcile_then_release(
+        dir,
+        Instant::now() + Duration::from_secs(15),
+        |until| host.reconcile(&preparation, until),
+        || {
+            let scope = read_json(&dir.join("qualification.json"))?;
+            slot_exchange(
+                Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?),
+                dir,
+                "release",
+                Instant::now() + Duration::from_secs(10),
+            )?;
+            Ok(())
+        },
+    )
+}
+
+fn reconcile_then_release(
+    dir: &Path,
+    until: Instant,
+    mut reconcile: impl FnMut(Instant) -> Res<Value>,
+    release: impl FnOnce() -> Res<()>,
+) -> Res<()> {
+    loop {
+        // The callback is AgentQ's certificate-validating reconcile, never raw host output.
+        let receipt = reconcile(until)?;
+        save(&dir.join("reconciliation.json"), &receipt)?;
+        if receipt["state"] == "completed" {
+            break;
+        }
+        if Instant::now() >= until {
+            return Err("protected native/descendant completion unknown; retain original slot".into());
+        }
+        std::thread::sleep(Duration::from_millis(250).min(until.saturating_duration_since(Instant::now())));
+    }
+    seal(&dir.join("slot-release-intent"), &json!(true))?;
+    release()
 }
 
 /// Recovery uses the original operation; a dead consumer never authorizes replay/release.
@@ -283,6 +454,79 @@ pub fn qualify(dir: &Path) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // R3/R4/R7: one reservation request, then same-binding observation; no launch
+    // from unknown/mismatched occupancy and no release before AgentQ completion.
+    #[test]
+    fn image_worker_slot_and_completion_order_preserve_original_operation() {
+        let dir = std::env::temp_dir().join(format!("aq-slot-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let slot = json!({"binding":{"caller":"invented","op_id":"invented-op"},"key":"invented-private-key"});
+        save(&dir.join("slot-request.json"), &slot).unwrap();
+        let receipt = |state: &str, occupied: bool| json!({"schema":"taskq.slots/1","caller":"invented","op_id":"invented-op","state":state,"occupied":occupied});
+        let mut calls = vec![];
+        slot_exchange_with(&dir, "reserve", Instant::now() + Duration::from_secs(1), |action, request| {
+            assert_eq!(*request, slot);
+            calls.push(action.to_string());
+            Ok(if calls.len() == 1 { receipt("queued", false) } else { receipt("reserved", true) })
+        })
+        .unwrap();
+        assert_eq!(calls, ["reserve", "observe"]);
+        for value in [
+            receipt("unknown", true),
+            receipt("reserved", false),
+            json!({"schema":"taskq.slots/1","caller":"foreign","op_id":"invented-op","state":"reserved","occupied":true}),
+        ] {
+            assert!(slot_exchange_with(&dir, "reserve", Instant::now(), |_, _| Ok(value.clone())).is_err());
+        }
+        let released = std::cell::Cell::new(false);
+        assert!(
+            reconcile_then_release(
+                &dir,
+                Instant::now(),
+                |_| Ok(json!({"state":"unknown"})),
+                || {
+                    released.set(true);
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert!(!released.get());
+        assert!(!dir.join("slot-release-intent").exists());
+        assert!(
+            reconcile_then_release(
+                &dir,
+                Instant::now(),
+                |_| Err("certificate mismatched".into()),
+                || {
+                    released.set(true);
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert!(!released.get());
+        reconcile_then_release(
+            &dir,
+            Instant::now(),
+            |_| Ok(json!({"state":"completed"})),
+            || {
+                released.set(true);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(released.get());
+        assert!(dir.join("slot-release-intent").exists());
+        slot_exchange_with(&dir, "release", Instant::now(), |action, request| {
+            assert_eq!(action, "release");
+            assert_eq!(*request, slot);
+            Ok(receipt("released", false))
+        })
+        .unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     // R3/R4/R6: dropping Run closes native stdin, so even a work error must keep
     // the original transport until host cancellation can observe the live operation.

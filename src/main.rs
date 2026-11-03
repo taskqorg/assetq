@@ -13,6 +13,7 @@ const USAGE: &str = "assetq <command>
 Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   serve [--listen 127.0.0.1:8740] [--http-threads 8]   API plus embedded executors
   work                                                 executors only (separate host)
+  image-serve <accepted-job-id> <pinned-adapter>         isolated one-job qualification; loopback API
   migrate                                              apply schema and built-in methods
   project <id> [--budget N] [--max-active N]           create or update a project
   token <project> [--role member|owner]                create a grant; prints it once
@@ -68,8 +69,12 @@ fn run(args: &[String]) -> Result<(), String> {
             print(&assetq::image_worker::protected::observe(std::path::Path::new(&pos(rest, 0)?), rest.iter().any(|s| s == "--cancel"))?);
             Ok(())
         }
+        "image-turn" if rest.len() == 3 => {
+            assetq::image_worker::run_job(Config::from_env()?, &pos(rest, 0)?, &pos(rest, 1)?, std::path::Path::new(&pos(rest, 2)?))
+        }
         "image-turn" => assetq::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
-        "serve" => serve(rest),
+        "image-serve" => serve(rest, true),
+        "serve" => serve(rest, false),
         "work" => {
             let ctx = Arc::new(exec::Ctx::new(Config::from_env()?).map_err(|e| e.to_string())?);
             check_schema(&ctx.cfg)?;
@@ -147,12 +152,32 @@ fn spawn_executors(ctx: &Arc<exec::Ctx>) -> Vec<std::thread::JoinHandle<()>> {
         .collect()
 }
 
-fn serve(rest: &[String]) -> Result<(), String> {
+fn serve(rest: &[String], qualification: bool) -> Result<(), String> {
     let cfg = Config::from_env()?;
     check_schema(&cfg)?;
-    let listen = opt(rest, "--listen").unwrap_or("127.0.0.1:8740".into());
+    let listen = opt(rest, "--listen").unwrap_or(if qualification { "127.0.0.1:0" } else { "127.0.0.1:8740" }.into());
     let threads: usize = opt(rest, "--http-threads").unwrap_or("8".into()).parse().map_err(|_| "--http-threads must be an integer")?;
-    let ctx = Arc::new(exec::Ctx::new(cfg).map_err(|e| e.to_string())?);
+    let mut ctx = exec::Ctx::new(cfg).map_err(|e| e.to_string())?;
+    if qualification {
+        if rest.len() != 2
+            || ctx.cfg.executors != 1
+            || ctx.cfg.max_execution_ms > 600_000
+            || !listen.starts_with("127.0.0.1:")
+            || ctx.cfg.fake_provider_dir.is_some()
+        {
+            return Err("image-serve requires one executor, <=600000 ms, loopback and no synthetic provider".into());
+        }
+        let root = ctx.cfg.image_worker_root.clone().ok_or("image worker root required")?;
+        let provider = assetq::image_worker::ImageWorker::qualification_job(
+            ctx.cfg.clone(),
+            root,
+            &pos(rest, 0)?,
+            std::path::Path::new(&pos(rest, 1)?),
+        )?;
+        ctx.providers.retain(|p| p.name() != assetq::image_worker::PROVIDER);
+        ctx.providers.push(Arc::new(provider));
+    }
+    let ctx = Arc::new(ctx);
     let server = Arc::new(assetq::api::bind(&listen).map_err(|e| format!("bind {listen}: {e}"))?);
     let addr = server.server_addr().to_ip().map(|a| a.to_string()).unwrap_or(listen);
     let mut handles = assetq::api::serve(ctx.clone(), server, threads);

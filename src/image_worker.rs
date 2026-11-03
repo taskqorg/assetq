@@ -71,6 +71,7 @@ pub struct ImageWorker {
     provider: &'static str,
     cfg: Config,
     root: PathBuf,
+    qualification: Option<(String, PathBuf)>,
 }
 
 impl ImageWorker {
@@ -79,7 +80,40 @@ impl ImageWorker {
             return Err(std::io::Error::other("image worker root must be an existing absolute directory"));
         }
         fs::create_dir_all(cfg.data_root.join("tmp/image-worker"))?;
-        Ok(Self { cfg, root, provider: PROVIDER })
+        Ok(Self { cfg, root, provider: PROVIDER, qualification: None })
+    }
+    /// Explicit local operator entry only; never populated by API or environment.
+    pub fn qualification_job(cfg: Config, root: PathBuf, job: &str, adapter: &Path) -> Res<Self> {
+        if !cfg!(target_os = "macos") {
+            return Err("capability_unavailable: image qualification requires the existing Mac authority".into());
+        }
+        protected::check_adapter(adapter)?;
+        let mut worker = Self::new(cfg, root).map_err(|e| e.to_string())?;
+        worker.qualification = Some((job.into(), adapter.into()));
+        let mut c = db::connect_config(&worker.cfg).map_err(|e| e.to_string())?;
+        let row = c.query_one("SELECT request FROM jobs WHERE id=$1", &[&job]).map_err(|e| e.to_string())?;
+        qualification_request(&row.get::<_, Value>(0))?;
+        let binding = json!({"job":job,"adapter":adapter,"root":worker.root});
+        let path = worker.cfg.data_root.join("tmp/image-worker/qualification-job.json");
+        seal(&path, &binding)?;
+        Ok(worker)
+    }
+    fn authorize(&self, effect: &str, request: &Value) -> Res<&Path> {
+        let (job, adapter) = self.qualification.as_ref().ok_or_else(|| dispatch_authority().unwrap_err())?;
+        qualification_request(request)?;
+        let mut c = db::connect_config(&self.cfg).map_err(|e| e.to_string())?;
+        let row = c
+            .query_one(
+                "SELECT e.job_id, e.request, j.request FROM effects e JOIN jobs j ON j.id=e.job_id WHERE e.id=$1 AND e.provider=$2",
+                &[&effect, &PROVIDER],
+            )
+            .map_err(|e| e.to_string())?;
+        if row.get::<_, String>(0) != *job || row.get::<_, Value>(1) != *request || row.get::<_, Value>(2) != *request {
+            return Err("capability_unavailable: effect differs from the operator-bound qualification job; no launch".into());
+        }
+        let path = self.cfg.data_root.join("tmp/image-worker/qualification-effect.json");
+        seal(&path, &json!({"job":job,"effect":effect}))?;
+        Ok(adapter)
     }
     pub(crate) fn legacy(cfg: Config, root: PathBuf) -> std::io::Result<Self> {
         let mut worker = Self::new(cfg, root)?;
@@ -95,7 +129,7 @@ impl ImageWorker {
     // Directory creation is the atomic effect barrier, including sealed absence.
     fn reserve(&self, effect: &str, request: &Value) -> Res<PathBuf> {
         let dir = self.dir(effect)?;
-        fs::create_dir(&dir).map_err(|_| "worker effect already reserved; reconcile original operation".to_string())?;
+        private_dir(&dir).map_err(|_| "worker effect already reserved; reconcile original operation".to_string())?;
         let store = Store::existing(&self.cfg.data_root).map_err(|e| e.to_string())?.with_bounds(
             self.cfg.quota_bytes,
             self.cfg.temp_quota_bytes,
@@ -122,9 +156,10 @@ impl Provider for ImageWorker {
         self.provider
     }
     fn submit(&self, effect: &str, request: &Value) -> Submit {
-        if let Err(reason) = dispatch_authority() {
-            return Submit::Refused(reason);
-        }
+        let adapter = match self.authorize(effect, request) {
+            Ok(adapter) => adapter,
+            Err(reason) => return Submit::Refused(reason),
+        };
         let dir = match self.reserve(effect, request) {
             Ok(d) => d,
             Err(e) => {
@@ -135,11 +170,20 @@ impl Provider for ImageWorker {
                 };
             }
         };
+        if let Err(reason) = save(&dir.join("qualification.json"), &json!({"job":self.qualification.as_ref().unwrap().0,"adapter":adapter}))
+        {
+            return Submit::Uncertain(reason);
+        }
         let mut command = Command::new(match std::env::current_exe() {
             Ok(p) => p,
             Err(e) => return Submit::Uncertain(e.to_string()),
         });
-        command.args(["image-turn", effect]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        command
+            .args(["image-turn", effect, self.qualification.as_ref().unwrap().0.as_str()])
+            .arg(adapter)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -199,7 +243,11 @@ impl Provider for ImageWorker {
                 credits: Some(0),
             });
         }
-        if dir.join("unknown.json").exists() {
+        if dir.join("preparation.json").exists() && !dir.join("result.json").exists() && !runner_alive(&dir)? {
+            protected::cancel_prepared(&dir)?;
+            recover_native(&dir)?;
+        }
+        if dir.join("unknown.json").exists() && !dir.join("result.json").exists() {
             return Err(read_json(&dir.join("unknown.json"))?["reason"].as_str().unwrap_or("native outcome unknown").into());
         }
         if !dir.join("result.json").exists() {
@@ -254,6 +302,91 @@ impl Provider for ImageWorker {
 
 const OUTPUTS: [(&str, &str); 3] = [("original.png", "image/png"), ("preview.png", "image/png"), ("evidence.json", "application/json")];
 
+pub const QUALIFICATION_TEXT: &str = "One original stylized blue wooden wedge on a plain background, no text or third-party references. Use the attached invented blue swatch as a color reference. Generate exactly one PNG up to 1024 by 1024 pixels.";
+
+fn qualification_request(request: &Value) -> Res<()> {
+    if request["method"] != "image.worker.v1@5"
+        || request["operation"] != "image.generate"
+        || request["text"] != QUALIFICATION_TEXT
+        || request["budget"] != json!({"max_credits":0})
+        || request["constraints"] != json!({"max_width":1024,"max_height":1024})
+        || request["attachments"].as_array().is_none_or(|a| a.len() != 1 || a[0].as_str().is_none())
+    {
+        return Err("capability_unavailable: only the operator-bound blue-wedge qualification request is allowed".into());
+    }
+    Ok(())
+}
+
+// A durable create-once selector bounds an operator command, never grants native authority.
+fn private_file(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+fn private_dir(path: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
+fn seal(path: &Path, value: &Value) -> Res<()> {
+    match private_file(path) {
+        Ok(mut f) => {
+            f.write_all(value.to_string().as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+            sync_spool(path.parent().unwrap())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if read_json(path)? == *value {
+                Ok(())
+            } else {
+                Err("qualification already bound to another job/effect; no replacement or replay".into())
+            }
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn runner_alive(dir: &Path) -> Res<bool> {
+    let runner = read_json(&dir.join("runner.json"))?;
+    let pid = runner["pid"].as_u64().and_then(|n| u32::try_from(n).ok()).ok_or("runner identity invalid; retain operation")?;
+    Ok(coreq::process::identity(pid)
+        .map_err(|_| "runner liveness unknown; retain operation")?
+        .is_some_and(|p| runner["started"] == p.started))
+}
+
+fn retain_observation(dir: &Path, observation: &Res<Value>) -> Res<()> {
+    save(&dir.join("turn-observation.json"), &json!({"turn":observation.as_ref().ok(),"unknown":observation.as_ref().err()}))
+}
+
+fn recover_native(dir: &Path) -> Res<()> {
+    recover_native_with(dir, || protected::reconcile_release(dir))
+}
+
+fn recover_native_with(dir: &Path, reconcile: impl FnOnce() -> Res<()>) -> Res<()> {
+    reconcile()?;
+    let observed = read_json(&dir.join("turn-observation.json"))?;
+    let mut result = observed["turn"].clone();
+    if !matches!(result["status"].as_str(), Some("completed" | "failed" | "refused" | "cancelled")) {
+        return Err("original native operation ended but turn result remains unknown; no replay".into());
+    }
+    result["exit_confirmed"] = json!(true);
+    if result["status"] == "completed" {
+        verify_outputs(dir, &result)?;
+    }
+    save(&dir.join("result.json"), &result)?;
+    File::options().write(true).open(dir.join("reservation")).and_then(|f| f.set_len(0)).map_err(|e| e.to_string())
+}
+
 fn read_json(path: &Path) -> Res<Value> {
     let bytes = read_bounded(path, LOG_LIMIT)?;
     serde_json::from_slice(&bytes).map_err(|_| "worker receipt invalid; native outcome unknown".into())
@@ -271,7 +404,7 @@ fn save(path: &Path, value: &Value) -> Res<()> {
 }
 fn save_bytes(path: &Path, bytes: &[u8]) -> Res<()> {
     let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-    let mut f = OpenOptions::new().create_new(true).write(true).open(&tmp).map_err(|e| e.to_string())?;
+    let mut f = private_file(&tmp).map_err(|e| e.to_string())?;
     f.write_all(bytes).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
     durable_rename(&tmp, path).map_err(|e| e.to_string())
 }
@@ -295,8 +428,18 @@ fn journal(file: &mut File, direction: &str, message: &Value) -> Res<()> {
 /// the turn. Its create-once marker is never removed, including after a crash.
 pub fn run(cfg: Config, op: &str) -> Res<()> {
     dispatch_authority()?;
+    run_job(cfg, op, "", Path::new(""))
+}
+
+pub fn run_job(cfg: Config, op: &str, job: &str, adapter: &Path) -> Res<()> {
     let worker =
-        ImageWorker::new(cfg.clone(), cfg.image_worker_root.clone().ok_or("image worker is not configured")?).map_err(|e| e.to_string())?;
+        ImageWorker::qualification_job(cfg.clone(), cfg.image_worker_root.clone().ok_or("image worker is not configured")?, job, adapter)?;
+    let request = read_json(&worker.dir(op)?.join("request.json"))?;
+    worker.authorize(op, &request["request"])?;
+    let scope = read_json(&worker.dir(op)?.join("qualification.json"))?;
+    if scope != json!({"job":job,"adapter":adapter}) {
+        return Err("qualification runner scope differs; no launch".into());
+    }
     let dir = worker.dir(op)?;
     let marker = OpenOptions::new()
         .create_new(true)
@@ -307,12 +450,17 @@ pub fn run(cfg: Config, op: &str) -> Res<()> {
     sync_spool(&dir)?;
     let result = native_run(&cfg, &dir, op);
     match result {
-        Ok(value) => {
-            save(&dir.join("result.json"), &value)?;
-            File::options().write(true).open(dir.join("reservation")).and_then(|f| f.set_len(0)).map_err(|e| e.to_string())?;
-            Ok(())
-        }
+        Ok(_) => Ok(()),
         Err(reason) => {
+            // Never leave a failed launch running; errors still reconcile the original identity.
+            if dir.join("preparation.json").exists() {
+                let _ = protected::cancel_prepared(&dir);
+                if recover_native(&dir).is_ok() {
+                    return Ok(());
+                }
+            } else if dir.join("slot-request.json").exists() {
+                let _ = protected::release_unlaunched(&dir);
+            }
             save(&dir.join("unknown.json"), &json!({"reason":reason}))?;
             Err(reason)
         }
@@ -336,7 +484,14 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     if receipt["request"] != request {
         return Err("worker request differs from durable job".into());
     }
-    let store = Store::existing(&cfg.data_root).map_err(|e| e.to_string())?;
+    let store = Store::existing(&cfg.data_root).map_err(|e| e.to_string())?.with_bounds(
+        cfg.quota_bytes,
+        cfg.temp_quota_bytes,
+        cfg.free_space_floor_bytes,
+    );
+    if store.room().map_err(|e| e.to_string())? == 0 {
+        return Err("store_full: no native launch".into());
+    }
     let mut input = vec![];
     let mut attachments = vec![];
     for id in request["attachments"].as_array().ok_or("attachments missing")? {
@@ -345,9 +500,10 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
         let size = object["size"].as_u64().ok_or("attachment size missing")?;
         store.verify(sha, size).map_err(|e| e.to_string())?;
         if object["content_type"] != "image/png" || size > cfg.max_upload_bytes.min(IMAGE_LIMIT) {
-            return Ok(
-                json!({"status":"refused","reason":"capability_unavailable: worker references require bounded verified PNG attachments"}),
-            );
+            let value = json!({"status":"refused","reason":"capability_unavailable: worker references require bounded verified PNG attachments","exit_confirmed":true});
+            save(&dir.join("result.json"), &value)?;
+            File::options().write(true).open(dir.join("reservation")).and_then(|f| f.set_len(0)).map_err(|e| e.to_string())?;
+            return Ok(value);
         }
         let path = cfg.data_root.join("objects").join(&sha[..2]).join(&sha[2..4]).join(sha);
         decode_png(&read_bounded(&path, cfg.max_upload_bytes.min(IMAGE_LIMIT))?, &json!({}))?;
@@ -359,9 +515,9 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
         request["constraints"], request["text"]
     );
     input.insert(0, Part::Text(prompt));
-    let control = serde_json::from_value(read_json(&dir.join("control.json"))?).map_err(|_| "protected worker control invalid")?;
+    let adapter = PathBuf::from(read_json(&dir.join("qualification.json"))?["adapter"].as_str().ok_or("qualification adapter missing")?);
     let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-    let (server, home) = protected::launch(cfg.image_worker_root.as_deref().unwrap(), dir, control)?;
+    let (server, home) = protected::prepare_launch(cfg.image_worker_root.as_deref().unwrap(), dir, op, &adapter)?;
     let opt = server.optimization();
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
@@ -370,55 +526,62 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     let (observed, cleanup) = protected::with_run(
         server.open(None, &launch),
         |run| {
-            if let Some(refusal) = runtime_start(runtime, run, dir, &mut log, &input)? {
-                return Ok(refusal);
-            }
-            let mut interrupt_at = None;
-            loop {
-                runtime.poll(run)?;
-                runtime_progress(runtime, run, &mut log)?;
-                if let Ok(report) = runtime.report(run) {
-                    let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
-                    let turn = checkpoint["app"]["turn"].as_str();
-                    let mut result = agentq_runtime::cli::report_json(&report);
-                    result["optimization"] = opt.json();
-                    result["thread"] = json!(runtime.session_id(run));
-                    result["turn"] = json!(turn);
-                    if report.outcome == "cancelled" {
-                        result["status"] = json!("cancelled");
-                        return Ok(result);
+            let observed = (|| {
+                if store.room().map_err(|e| e.to_string())? == 0 {
+                    return Err("store_full: no native input".into());
+                }
+                if let Some(refusal) = runtime_start(runtime, run, dir, &mut log, &input)? {
+                    return Ok(refusal);
+                }
+                let mut interrupt_at = None;
+                loop {
+                    runtime.poll(run)?;
+                    runtime_progress(runtime, run, &mut log)?;
+                    if let Ok(report) = runtime.report(run) {
+                        let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
+                        let turn = checkpoint["app"]["turn"].as_str();
+                        let mut result = agentq_runtime::cli::report_json(&report);
+                        result["optimization"] = opt.json();
+                        result["thread"] = json!(runtime.session_id(run));
+                        result["turn"] = json!(turn);
+                        if report.outcome == "cancelled" {
+                            result["status"] = json!("cancelled");
+                            return Ok(result);
+                        }
+                        if report.outcome != "ok" {
+                            result["status"] = json!("failed");
+                            result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
+                            return Ok(result);
+                        }
+                        let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
+                            result["status"] = json!("refused");
+                            result["reason"] = json!(
+                                "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
+                            );
+                            return Ok(result);
+                        };
+                        return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
                     }
-                    if report.outcome != "ok" {
-                        result["status"] = json!("failed");
-                        result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
-                        return Ok(result);
+                    if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
+                        journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
+                        runtime.cancel(run)?;
+                        interrupt_at = Some(Instant::now());
                     }
-                    let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
-                        result["status"] = json!("refused");
-                        result["reason"] = json!(
-                            "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
-                        );
-                        return Ok(result);
-                    };
-                    return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
+                    if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
+                        return Err("native interrupt unconfirmed; original operation retained; no replay".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
                 }
-                if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
-                    journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
-                    runtime.cancel(run)?;
-                    interrupt_at = Some(Instant::now());
-                }
-                if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
-                    return Err("native interrupt unconfirmed; original operation retained; no replay".into());
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
+            })();
+            retain_observation(dir, &observed)?;
+            observed
         },
-        || protected::observe(dir, true),
+        || protected::cancel_prepared(dir),
     );
-    // Runtime owns the transport. Exact host cancellation remains observation-only;
-    // neither its receipt nor a turn report establishes whole-operation completion.
-    let cleanup = cleanup.and_then(|_| Err("supervisor exit unobserved through Runtime; native completion remains unknown".into()));
-    finish_native_observation(dir, observed, cleanup)
+    // Drop Runtime only after cancellation readback; then certify the original scope.
+    record_native_observation(dir, &observed, &cleanup.map(|_| false))?;
+    recover_native(dir)?;
+    read_json(&dir.join("result.json"))
 }
 
 fn runtime_launch(root: &Path, home: &Path, deadline: Instant) -> RuntimeLaunch {
@@ -476,16 +639,15 @@ fn runtime_start(runtime: &dyn Runtime, run: &mut Run, dir: &Path, log: &mut Fil
     Ok(None)
 }
 
-fn finish_native_observation(dir: &Path, observed: Res<Value>, cleanup: Res<bool>) -> Res<Value> {
-    // AgentQ poll observes only the supervisor, never whole-operation completion.
+fn record_native_observation(dir: &Path, observed: &Res<Value>, cleanup: &Res<bool>) -> Res<()> {
+    // This evidence is never a whole-operation certificate or a terminal receipt.
     let reason = "protected native/descendant completion unknown; original operation retained; no replay";
     save(
         &dir.join("native-observation.json"),
         &json!({"turn":observed.as_ref().ok(),"turn_unknown":observed.as_ref().err(),
             "supervisor_exit_confirmed":cleanup.as_ref().ok(),"supervisor_unknown":cleanup.as_ref().err(),
             "exit_confirmed":false,"reason":reason}),
-    )?;
-    Err(reason.into())
+    )
 }
 
 fn native_image(dir: &Path, thread: Option<&str>, turn: Option<&str>) -> Res<Option<Value>> {
@@ -553,7 +715,7 @@ fn complete(
     let mut preview = std::io::Cursor::new(vec![]);
     decoded.thumbnail(512, 512).write_to(&mut preview, image::ImageFormat::Png).map_err(|e| e.to_string())?;
     save_bytes(&dir.join("preview.png"), preview.get_ref())?;
-    let evidence = json!({"runtime":{"package":"agentq-runtime","version":"0.1.0","revision":PIN},"provider":PROVIDER,
+    let evidence = json!({"runtime":{"package":"agentq-runtime","version":"0.2.0","revision":PIN},"provider":PROVIDER,
         "native_image_item":item,"report":report,"attachments":attachments,"original_sha256":db::sha256_hex(&original),
         "dimensions":{"width":decoded.width(),"height":decoded.height()},"usage_credits":null,"usage_unknown_reason":"native subscription image charge not reported","owner_acceptance":"pending"});
     save(&dir.join("evidence.json"), &evidence)?;
@@ -612,6 +774,77 @@ mod tests {
         let worker = ImageWorker::new(cfg.clone(), dir.clone()).unwrap();
         (dir, cfg, worker)
     }
+    // R3/R7: requests cannot opt into qualification; scope is exact and durable,
+    // including a competing job/effect and an interrupted partial selector write.
+    #[test]
+    fn image_worker_qualification_scope_never_floats_or_replays() {
+        let (dir, _, worker) = fixture();
+        let request = json!({"method":"image.worker.v1@5","operation":"image.generate","text":QUALIFICATION_TEXT,
+            "attachments":[db::new_id()],"constraints":{"max_width":1024,"max_height":1024},"budget":{"max_credits":0}});
+        qualification_request(&request).unwrap();
+        assert!(matches!(worker.submit(&db::new_id(), &request), Submit::Refused(_)));
+        for (field, value) in [
+            ("method", json!("image.worker.v1@2")),
+            ("text", json!("accepted crate replay")),
+            ("budget", json!({"max_credits":1})),
+            ("constraints", json!({"max_width":4096,"max_height":4096})),
+            ("attachments", json!([])),
+        ] {
+            let mut other = request.clone();
+            other[field] = value;
+            assert!(qualification_request(&other).is_err(), "{field}");
+        }
+        let path = dir.join("selector.json");
+        let first = json!({"job":db::new_id(),"effect":db::new_id()});
+        seal(&path, &first).unwrap();
+        seal(&path, &first).unwrap();
+        assert!(seal(&path, &json!({"job":db::new_id(),"effect":db::new_id()})).is_err());
+        assert_eq!(read_json(&path).unwrap(), first);
+        let partial = dir.join("partial.json");
+        fs::write(&partial, b"{").unwrap();
+        assert!(seal(&partial, &first).is_err());
+        assert_eq!(fs::read(partial).unwrap(), b"{");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R4/R5/R6/R7: interruption after a terminal tool receipt resumes import only
+    // after validated completion/release; unknown or corrupt output stays charged.
+    #[test]
+    fn image_worker_terminal_recovery_requires_completion_and_intact_original() {
+        let (dir, cfg, worker) = fixture();
+        let home = dir.join("native-home");
+        fs::create_dir_all(home.join("generated_images")).unwrap();
+        let image = home.join("generated_images/invented.png");
+        image::RgbImage::new(64, 64).save(&image).unwrap();
+        for outcome in ["completed", "unknown", "missing-turn", "corrupt"] {
+            let op = db::new_id();
+            let spool = worker.reserve(&op, &json!({})).unwrap();
+            let item = json!({"id":"invented-tool","type":"imageGeneration","status":"completed","savedPath":image,"failure":null});
+            let terminal =
+                complete(&cfg, &spool, &home, &item, json!({"thread":"invented-thread","turn":"invented-turn"}), &[], &json!({})).unwrap();
+            retain_observation(&spool, &if outcome == "missing-turn" { Err("turn unobserved".into()) } else { Ok(terminal) }).unwrap();
+            if outcome == "corrupt" {
+                fs::write(spool.join("original.png"), b"corrupt").unwrap();
+            }
+            let result = recover_native_with(&spool, || if outcome == "unknown" { Err("descendants unknown".into()) } else { Ok(()) });
+            if outcome == "completed" {
+                result.unwrap();
+                assert!(matches!(worker.poll(&op), Ok(Poll::Done { outputs: 3, credits: None })));
+                let mut output = worker.fetch(&op, 0).unwrap();
+                let mut bytes = vec![];
+                output.reader.read_to_end(&mut bytes).unwrap();
+                assert_eq!(bytes, fs::read(&image).unwrap());
+                assert_eq!(fs::metadata(spool.join("reservation")).unwrap().len(), 0);
+            } else {
+                assert!(result.is_err(), "{outcome}");
+                assert!(!spool.join("result.json").exists());
+                assert_eq!(fs::metadata(spool.join("reservation")).unwrap().len(), RESERVATION);
+            }
+            assert!(worker.reserve(&op, &json!({})).is_err());
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     // R2/R4/R7: receipt loss and interruption never permit another launch;
     // absence is sealed, and capacity is charged before a native effect.
     #[test]
@@ -695,7 +928,8 @@ mod tests {
         ] {
             let op = db::new_id();
             let spool = worker.reserve(&op, &json!({})).unwrap();
-            let reason = finish_native_observation(&spool, observation.clone(), cleanup.clone()).unwrap_err();
+            record_native_observation(&spool, &observation, &cleanup).unwrap();
+            let reason = recover_native_with(&spool, || Err("protected native/descendant completion unknown".into())).unwrap_err();
             assert!(reason.contains("native/descendant completion unknown"));
             let retained = read_json(&spool.join("native-observation.json")).unwrap();
             assert_eq!(retained["turn"], json!(observation.as_ref().ok()));
