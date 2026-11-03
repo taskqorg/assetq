@@ -124,7 +124,7 @@ pub fn new_id() -> String {
 
 const SCHEMA: &str = include_str!("schema.sql");
 
-/// Apply schema version 1 once and register the built-in method versions.
+/// Apply schema version 1 once and bring unreferenced built-in method rows up to the current seed.
 pub fn migrate(c: &mut Client) -> Result<()> {
     let mut tx = write_tx(c, false)?;
     tx.batch_execute("CREATE TABLE IF NOT EXISTS schema_version (version int PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now()); LOCK TABLE schema_version IN EXCLUSIVE MODE;")?;
@@ -136,6 +136,16 @@ pub fn migrate(c: &mut Client) -> Result<()> {
         tx.batch_execute(SCHEMA)?;
         tx.execute("INSERT INTO schema_version (version) VALUES (1)", &[])?;
     }
+    // Rename the runtime-specific image route seeded by earlier builds to the capability name. Only the
+    // disabled, never-referenced built-in row changes; a row any job or recommendation resolved keeps its spec (R5).
+    let image = builtin_methods().into_iter().find(|m| m.0 == "image.worker.v1").expect("built-in image method").3;
+    tx.execute(
+        "UPDATE methods m SET spec = $1 WHERE m.id = 'image.worker.v1' AND m.version = 1 AND m.status = 'disabled'
+           AND m.spec <> $1
+           AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.project = m.project AND j.method_id = m.id AND j.method_version = m.version)
+           AND NOT EXISTS (SELECT 1 FROM recommendations r WHERE r.project = m.project AND r.method_id = m.id AND r.method_version = m.version)",
+        &[&image],
+    )?;
     commit_write(tx)?;
     Ok(())
 }
@@ -177,12 +187,12 @@ pub fn builtin_methods() -> Vec<(&'static str, i32, &'static str, Value)> {
                 "operation": "image.generate",
                 "inputs": ["text", "attachments"],
                 "outputs": ["image/png"],
-                "provider": "agentq.codex-image",
+                "provider": "agentq.image",
                 "model": "unqualified",
                 "api_revision": "unqualified",
                 "pipeline_revision": "0",
                 "parameters": {},
-                "capabilities": ["codex.image_generation"],
+                "capabilities": ["image_generation"],
                 "limitations": ["Not implemented in this build; attached by a later task after real tool qualification."],
                 "provenance": "assetq.md initial generation methods",
                 "validation": ["bitmap decode", "dimensions", "sha256"],

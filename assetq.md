@@ -100,7 +100,7 @@ A durable effect receipt binds exactly one worker launch; restart observes that 
 
 Native terminal image-tool evidence, an allowed original artifact path and full PNG decoding are required before import. Preserve a bounded preview, dimensions, input identities, runtime/tool evidence and actual or explicitly unknown usage. Exact worker limits, capability refusal and recovery are specified in [image worker](docs/image-worker.md).
 
-Claude is eligible only after equivalent tool and output-path qualification. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
+A runtime is eligible only after AgentQ qualifies its tool and output path. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
 
 **Image to 3D prop (`model.meshy-prop.v1`).** Resolve a verified input image; submit a versioned Meshy image-to-3D request with explicit `meshy-t2`, Smart Topology, a 3000-triangle target and 2K PBR as the starting recipe. Preserve source GLB/textures, then validate and render with headless Blender. Provider support and current cost require fresh verification before dispatch.
 

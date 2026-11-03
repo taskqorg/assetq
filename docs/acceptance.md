@@ -4,9 +4,9 @@ These checks implement AssetQ R2-R8. They are required outcomes; no real runs ar
 
 ## Image through a worker
 
-Submit an original wooden-crate brief and constraints through API/CLI; receive a durable job ID. A qualified Codex worker uses its image-generation tool through AgentQ and returns a real bitmap. Persist the original, preview, hash, dimensions, prompt/attachment identities, method/runtime version and reported or explicitly unknown usage.
+Submit an original wooden-crate brief and constraints through API/CLI; receive a durable job ID. An AgentQ worker qualified for `image_generation` uses its image-generation tool and returns a real bitmap. Persist the original, preview, hash, dimensions, prompt/attachment identities, method/runtime version and reported or explicitly unknown usage.
 
-Read job progress and retrieve the verified image after the originating chat ends. Confirm the download hash matches the committed manifest. An unavailable image tool is a capability refusal, never fake success. Claude is a separately qualified implementation of this route, not an automatic fallback.
+Read job progress and retrieve the verified image after the originating chat ends. Confirm the download hash matches the committed manifest. An unavailable image tool is a capability refusal, never fake success. Each runtime AgentQ qualifies for this capability is a separate implementation, not an automatic fallback.
 
 ## 3D from the generated image
 
