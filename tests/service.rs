@@ -503,6 +503,32 @@ fn waiting_jobs_release_executor_capacity() {
 }
 
 #[test]
+fn migration_renames_runtime_specific_image_method_and_keeps_jobs() {
+    let f = fixture();
+    let mut c = f.client();
+    let (a, _) = project(&mut c, "mu", 10, 4);
+    let (job, _) = db::submit_job(&mut c, &a, &req("m1", json!({})), &limits(), FAKE).unwrap();
+    // Rows seeded by an earlier build named the runtime instead of the capability.
+    c.execute(
+        "UPDATE methods SET spec = jsonb_set(jsonb_set(spec, '{provider}', '\"agentq.codex-image\"'), '{capabilities}', '[\"codex.image_generation\"]') WHERE id = 'image.worker.v1'",
+        &[],
+    )
+    .unwrap();
+    db::migrate(&mut c).unwrap();
+    let spec =
+        &db::list_methods(&mut c, "mu").unwrap().as_array().unwrap().iter().find(|m| m["id"] == "image.worker.v1").unwrap()["spec"].clone();
+    assert_eq!(spec["provider"], "agentq.image");
+    assert_eq!(spec["capabilities"], json!(["image_generation"]));
+    assert!(
+        !db::builtin_methods()
+            .iter()
+            .any(|m| m.3.to_string().to_lowercase().contains("codex") || m.3.to_string().to_lowercase().contains("claude"))
+    );
+    let id = job["id"].as_str().unwrap();
+    assert_eq!(db::get_job(&mut c, "mu", id).unwrap()["method"], json!("synthetic.fake@1"));
+}
+
+#[test]
 fn registry_recommendations_and_comparisons() {
     let f = fixture();
     let mut c = f.client();

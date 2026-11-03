@@ -48,9 +48,9 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 ## Initial generation methods
 
-**Image worker (`image.worker.v1`).** A capable Codex worker receives text, attachments and output constraints through AgentQ and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
+**Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-Claude is eligible only after equivalent tool and output-path qualification. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
+A runtime is eligible only after AgentQ qualifies its tool and output path. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
 
 **Image to 3D prop (`model.meshy-prop.v1`).** Resolve a verified input image; submit a versioned Meshy image-to-3D request with explicit `meshy-t2`, Smart Topology, a 3000-triangle target and 2K PBR as the starting recipe. Preserve source GLB/textures, then validate and render with headless Blender. Provider support and current cost require fresh verification before dispatch.
 
