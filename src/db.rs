@@ -994,6 +994,9 @@ pub fn add_comparison(c: &mut Client, p: &Principal, body: &Value) -> Result<Val
             m.as_str().filter(|m| m.contains('@')).ok_or_else(|| Error::new(422, "bad_comparison", "method_versions are id@version"))?;
         let (id, v) = name.split_once('@').unwrap();
         let v: i32 = v.parse().map_err(|_| Error::new(422, "bad_comparison", "bad version"))?;
+        if v <= 0 || name != format!("{id}@{v}") {
+            return Err(Error::new(422, "bad_comparison", "method version must use canonical positive decimal notation"));
+        }
         let row = c
             .query_opt("SELECT spec->>'operation' FROM methods WHERE id = $1 AND version = $2 AND project = $3", &[&id, &v, &p.project])?
             .ok_or_else(|| Error::new(422, "bad_comparison", format!("unknown method {name}")))?;

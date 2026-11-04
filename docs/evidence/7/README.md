@@ -20,6 +20,8 @@ The first API fixture compile failed because it referenced a nonexistent `Servic
 
 ## Failure before and pass after
 
+Review of `30d07e52afefa616cbbaa26460a448caf7473423` returned A2/A3/A7 and R5 for noncanonical method pins: `synthetic.fake@01` was accepted, then run/read returned `409 sample_conflict` after resolution to `synthetic.fake@1`. The admission regression added to `registry_cli_api_projection` failed before the fix: all five requests (`@01`, `@+1`, canonical-plus-each-alias and both aliases) returned 201 instead of 422. With the three-line shared comparison admission guard, the same `python3 scripts/check.py --test registry_cli_api_projection` passed on Windows. All five now refuse before retaining a comparison or admitting a job; the existing canonical CLI run, technical result, immutable score, authenticated read and foreign-project assertions still pass. The guarding assertions for pins, resumability and replay remain unchanged. The owning [evaluation rule](../../method-evaluation.md) was clarified before the implementation.
+
 `registry_publication_limits_and_receipt_identity` was run against reconstructed pre-fix branches from this implementation. It failed with all five observations below. The fixed source was restored byte-for-byte, and the same check then passed in the six-fixture run:
 
 - A project-owned different specification borrowed the real Meshy receipt when lookup used only `id@version`. Qualification now also requires the exact immutable recipe and exposes its SHA-256.

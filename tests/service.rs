@@ -1334,6 +1334,30 @@ fn registry_cli_api_projection() {
     );
     assert_eq!(methods["items"].as_array().unwrap().len(), 1);
     let body = json!({"use_case":"crate","dataset_version":"d@1","evaluator_version":"e@1","method_versions":["synthetic.fake@1"],"plan":{"dataset":"d@1","evaluator":"e@1","constraints":{},"repeats":1,"max_jobs":1,"max_credits":1}});
+    // A2/A3/A7, R5: aliases must fail before admission, not strand resolved sample jobs.
+    let h = http();
+    let mut alias_statuses = vec![];
+    for methods in [
+        json!(["synthetic.fake@01"]),
+        json!(["synthetic.fake@+1"]),
+        json!(["synthetic.fake@1", "synthetic.fake@01"]),
+        json!(["synthetic.fake@1", "synthetic.fake@+1"]),
+        json!(["synthetic.fake@01", "synthetic.fake@+1"]),
+    ] {
+        let mut invalid = body.clone();
+        invalid["method_versions"] = methods;
+        invalid["plan"]["max_jobs"] = json!(2);
+        invalid["plan"]["max_credits"] = json!(2);
+        let response = h
+            .post(format!("{}/v1/comparisons", s.url))
+            .header("Authorization", format!("Bearer {member_token}"))
+            .send(invalid.to_string())
+            .unwrap();
+        alias_statuses.push(response.status().as_u16());
+    }
+    assert_eq!(alias_statuses, vec![422; 5], "noncanonical pins, including duplicate aliases, must refuse before admission");
+    assert!(db::list_comparisons(&mut c, "registry-cli", None).unwrap().as_array().unwrap().is_empty());
+    assert_eq!(c.query_one("SELECT count(*) FROM jobs WHERE project='registry-cli'", &[]).unwrap().get::<_, i64>(0), 0);
     std::fs::write(&file, body.to_string()).unwrap();
     let cmp = cli(&f, &s, &member_token, &["comparison-add", file.to_str().unwrap()]);
     let id = cmp["id"].as_str().unwrap();
