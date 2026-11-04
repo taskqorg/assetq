@@ -2,6 +2,8 @@
 
 Task [#6](https://github.com/taskqorg/assetq/issues/6), AssetQ R2-R8. This record preserves the [owner request](../../intake/2026-11-01-owner-request.md), the managed run reported in [PM note 6632591828](https://github.com/taskqorg/assetq/issues/6#issuecomment-6632591828), and the owner decision and isolated recovery repeat in [note 6633444528](https://github.com/taskqorg/assetq/issues/6#issuecomment-6633444528).
 
+[PM readback 6634471512](https://github.com/taskqorg/assetq/issues/6#issuecomment-6634471512) supplies the retained model measurements, provider-wait observations and isolated host storage-fault results below. [Owner verdict 6634512869](https://github.com/taskqorg/assetq/issues/6#issuecomment-6634512869) records the scope of visual acceptance. These observations supplement the original receipts without changing them.
+
 The host observations below are attributed to PM. The Windows worker verified the CI candidate bytes and existing source image locally; it did not access the private installation receipt, redownload the new host payloads or repeat a provider request. Public notes are the available host evidence; private native receipts and original results remain with the operator. This documentation publishes no credentials, private infrastructure locators or provider download URLs.
 
 ## Candidate and activation
@@ -39,9 +41,15 @@ PM used managed source object `3268ca7f-e3a8-4bd2-ac93-85c5d638ccc5` with that s
 | Provider operation | `01a1a6c5-4d6f-719f-a60b-8f04dd24c344` |
 | Recipe | Version 2: explicit `meshy-t2`, Smart Topology, target 3000 triangles, 2K PBR |
 | Outcome | Provider `SUCCEEDED`; job succeeded with nine manifest items, one submission |
-| Native validation | Blender 5.2.3, `valid: true`, 2815 triangles against target 3000, 2048-pixel textures |
-| Measurements not supplied in the public note | Components, dimensions, UV coverage and exact Blender executable hash remain unverified here |
+| Native validation | Blender 5.2.3 LTS, `valid: true`, 2815 triangles against target 3000, delta -185 |
+| Geometry and UVs | One mesh object, 424 components, 2815 faces and 2815 UV faces |
+| Dimensions | 1.0 x 1.0 x 0.9281949996948242, provider GLB units; no real-world scale inferred |
+| Packed textures | Three, each 2048 x 2048 pixels; original maps retained separately below |
+| Provider defaults | `texture_model: null`; unreported defaults are not inferred |
+| Remaining validator identity gap | Exact Blender executable hash not supplied |
 | Cost | Provider 15 credits; account 5470 to 5455, delta 15 |
+
+The later readback identifies the retained report by the `output-8` hash below and confirms `meshy-t2`, `smart-topology`, triangle topology, target 3000, `should_texture`, `enable_pbr`, `2k` and `glb`. Its ledger retains prior spend 30, actual 15, cumulative 45, balance before 5470, `cap: null` and no purchases. The later repeat raises the workstream total to 60; it does not rewrite this report's historical total.
 
 After recovery, PM downloaded the source and all nine outputs through the normal managed unit, matching each manifest hash:
 
@@ -59,7 +67,7 @@ After recovery, PM downloaded the source and all nine outputs through the normal
 
 For object metadata, content, job and result reads, the owning token returned 200, a foreign project token 404, and anonymous requests 401. Foreign download and submit-with-attachment attempts returned 404; the foreign project object list was empty. The zero-budget, job-free isolation probe project remains retained; its token was not kept.
 
-PM's `restore-check` on the current managed database/store returned `verified=true`: schema 1, one job, ten blobs, 18,881,638 object bytes and 1,003,814 retained temporary bytes. This is a current-store integrity observation, not a backup or isolated restoration. `ops` reported zero uncertain submissions and a non-full store. Managed partial-import and full-store faults were not induced; source regression coverage is `partial_import_resumes_and_full_store_preserves_work` in `tests/service.rs`, not live fault qualification.
+PM's `restore-check` on the current managed database/store returned `verified=true`: schema 1, one job, ten blobs, 18,881,638 object bytes and 1,003,814 retained temporary bytes. This is a current-store integrity observation, not a backup or isolated restoration. `ops` reported zero uncertain submissions and a non-full store. Managed partial-import and full-store faults were not induced; the separate host qualification below supplements source regression coverage in `partial_import_resumes_and_full_store_preserves_work` without claiming a managed-store fault.
 
 ## Recovery: failed procedure and bounded repeat
 
@@ -83,9 +91,31 @@ PM repeated the qualification in a fresh isolated pds18 store using the exact ca
 | Total elapsed | 98 seconds from first control start, inside 600-second bound |
 | Native bounds, both processes | Address space 2147483648 bytes; stack 2097152 bytes; CPUs 0,1 |
 | Downloads / audit | Nine manifest items hash-matched; GLB 7,330,860 bytes; replay matches stored state |
+| Geometry, comparison only | 313 components, 2539 triangles, dimensions 1.0 x 1.0 x 1.00006902217865 in provider GLB units |
 | Cost | Balance 5455 to 5440; delta 15 equals provider usage |
 
-The repeat corrects the procedure's restart/deadline failure on the isolated store. Its individual output hashes and raw native receipts were not supplied in the public note, so this record does not invent them or claim Windows independently verified them. It does not establish a bounded restart on the managed store. Native TaskQ/agent slot-release telemetry was not supplied; `waiting_jobs_release_executor_capacity` provides deterministic service coverage, not proof of native agent capacity release.
+The repeat corrects the procedure's restart/deadline failure on the isolated store. Its individual output hashes and raw native receipts were not supplied in the public note, so this record does not invent them or claim Windows independently verified them. It does not establish a bounded restart on the managed store.
+
+## Provider-wait capacity
+
+PM readback 6634471512 reports the pre-restart status of both real Meshy jobs: phase `waiting`, effect `submitted`, `leased: false`, `submissions: 1`, fence 1. The bounded repeat retained the address-space, stack and CPU bounds listed above on both control processes.
+
+On pds18, the exact candidate binary also ran `synthetic.fake` with one executor. A job configured with `polls=25` remained waiting and unleased while a second job submitted during that wait reached `succeeded`. The waiter then completed with one submission. This shows that a provider wait held neither a job lease nor the sole service executor. It supplements `waiting_jobs_release_executor_capacity` with a shipped-binary host observation; it does not supply native TaskQ/agent-capacity telemetry, which remains open.
+
+## Isolated host storage-fault qualification
+
+PM used the exact candidate executable SHA-256 `5aacde4b30e58a86d0e6d7c42b80532364f2ba5533cfb277081367ef2938c0d4` on pds18 with a separate database and data root and provider `synthetic.fake`. This qualifies the shipped binary's host storage path with a synthetic provider. It is not a live Meshy stream fault or a fault on the managed store.
+
+| Case | Failure observation | Recovery or preservation observation |
+|---|---|---|
+| Partial import | `fail_fetch` broke `output-1`; job remained `active`, reason `import of output-1 failed: source_failed: synthetic fault: stream reset`, result `incomplete`, one object committed | Resumed to `succeeded`, one submission, two manifest items, zero temporary files |
+| Full store during import | Quota set to used + 10, 438 bytes; job remained `active`, reason `import of output-0 failed: store_full: quota or free-space floor exhausted`, one submission | Both previously committed objects downloaded and hash-matched; PM supplied hash prefixes `ea292c54600b` and `48f96ad23720`, not full digests |
+| Admission at capacity | 428 of 428 bytes used; submission refused with `HTTP 507 store_full: store uses 428 of 428 bytes` | No job created; provider-operation count stayed four |
+| Capacity restored | Isolated quota returned to 1 GiB | Paused job reached `succeeded` within seconds, one submission, provider-operation count stayed four |
+
+The HTTP admission refusal occurs before a job exists, whereas the in-process regression reaches its no-effect assertion inside a job. Both observations preserve the no-new-provider-effect requirement; they are distinct entry paths. Finally, all four host-fixture jobs audited as `matches stored state`; `restore-check` returned `verified=true`, four jobs, five blobs, 535 object bytes and zero retained temporary bytes. This verifies that fixture's current state, not a backup restoration.
+
+PM reports that the managed service remained active, its `initial-effect.json` barrier remained present, and its store, quotas and originals were untouched. The fault run used no Meshy key or paid request. Inducing faults on the managed store remains outside scope without a reviewed operator plan; these isolated results do not authorize one.
 
 ## Cumulative credit ledger
 
@@ -103,11 +133,11 @@ The [#5 ledger scope](../5/operator-run/ledger-receipt.json) and original jobs/r
 | Item | Evidence and limit |
 |---|---|
 | A1 installation | PM-observed exact candidate installation and private receipt; owner-accepted historical outage exception, not uninterrupted activation |
-| A2 technical/live journey | Existing native crate feeds the managed Meshy result; nine managed downloads PM-verified. No new image generation or general method qualification |
-| A3 recovery | PM-observed bounded recovery while provider running on the isolated store with the same binary. First managed recovery exceeded its original bound; native agent-capacity telemetry remains open |
-| A4 storage/access | PM-observed managed download hashes and project isolation; current-store integrity verified. Live partial/full-store fault tests and an executed rollback remain unproved |
+| A2 technical/live journey | Existing native crate feeds the managed Meshy result; nine managed downloads and retained measurements PM-verified: 424 components, 2815 triangles, dimensions 1.0 x 1.0 x 0.9281949996948242. No new image generation or general method qualification |
+| A3 recovery/capacity | PM-observed bounded recovery while provider running on the isolated store with the same binary; both real waits were unleased, and the one-executor host fixture served another job. First managed recovery exceeded its original bound; native agent-capacity telemetry remains open |
+| A4 storage/access | PM-observed managed hashes, project isolation and current-store integrity; isolated exact-binary host faults prove partial-import recovery, quota refusal and retained-object preservation with a synthetic provider. Managed/live-Meshy faults and an executed rollback remain unproved |
 | A5 restore | Deferred/unknown under owner note 6558008840; neither local nor independent external backup/restore qualification is claimed |
-| A6 owner visuals | PM presented the source and three managed-result views in the owner chat. Source image accepted previously; no model verdict recorded. PM reports softer blue corners and a dark front-plank stain; this is not owner acceptance |
+| A6 owner visuals | PM presented the source and three managed-result views in the owner chat. Owner verdict on 2026-11-04: "accepted as a pipeline check, not as a finished game asset." Source image accepted previously. PM's softer-corner and dark-stain observations remain separate from that verdict |
 | A7 publication | This evidence and the linked deployment guidance identify source, binary, methods, checks and ledger. Documentation merge-result CI remains required; original inputs/results stay retained |
 
 Task #6 remains incomplete where the table names open evidence. The published source's green checks, PM's live observations, restoration status and owner visual judgment are separate verdicts. No website, general Meshy recommendation, another executor, complete managed failure matrix or future generation authority is qualified by these examples.

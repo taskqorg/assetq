@@ -20,7 +20,7 @@ The owner request is preserved in [intake](intake/2026-11-01-owner-request.md). 
 
 Storage preparation has a separate task in the private host repository. Its identity, infrastructure inventory and operator effects stay in restricted PM evidence. GitHub and GitLab dependencies do not cross providers; the PM creates the concrete activation task once the candidate and reviewed effects exist.
 
-Task #6's [delivery record](evidence/6/README.md) records PM-observed managed installation/retrieval on `ed30cd1`, an owner-accepted historical outage, and bounded provider-wait restart on a separate isolated store using the same binary. Observed cumulative Meshy spend is 60 credits. Managed fault probes, native agent-capacity readback and the model's owner visual verdict remain open; backup/restore is deferred/unknown. These observations do not qualify the website or authorize another paid run.
+Task #6's [delivery record](evidence/6/README.md) records PM-observed managed installation/retrieval and model measurements on `ed30cd1`, an owner-accepted historical outage, unleased real provider waits, a bounded restart on an isolated store, and separate exact-binary host capacity/storage faults with a synthetic provider. Observed cumulative Meshy spend is 60 credits. The owner verdict is "accepted as a pipeline check, not as a finished game asset." Managed/live-Meshy faults and native agent-capacity telemetry remain open; backup/restore is deferred/unknown. These observations do not qualify the website or authorize another paid run.
 
 ## Bootstrap verification
 
