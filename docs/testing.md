@@ -12,6 +12,7 @@ Run only the affected check while editing:
 cargo test --locked --lib store::tests
 cargo test --locked --lib provider::tests
 cargo test --locked --test traces
+python3 scripts/check.py --test meshy
 python3 scripts/check.py --test admission_idempotency_scope_and_typed_limits
 python3 scripts/check.py --test resource_bounds
 ```
@@ -32,3 +33,5 @@ Windows runs unrelated Rust fixtures sequentially; concurrency cases retain thei
 - A7/A8: real PostgreSQL transactions, a killed/restarted service through the CLI, streamed SHA-verified retrieval, genuine SQL dump/restore followed by API checks, and refusal of corrupt/missing restored payloads.
 
 `synthetic.fake` proves service semantics only. It never qualifies real image/3D generation, provider cost, native worker output, public browser authentication or the managed store.
+
+Meshy checks use a local HTTP fixture, counted-store receipts and isolated PostgreSQL; they protect the single-POST barrier, lost reply/receipt recovery, retained completion without credentials, unknown/over-cap spend refusal, non-destructive cancellation and retained originals after failed validation. The canonical gate also runs `scripts/test_validate_meshy.py` for connectivity/world dimensions, UV/PBR presence, texture bounds and nonfinite geometry. Its invented scene does not qualify native Blender. The live operator run, memory-boundary readback, actual Meshy charge and textured views remain separate.

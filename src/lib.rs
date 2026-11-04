@@ -5,6 +5,7 @@ pub mod api;
 pub mod db;
 pub mod exec;
 pub mod image_worker;
+pub mod meshy;
 pub mod model;
 pub mod provider;
 pub mod store;

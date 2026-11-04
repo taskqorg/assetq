@@ -30,6 +30,7 @@ name = "assetq"
 version = "0.1.0"
 dependencies = [
  "agentq-runtime",
+ "base64 0.22.1",
  "coreq",
  "hex",
  "image",

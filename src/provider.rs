@@ -43,6 +43,10 @@ pub trait Provider: Send + Sync {
     fn fetch(&self, op_id: &str, index: usize) -> Result<Output, String>;
     /// `Ok(true)` confirmed stopped, `Ok(false)` provider could not confirm.
     fn cancel(&self, op_id: &str) -> Result<bool, String>;
+    /// Definitive output validation after originals have been retained/imported.
+    fn validate(&self, _op_id: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 pub struct FakeProvider {

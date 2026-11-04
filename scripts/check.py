@@ -75,6 +75,7 @@ def postgres_cluster():
 
 def rust_checks(name=None):
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
+    print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
     print(run("cargo", "fmt", "--check"), end="")
     with postgres_cluster() as pg:
         env = dict(os.environ, ASSETQ_TEST_PG=pg, ASSETQ_TEST_PG_BIN=str(pg_bin()))

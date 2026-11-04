@@ -27,7 +27,7 @@ def main():
     shutil.rmtree(stage, ignore_errors=True)
     (stage / "bin").mkdir(parents=True)
     shutil.copy2(ROOT / "target/release/assetq", stage / "bin/assetq")
-    for doc in ["assetq.md", "docs/service.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md"]:
+    for doc in ["assetq.md", "docs/service.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md", "docs/meshy-pipeline.md", "docs/evidence/5/operator.md"]:
         (stage / doc).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / doc, stage / doc)
     binary_sha = hashlib.sha256((stage / "bin/assetq").read_bytes()).hexdigest()

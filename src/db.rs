@@ -146,6 +146,13 @@ pub fn migrate(c: &mut Client) -> Result<()> {
            AND NOT EXISTS (SELECT 1 FROM recommendations r WHERE r.project = m.project AND r.method_id = m.id AND r.method_version = m.version)",
         &[&image],
     )?;
+    // Add the new Meshy version to existing projects without rewriting any prior version.
+    let meshy = crate::meshy::method();
+    let projects=tx.query("SELECT p.id FROM projects p WHERE NOT EXISTS (SELECT 1 FROM methods m WHERE m.project=p.id AND m.id='model.meshy-prop.v1' AND m.version=2)",&[])?;
+    for project in projects {
+        charge(&mut tx, meshy.to_string().len() + project.get::<_, String>(0).len())?;
+        tx.execute("INSERT INTO methods (project,id,version,status,spec) VALUES ($1,'model.meshy-prop.v1',2,'experimental',$2) ON CONFLICT DO NOTHING",&[&project.get::<_,String>(0),&meshy])?;
+    }
     commit_write(tx)?;
     Ok(())
 }
@@ -225,6 +232,7 @@ pub fn builtin_methods() -> Vec<(&'static str, i32, &'static str, Value)> {
         ("image.worker.v1", 3, "experimental", crate::image_worker::protected_method_v3()),
         ("image.worker.v1", 4, "experimental", crate::image_worker::protected_method_v4()),
         ("image.worker.v1", 5, "experimental", crate::image_worker::method()),
+        ("model.meshy-prop.v1", 2, "experimental", crate::meshy::method()),
     ]
 }
 

@@ -86,6 +86,76 @@ fn req(key: &str, constraints: Value) -> Value {
 
 const NO_PROVIDERS: &[&str] = &[];
 const FAKE: &[&str] = &["synthetic.fake"];
+
+// A3/A4, R5/R6: a definitive geometry refusal retains source objects and charge,
+// releases the job, publishes no manifest and cannot redispatch after restart.
+#[test]
+fn meshy_validation_retains_originals_without_success_manifest() {
+    struct MeshFixture(FakeProvider);
+    impl Provider for MeshFixture {
+        fn name(&self) -> &str {
+            "meshy"
+        }
+        fn submit(&self, effect: &str, request: &Value) -> Submit {
+            self.0.submit(effect, request)
+        }
+        fn lookup(&self, effect: &str) -> Result<Option<String>, String> {
+            self.0.lookup(effect)
+        }
+        fn poll(&self, _op: &str) -> Result<Poll, String> {
+            Ok(Poll::Done { outputs: 1, credits: Some(15) })
+        }
+        fn fetch(&self, _op: &str, _index: usize) -> Result<Output, String> {
+            Ok(Output {
+                content_type: "model/gltf-binary".into(),
+                reader: Box::new(std::io::Cursor::new(b"invented invalid GLB fixture".to_vec())),
+                evidence: json!({"fixture":true,"validation":{"valid":false}}),
+            })
+        }
+        fn cancel(&self, _op: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+        fn validate(&self, _op: &str) -> Result<(), String> {
+            Err("Meshy output validation failed: invented invalid GLB fixture".into())
+        }
+    }
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "meshy-fixture", 1000, 1);
+    let mut ctx = f.ctx(1 << 30);
+    ctx.providers.push(Arc::new(MeshFixture(f.fake())));
+    let mut spec = assetq::meshy::method();
+    spec["synthetic"] = json!(true);
+    let owner = Principal { project: p.project.clone(), role: "owner".into() };
+    let method = db::create_method_version(&mut c, &owner, &json!({"id":"model.meshy-prop.v1","spec":spec})).unwrap();
+    let request = json!({"method":format!("model.meshy-prop.v1@{}",method["version"]),"operation":"model.image_to_3d",
+        "text":"invented fixture","attachments":[],"constraints":{},"budget":{"max_credits":15},"idempotency_key":"meshy-refusal"});
+    let (job, created) = db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap();
+    assert!(created);
+    let id = job["id"].as_str().unwrap();
+    for _ in 0..8 {
+        exec::tick(&mut c, &ctx, "meshy-fixture").unwrap();
+    }
+    let failed = db::get_job(&mut c, &p.project, id).unwrap();
+    assert_eq!(failed["phase"], "failed");
+    assert_eq!(failed["usage"]["credits"], 15);
+    assert_eq!(failed["leased"], false);
+    assert!(failed["reason"].as_str().unwrap().contains("invented invalid GLB fixture"));
+    assert_eq!(failed["submissions"], 1);
+    let objects = c.query("SELECT id, sha256, size FROM objects WHERE job_id=$1", &[&id]).unwrap();
+    assert_eq!(objects.len(), 1);
+    let object = &objects[0];
+    ctx.store.verify(&object.get::<_, String>(1), object.get::<_, i64>(2) as u64).unwrap();
+    assert_eq!(db::get_object(&mut c, &p.project, &object.get::<_, String>(0)).unwrap()["job_id"], id);
+    assert_eq!(c.query_one("SELECT count(*) FROM manifests WHERE job_id=$1", &[&id]).unwrap().get::<_, i64>(0), 0);
+    assert!(db::audit_job(&mut c, id).is_ok());
+    assert!(!db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap().1);
+    let mut restarted = f.ctx(1 << 30);
+    restarted.providers.push(Arc::new(MeshFixture(f.fake())));
+    exec::tick(&mut c, &restarted, "restarted").unwrap();
+    assert_eq!(f.fake().submissions(), 1);
+}
+
 fn limits() -> db::Limits {
     db::Limits { quota_bytes: 1 << 30 }
 }
@@ -796,11 +866,34 @@ fn registry_recommendations_and_comparisons() {
     let owner_token = db::create_token(&mut c, "kappa", "owner").unwrap();
     let owner = db::authenticate(&mut c, &owner_token).unwrap();
     let methods = db::list_methods(&mut c, "kappa").unwrap();
-    assert_eq!(methods.as_array().unwrap().len(), 7);
+    assert_eq!(methods.as_array().unwrap().len(), 8);
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, assetq::image_worker::legacy_method());
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, assetq::image_worker::protected_method_v3());
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, assetq::image_worker::protected_method_v4());
     assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@5").unwrap().2, assetq::image_worker::method());
+    // A1/R5 adds Meshy v2; migrate old catalogs without rewriting disabled v1 or another project's registry.
+    let old_meshy = db::list_methods(&mut c, "kappa")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "model.meshy-prop.v1" && m["version"] == 1)
+        .unwrap()["spec"]
+        .clone();
+    c.execute("DELETE FROM methods WHERE project='kappa' AND id='model.meshy-prop.v1' AND version=2", &[]).unwrap();
+    db::migrate(&mut c).unwrap();
+    assert_eq!(db::resolve_method(&mut c, "kappa", "model.meshy-prop.v1@2").unwrap().2, assetq::meshy::method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "model.meshy-prop.v1@1").unwrap_err().code, "method_disabled");
+    assert_eq!(
+        db::list_methods(&mut c, "kappa")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "model.meshy-prop.v1" && m["version"] == 1)
+            .unwrap()["spec"],
+        old_meshy
+    );
     let mut spec = db::builtin_methods()[0].3.clone();
     spec["pipeline_revision"] = json!("2");
     let body = json!({"id": "synthetic.fake", "status": "experimental", "spec": spec});
@@ -873,7 +966,7 @@ fn registry_scope_and_expired_fences() {
     let body = json!({"id": "private-method", "spec": db::builtin_methods()[0].3});
     db::create_method_version(&mut c, &owner_a, &body).unwrap();
     assert!(db::resolve_method(&mut c, &b.project, "private-method@1").is_err());
-    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 7);
+    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 8);
     let rec = db::propose_recommendation(
         &mut c,
         &a,
@@ -1362,7 +1455,7 @@ fn service_restart_recovers_job_through_cli() {
     let audit = admin(&["audit", &id]);
     assert!(audit.contains("matches stored state"));
     let methods = cli(&f, &s, &token, &["methods"]);
-    assert_eq!(methods.as_array().unwrap().len(), 7);
+    assert_eq!(methods.as_array().unwrap().len(), 8);
     let rec = cli(&f, &s, &token, &["recommend", "prop image"]);
     assert_eq!(rec["recommended"], Value::Null);
     // A corrupted download is refused and leaves no output file.

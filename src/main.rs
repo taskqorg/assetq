@@ -15,6 +15,9 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   work                                                 executors only (separate host)
   image-serve <accepted-job-id> <pinned-adapter>         isolated one-job qualification; loopback API
   image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; no generation
+  meshy-serve <accepted-job-id> <private-profile.json>  operator-bound initial Meshy qualification
+  meshy-admit                                        loopback admission only; zero executors/effects
+  meshy-preflight [blender-executable]                read-only host/candidate/budget prerequisites
   migrate                                              apply schema and built-in methods
   project <id> [--budget N] [--max-active N]           create or update a project
   token <project> [--role member|owner]                create a grant; prints it once
@@ -76,6 +79,12 @@ fn run(args: &[String]) -> Result<(), String> {
         "image-turn" => assetq::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
         "image-serve" => serve(rest, "generate"),
         "image-import-serve" => serve(rest, "retained"),
+        "meshy-serve" => serve(rest, "meshy"),
+        "meshy-admit" => serve(rest, "meshy-admit"),
+        "meshy-preflight" => {
+            print(&assetq::meshy::preflight(rest.first().map(std::path::Path::new))?);
+            Ok(())
+        }
         "serve" => serve(rest, ""),
         "work" => {
             let ctx = Arc::new(exec::Ctx::new(Config::from_env()?).map_err(|e| e.to_string())?);
@@ -160,7 +169,13 @@ fn serve(rest: &[String], qualification: &str) -> Result<(), String> {
     let listen = opt(rest, "--listen").unwrap_or(if !qualification.is_empty() { "127.0.0.1:0" } else { "127.0.0.1:8740" }.into());
     let threads: usize = opt(rest, "--http-threads").unwrap_or("8".into()).parse().map_err(|_| "--http-threads must be an integer")?;
     let mut ctx = exec::Ctx::new(cfg).map_err(|e| e.to_string())?;
-    if !qualification.is_empty() {
+    if qualification == "meshy-admit" {
+        if !rest.is_empty() || ctx.cfg.executors != 0 || ctx.cfg.fake_provider_dir.is_some() || !listen.starts_with("127.0.0.1:") {
+            return Err("Meshy admission requires no arguments, zero executors, loopback and no synthetic provider".into());
+        }
+        ctx.providers.retain(|p| p.name() != assetq::meshy::PROVIDER);
+        ctx.providers.push(Arc::new(assetq::meshy::Meshy::observer(ctx.cfg.clone())?));
+    } else if !qualification.is_empty() {
         if rest.len() != 2
             || ctx.cfg.executors != 1
             || ctx.cfg.max_execution_ms > 600_000
@@ -169,19 +184,25 @@ fn serve(rest: &[String], qualification: &str) -> Result<(), String> {
         {
             return Err("image qualification/import requires one executor, <=600000 ms, loopback and no synthetic provider".into());
         }
-        let root = ctx.cfg.image_worker_root.clone().ok_or("image worker root required")?;
-        let provider = if qualification == "retained" {
-            assetq::image_worker::ImageWorker::retained_job(ctx.cfg.clone(), root, &pos(rest, 0)?, &pos(rest, 1)?)?
+        if qualification == "meshy" {
+            let provider = assetq::meshy::Meshy::bound(ctx.cfg.clone(), &pos(rest, 0)?, std::path::Path::new(&pos(rest, 1)?))?;
+            ctx.providers.retain(|p| p.name() != assetq::meshy::PROVIDER);
+            ctx.providers.push(Arc::new(provider));
         } else {
-            assetq::image_worker::ImageWorker::qualification_job(
-                ctx.cfg.clone(),
-                root,
-                &pos(rest, 0)?,
-                std::path::Path::new(&pos(rest, 1)?),
-            )?
-        };
-        ctx.providers.retain(|p| p.name() != assetq::image_worker::PROVIDER);
-        ctx.providers.push(Arc::new(provider));
+            let root = ctx.cfg.image_worker_root.clone().ok_or("image worker root required")?;
+            let provider = if qualification == "retained" {
+                assetq::image_worker::ImageWorker::retained_job(ctx.cfg.clone(), root, &pos(rest, 0)?, &pos(rest, 1)?)?
+            } else {
+                assetq::image_worker::ImageWorker::qualification_job(
+                    ctx.cfg.clone(),
+                    root,
+                    &pos(rest, 0)?,
+                    std::path::Path::new(&pos(rest, 1)?),
+                )?
+            };
+            ctx.providers.retain(|p| p.name() != assetq::image_worker::PROVIDER);
+            ctx.providers.push(Arc::new(provider));
+        }
     }
     let ctx = Arc::new(ctx);
     let server = Arc::new(assetq::api::bind(&listen).map_err(|e| format!("bind {listen}: {e}"))?);
