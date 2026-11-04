@@ -188,3 +188,29 @@ impl Browser {
         Ok(format!("{COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    // R3: an expired session cannot keep ambient browser authority alive.
+    #[test]
+    fn management_sessions_expire_without_renewal() {
+        let guard = "invented-guard-proof-for-isolated-unit-test";
+        let browser = Browser::from_json(&json!({"guard_secret":guard,"subjects":{"invented":["invented-token"]}}).to_string()).unwrap();
+        let id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        browser
+            .sessions
+            .lock()
+            .unwrap()
+            .insert(id.into(), Session { subject: "invented".into(), csrf: "invented-csrf".into(), expires: Instant::now() + TTL });
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let mut client = std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
+        write!(client,"GET /browser/v1/objects?project=invented HTTP/1.1\r\nHost: assets.ufobe.com\r\nX-AssetQ-Guard: {guard}\r\nX-AssetQ-Subject: invented\r\nCookie: {COOKIE}={id}\r\nConnection: close\r\n\r\n").unwrap();
+        let req = server.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        assert_eq!(browser.check_session(&req).unwrap(), "invented");
+        browser.sessions.lock().unwrap().get_mut(id).unwrap().expires = Instant::now() - Duration::from_secs(1);
+        assert_eq!(browser.check_session(&req).unwrap_err().status, 403);
+    }
+}

@@ -30,4 +30,12 @@ Initial Windows canonical execution failed because the selected GNU toolchain la
 
 Computer-use inventory reports no enabled apps or browsers. Actual browser captures and geometry/interaction cells are **Not tested**, not passed or simulated. Host TLS, sign-in, private catalog and publication were not accessed from this Windows source attempt. The existing private host workstream must supply those observations before final acceptance. New backup/restore qualification stays deferred/unknown under the contract.
 
+## Source review and corrections
+
+A read-only Astra review of frozen revision `d7767e1` found four failures: default Jobs supplied `phase=` and hid the history; default Methods supplied `operation=` and hid the registry; verified by-key recovery retained the pending key indefinitely; and member comparison/proposal controls were hidden despite shared API permission. No auth/CSRF/cross-project bypass was established by that source review; it did not prove browser or live behavior.
+
+The client now omits absent optional predicates, clears a pending key only after verified original-job recovery, and retains owner checks specifically around execution, registration and promotion. Component checks cover default/cleared URLs and absent/unknown/recovered request-key transitions; the HTTP fixture exercises the actual client-generated list URLs and member creation/proposal versus owner execution/promotion denials. The isolated HTTP reproducer observed the old empty-filter requests returning zero rows. Corrected client URLs returned one durable job and eight seeded methods on the same fixture. The focused management checks passed, including session expiry without renewal and member-versus-owner boundaries. Actual browser reproduction remains unavailable. Pending-key recovery is component-level before/after state evidence, not browser proof.
+
+A read-only public DNS lookup observed `assets.ufobe.com` as a CNAME to `ufobe.com`, with a 300-second TTL and A resolution `104.250.138.186`. It does not establish DNS account ownership or the intended private host/site. The canonical HTTPS HEAD could not connect from this environment; TLS, sign-in and live reachability remain unknown. No DNS or HTTPS configuration was changed.
+
 Full canonical and packaged-candidate outcomes are recorded on the task with their exact source revision when available. This record does not claim them in advance. The workstream remains incomplete until the authenticated deployed application and required real journeys exist.

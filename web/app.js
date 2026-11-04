@@ -40,7 +40,7 @@ function loseSession(message) {
 async function api(path, {method = 'GET', body, binary = false} = {}) {
   if (!session) throw new Error('No authorized browser session.');
   const scope = project, identity = session;
-  const u = new URL('/browser/v1/' + path, location.origin); u.searchParams.set('project', project);
+  const u = AssetQRequest.apiUrl(path, project, location.origin);
   const headers = {};
   if (method !== 'GET') headers['X-CSRF-Token'] = session.csrf;
   if (body !== undefined && !binary) headers['Content-Type'] = 'application/json';
@@ -176,13 +176,9 @@ async function newJob() {
     } catch (e) { uploadStatus.textContent = e.message; } finally { files.disabled = false; }
   }});
   const storageKey = `assetq-pending-key:${project}`;
-  let key;
-  try { key = sessionStorage.getItem(storageKey) || crypto.randomUUID(); sessionStorage.setItem(storageKey, key); }
-  catch { throw new Error('Session storage is required to preserve request identity across a reload.'); }
-  try {
-    const retained = await api(`jobs/by-key/${encodeURIComponent(key)}`);
-    return [heading('Request already accepted'),note('The retained request key resolves to an existing durable job. No new submission is needed.'),link('Open original job',`/jobs/${retained.id}`)];
-  } catch(e) { if(e.status !== 404) throw e; }
+  const pending = await AssetQRequest.pendingRequest(sessionStorage,storageKey,key=>api(`jobs/by-key/${encodeURIComponent(key)}`),()=>crypto.randomUUID());
+  const key = pending.key;
+  if (pending.job) return [heading('Request already accepted'),note('The retained key resolved to the original durable job. A new request now requires an explicit action.'),link('Open original job',`/jobs/${pending.job.id}`),button('Start another request',()=>render())];
   return editor('New generation', [el('label', {}, 'Pinned method', select), evidence, field('Brief', 'text', '', 'textarea', {maxlength: 65536}), el('label', {}, 'Attachments', attachments), files, uploadStatus,
     input('Maximum credits for this job', 'max_credits', '0', 'number', {min: 0, step: 1, required: ''}), jsonField('Method constraints', 'constraints', {}),
     note('Submission uses one retained request key. A lost response stays unknown; retry preserves that key and never authorizes a replacement provider operation.')], async (f, status) => {
@@ -249,7 +245,7 @@ async function benchmarkSetup() {
   },'Create frozen comparison');
   const form=result[1];
   const count=()=>{const d=datasets.find(d=>`${d.id}@${d.version}`===form.elements.dataset.value);matrix.textContent=`Planned samples: ${(d?.document?.cases?.length || 0)*methodSelect.selectedOptions.length*Number(form.elements.repeats.value)}. The server enforces operation, revision, job and credit limits before admission.`;};
-  form.addEventListener('change',count);count();return role()==='owner'?result:[heading('New benchmark'),note('An owner grant is required to create and run comparisons.')];
+  form.addEventListener('change',count);count();return result;
 }
 
 async function benchmarks(params, token, id) {
@@ -274,7 +270,7 @@ async function benchmarks(params, token, id) {
   return [heading(useCase || `Benchmark ${short(id)}`,link('Benchmarks','/benchmarks')),actions,comparison.state==='incomplete'?note('Incomplete evidence. Missing, failed, unknown-usage and unjudged cases remain visible.'):null,
     panel(el('h2',{},'Frozen plan'),jsonDetails('Dataset, evaluator, methods and bounds',comparison.plan || comparison,true)),
     panel(el('h2',{},'Candidate evidence'),metricTable(comparison.method_metrics || []),jsonDetails('Full metrics',comparison.method_metrics || comparison.results),jsonDetails('Missing evidence',comparison.missing_cases || [])),
-    el('h2',{},'Case outputs'),el('div',{class:'samples'},sampleViews),panel(el('h2',{},'Scoped recommendation'),el('p',{},recommendation.recommended ? value(recommendation.recommended) : `None qualified: ${recommendation.none_reason || recommendation.reason || 'No promoted route.'}`),properties({'Revision':recommendation.revision,'Observed':recommendation.observed_at}),jsonDetails('Scope, records and qualification evidence',recommendation)),requireOwner(recommendationForm(comparison,methodsFromComparison(comparison)))];
+    el('h2',{},'Case outputs'),el('div',{class:'samples'},sampleViews),panel(el('h2',{},'Scoped recommendation'),el('p',{},recommendation.recommended ? value(recommendation.recommended) : `None qualified: ${recommendation.none_reason || recommendation.reason || 'No promoted route.'}`),properties({'Revision':recommendation.revision,'Observed':recommendation.observed_at}),jsonDetails('Scope, records and qualification evidence',recommendation)),recommendationForm(comparison,methodsFromComparison(comparison))];
 }
 
 function metricTable(metrics) {
@@ -284,7 +280,7 @@ function metricTable(metrics) {
 }
 function methodsFromComparison(c){return c.method_versions || [...new Set((c.samples||[]).map(s=>s.method))];}
 function recommendationForm(c,pins){
-  const form=editor('Propose scoped recommendation',[input('Pinned method','method',pins[0]||''),input('Evidence observed at (ISO UTC)','observed_at',new Date().toISOString()),jsonField('Exact constraints','constraints',c.plan?.constraints || {}),field('Evidence and limitations','evidence','','textarea',{required:''})],async(f,status)=>{const record=await api('recommendations',{method:'POST',body:AssetQRequest.recommendation(f,c)});status.replaceChildren('Proposal retained. ',button('Promote this exact scope',async()=>{if(!confirm('Promote this pinned method for the displayed use case and exact constraints?'))return;try{await api(`recommendations/${record.id}/promote`,{method:'POST'});status.textContent='Promotion recorded.';}catch(e){status.textContent=e.message;}}));},'Retain proposal')[1];
+  const form=editor('Propose scoped recommendation',[input('Pinned method','method',pins[0]||''),input('Evidence observed at (ISO UTC)','observed_at',new Date().toISOString()),jsonField('Exact constraints','constraints',c.plan?.constraints || {}),field('Evidence and limitations','evidence','','textarea',{required:''})],async(f,status)=>{const record=await api('recommendations',{method:'POST',body:AssetQRequest.recommendation(f,c)});status.replaceChildren('Proposal retained. ',requireOwner(button('Promote this exact scope',async()=>{if(!confirm('Promote this pinned method for the displayed use case and exact constraints?'))return;try{await api(`recommendations/${record.id}/promote`,{method:'POST'});status.textContent='Promotion recorded.';}catch(e){status.textContent=e.message;}})));},'Retain proposal')[1];
   return el('details',{},el('summary',{},'Recommendation proposal and owner promotion'),form);
 }
 

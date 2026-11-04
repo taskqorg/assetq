@@ -1,6 +1,25 @@
 'use strict';
 // Form-to-API payloads; the service remains the authority for every limit.
 const AssetQRequest = (() => {
+  function apiUrl(path, project, origin) {
+    const url = new URL('/browser/v1/' + path, origin);
+    for (const key of ['phase','operation','capability','status','after']) if (url.searchParams.get(key) === '') url.searchParams.delete(key);
+    url.searchParams.set('project',project);
+    return url;
+  }
+  async function pendingRequest(storage, storageKey, lookup, createKey) {
+    let key = storage.getItem(storageKey);
+    if (key) {
+      try {
+        const job = await lookup(key);
+        storage.removeItem(storageKey);
+        return {job,key};
+      } catch(e) { if (e.status !== 404) throw e; }
+    }
+    key = key || createKey();
+    storage.setItem(storageKey,key);
+    return {key};
+  }
   function integer(v, label, min = 0, max = Number.MAX_SAFE_INTEGER) {
     const n = Number(v);
     if (String(v).trim() === '' || !Number.isSafeInteger(n) || n < min || n > max) throw new Error(`${label} must be an integer in ${min}–${max}.`);
@@ -30,6 +49,6 @@ const AssetQRequest = (() => {
     return {use_case:c.use_case || c.plan?.use_case,method:f.method,observed_at:f.observed_at,
       constraints:object(f.constraints),evidence:{comparison:c.id,judgment:f.evidence}};
   }
-  return {job,comparison,method,recommendation};
+  return {apiUrl,pendingRequest,job,comparison,method,recommendation};
 })();
 if (typeof module !== 'undefined') module.exports = AssetQRequest;

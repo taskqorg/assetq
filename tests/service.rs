@@ -1546,6 +1546,24 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
     assert_eq!(r.status().as_u16(), 201);
     let job: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
     let jid = job["job"]["id"].as_str().unwrap();
+    let urls = Command::new("node").current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["-e", "const r=require('./web/requests.js'); console.log(JSON.stringify(['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100'].map(p=>{const u=r.apiUrl(p,'web-a','https://assets.ufobe.com');return {before:'/browser/v1/'+p+'&project=web-a',after:u.pathname+u.search};})))"])
+        .output().unwrap();
+    assert!(urls.status.success());
+    for paths in serde_json::from_slice::<Vec<Value>>(&urls.stdout).unwrap() {
+        let path = paths["after"].as_str().unwrap();
+        let mut before = get(paths["before"].as_str().unwrap(), "invented-member", cookie).call().unwrap();
+        let before: Value = serde_json::from_str(&before.body_mut().read_to_string().unwrap()).unwrap();
+        let mut response = get(path, "invented-member", cookie).call().unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        let page: Value = serde_json::from_str(&response.body_mut().read_to_string().unwrap()).unwrap();
+        println!(
+            "R9 empty-filter regression: before={} rows, after={} rows ({path})",
+            before["items"].as_array().unwrap().len(),
+            page["items"].as_array().unwrap().len()
+        );
+        assert!(!page["items"].as_array().unwrap().is_empty(), "default browser list must not apply an exact empty filter: {path}");
+    }
     assert_eq!(db::job_by_key(&mut c, "web-a", "browser-original").unwrap()["id"], jid);
     assert_eq!(db::job_by_key(&mut c, "web-b", "browser-original").unwrap_err().status, 404);
     assert_eq!(db::get_method(&mut c, "web-a", "image.worker.v1", "1").unwrap()["status"], "disabled");
@@ -1577,6 +1595,51 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
             .unwrap()
             .status()
             .as_u16(),
+        403
+    );
+    // Members can freeze a comparison/propose guidance; only owners run/promote.
+    let owner_principal = db::authenticate(&mut c, &owner).unwrap();
+    assetq::registry::register(&mut c,&owner_principal,"dataset",&json!({"id":"browser-input","version":1,"document":{"operation":"synthetic.generate","cases":[{"id":"one","text":"invented fixture","attachments":[]}]}})).unwrap();
+    assetq::registry::register(
+        &mut c,
+        &owner_principal,
+        "evaluator",
+        &json!({"id":"browser-rubric","version":1,"document":{"decision_rule":"invented rule","quality_rubric":"invented rubric"}}),
+    )
+    .unwrap();
+    let body = json!({"use_case":"browser-fixture","dataset_version":"browser-input@1","evaluator_version":"browser-rubric@1","method_versions":["synthetic.fake@1"],"plan":{"dataset":"browser-input@1","evaluator":"browser-rubric@1","constraints":{},"repeats":1,"max_jobs":1,"max_credits":1}});
+    let mut response = post("/browser/v1/comparisons?project=web-a", "invented-member", cookie, csrf)
+        .header("Content-Type", "application/json")
+        .send(body.to_string())
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    let comparison: Value = serde_json::from_str(&response.body_mut().read_to_string().unwrap()).unwrap();
+    assert_eq!(
+        post(&format!("/browser/v1/comparisons/{}/run?project=web-a", comparison["id"].as_str().unwrap()), "invented-member", cookie, csrf)
+            .send("")
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    let proposal = json!({"use_case":"browser-fixture","method":"synthetic.fake@1","constraints":{},"evidence":{"fixture":true},"observed_at":"2026-11-05T00:00:00Z"});
+    let mut response = post("/browser/v1/recommendations?project=web-a", "invented-member", cookie, csrf)
+        .header("Content-Type", "application/json")
+        .send(proposal.to_string())
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    let record: Value = serde_json::from_str(&response.body_mut().read_to_string().unwrap()).unwrap();
+    assert_eq!(
+        post(
+            &format!("/browser/v1/recommendations/{}/promote?project=web-a", record["id"].as_str().unwrap()),
+            "invented-member",
+            cookie,
+            csrf
+        )
+        .send("")
+        .unwrap()
+        .status()
+        .as_u16(),
         403
     );
     for _ in 0..4 {

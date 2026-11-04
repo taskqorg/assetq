@@ -4,6 +4,26 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('../web/requests.js');
 
+test('default and cleared filters omit exact empty predicates', () => {
+  for(const path of ['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100']) {
+    const url=request.apiUrl(path,'project-a','https://assets.ufobe.com');
+    assert.equal(url.searchParams.has('phase'),false);assert.equal(url.searchParams.has('operation'),false);
+    assert.equal(url.searchParams.get('project'),'project-a');assert.ok(url.searchParams.get('limit'));
+  }
+  assert.equal(request.apiUrl('jobs?phase=failed','project-a','https://assets.ufobe.com').searchParams.get('phase'),'failed');
+});
+test('unknown submissions retain the original key; verified recovery permits another request', async () => {
+  const data=new Map(), storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};
+  let seq=0;const make=()=>`key-${++seq}`, absent=async()=>{throw {status:404};};
+  const first=await request.pendingRequest(storage,'pending',absent,make);assert.equal(first.key,'key-1');
+  assert.equal((await request.pendingRequest(storage,'pending',absent,make)).key,first.key);
+  await assert.rejects(request.pendingRequest(storage,'pending',async()=>{throw new Error('observation unknown');},make));
+  assert.equal(storage.getItem('pending'),first.key);
+  const recovered=await request.pendingRequest(storage,'pending',async key=>({id:'original-job',key}),make);
+  assert.equal(recovered.job.id,'original-job');assert.equal(storage.getItem('pending'),null);
+  assert.equal((await request.pendingRequest(storage,'pending',absent,make)).key,'key-2');
+});
+
 test('generation preserves the retained key and pin without accepting authority fields', () => {
   const method={id:'image.worker.v1',version:5,spec:{operation:'image.generate'}};
   const form={method:'image.worker.v1@5',text:'original brief',attachments:'image-1\nimage-2',constraints:'{"max_width":1024}',max_credits:'0',permissions:'invented owner'};
