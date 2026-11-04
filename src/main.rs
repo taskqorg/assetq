@@ -28,13 +28,15 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   image-observe <private-workspace-dir> [--cancel]      reconcile original protected operation; never launch or release
 
 Client (ASSETQ_URL, default http://127.0.0.1:8740; ASSETQ_TOKEN):
-  submit --method M --operation O --key K --budget N [--text T] [--attach ID].. [--set k=JSON]..
+  submit --method M --operation O --key K --budget N [--recommendation ID] [--text T] [--attach ID].. [--set k=JSON]..
   jobs [--phase P] [--after ID] | status <job> | events <job> | result <job> | cancel <job>
   upload <file> --type CONTENT_TYPE
   objects [--after ID] | object <id> | download <id> <out-file> | accept <id> accepted|rejected|pending
-  methods | method-add <spec.json>
+  methods [--operation O] [--capability C] [--status S] [--constraints JSON] [--after CURSOR] [--limit N] | method-add <spec.json>
   recommend <use-case> [--constraints JSON] | recommend-propose <body.json> | recommend-promote <id>
   comparisons [--use-case U] | comparison-add <body.json>
+  datasets | dataset-add <revision.json> | evaluators | evaluator-add <revision.json>
+  comparison <id> | comparison-run <id> | comparison-score <id> <judgment.json>
   ops                                                  operational status";
 
 fn main() -> ExitCode {
@@ -312,7 +314,7 @@ fn client(cmd: &str, rest: &[String]) -> Result<(), String> {
     let api = Api::new()?;
     let page = |base: &str| {
         let mut q = vec![];
-        for k in ["phase", "after", "use-case"] {
+        for k in ["phase", "after", "use-case", "operation", "capability", "status", "constraints", "limit"] {
             if let Some(v) = opt(rest, &format!("--{k}")) {
                 q.push(format!("{}={}", k.replace('-', "_"), enc(&v)));
             }
@@ -327,18 +329,19 @@ fn client(cmd: &str, rest: &[String]) -> Result<(), String> {
                 constraints.insert(k.into(), serde_json::from_str(v).map_err(|e| format!("--set {k}: {e}"))?);
             }
             let budget: u64 = opt(rest, "--budget").ok_or("--budget required")?.parse().map_err(|_| "--budget must be an integer")?;
-            api.post(
-                "/v1/jobs",
-                &json!({
-                    "method": opt(rest, "--method").ok_or("--method required")?,
-                    "operation": opt(rest, "--operation").ok_or("--operation required")?,
-                    "idempotency_key": opt(rest, "--key").ok_or("--key required")?,
-                    "text": opt(rest, "--text").unwrap_or_default(),
-                    "attachments": multi(rest, "--attach"),
-                    "constraints": constraints,
-                    "budget": {"max_credits": budget},
-                }),
-            )?
+            let mut body = json!({
+                "method": opt(rest, "--method").ok_or("--method required")?,
+                "operation": opt(rest, "--operation").ok_or("--operation required")?,
+                "idempotency_key": opt(rest, "--key").ok_or("--key required")?,
+                "text": opt(rest, "--text").unwrap_or_default(),
+                "attachments": multi(rest, "--attach"),
+                "constraints": constraints,
+                "budget": {"max_credits": budget},
+            });
+            if let Some(rec) = opt(rest, "--recommendation") {
+                body["recommendation"] = json!(rec);
+            }
+            api.post("/v1/jobs", &body)?
         }
         "jobs" => api.get(&page("/v1/jobs"))?,
         "status" => api.get(&format!("/v1/jobs/{}", enc(&pos(rest, 0)?)))?,
@@ -367,17 +370,25 @@ fn client(cmd: &str, rest: &[String]) -> Result<(), String> {
             Api::finish(r)?
         }
         "download" => download(&api, &pos(rest, 0)?, &pos(rest, 1)?)?,
-        "methods" => api.get("/v1/methods")?,
+        "methods" => api.get(&page("/v1/methods"))?,
         "method-add" => api.post("/v1/methods", &read_json_file(&pos(rest, 0)?)?)?,
         "recommend" => api.get(&format!(
-            "/v1/recommendations?use_case={}&constraints={}",
+            "/v1/recommendations?use_case={}&constraints={}{}",
             enc(&pos(rest, 0)?),
-            enc(&opt(rest, "--constraints").unwrap_or("{}".into()))
+            enc(&opt(rest, "--constraints").unwrap_or("{}".into())),
+            opt(rest, "--operation").map(|s| format!("&operation={}", enc(&s))).unwrap_or_default()
         ))?,
         "recommend-propose" => api.post("/v1/recommendations", &read_json_file(&pos(rest, 0)?)?)?,
         "recommend-promote" => api.post(&format!("/v1/recommendations/{}/promote", enc(&pos(rest, 0)?)), &json!({}))?,
         "comparisons" => api.get(&page("/v1/comparisons"))?,
         "comparison-add" => api.post("/v1/comparisons", &read_json_file(&pos(rest, 0)?)?)?,
+        "comparison" => api.get(&format!("/v1/comparisons/{}", enc(&pos(rest, 0)?)))?,
+        "comparison-run" => api.post(&format!("/v1/comparisons/{}/run", enc(&pos(rest, 0)?)), &json!({}))?,
+        "comparison-score" => api.post(&format!("/v1/comparisons/{}/scores", enc(&pos(rest, 0)?)), &read_json_file(&pos(rest, 1)?)?)?,
+        "datasets" => api.get(&page("/v1/datasets"))?,
+        "evaluators" => api.get(&page("/v1/evaluators"))?,
+        "dataset-add" => api.post("/v1/datasets", &read_json_file(&pos(rest, 0)?)?)?,
+        "evaluator-add" => api.post("/v1/evaluators", &read_json_file(&pos(rest, 0)?)?)?,
         "ops" => api.get("/v1/status")?,
         _ => return Err(USAGE.into()),
     };

@@ -52,6 +52,18 @@ Compare candidates on a fixed versioned input set, repeated samples where needed
 
 API, CLI and agent tools read the same method registry and recommendation records. Human guidance is a projection of those records. Do not maintain a second handwritten recommendation source.
 
+The bounded comparison contract is [method evaluation](docs/method-evaluation.md). Dataset and evaluator revisions are immutable project-owned records.
+
+A comparison pins their contents, exact method versions, operation, use case, constraints, repeat count, decision rule and maximum job/credit budget before admission.
+
+Its samples use ordinary durable jobs and retain incomplete, failed, unknown-usage and unjudged cases. Resuming a comparison reuses sample identities and never replaces an uncertain job.
+
+Read-only qualification records link real retained receipts to exact registry versions without rewriting their specifications or authorizing dispatch. Historical tool/output qualification and owner pipeline acceptance do not imply general generation eligibility or finished-asset quality.
+
+A recommendation read includes its revision, evidence, observation time and an explicit scoped none result when no owner-promoted route is qualified.
+
+Control summaries expose registry/comparison/recommendation revisions for downstream consumers, with private assets accessible only through scoped AssetQ routes.
+
 ## Initial generation methods
 
 **Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.

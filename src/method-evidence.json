@@ -1,0 +1,70 @@
+{
+  "image.worker.v1@2": {
+    "scope": "one retained original crate; historical native tool/output path",
+    "observed_at": "2026-11-01",
+    "operation": "image.generate",
+    "technical": "verified original PNG, immutable import and authenticated retrieval",
+    "general_dispatch": "refused",
+    "reason": "historical example does not qualify reusable protected launch or the current image capability",
+    "job": "0e1fdfd2-9f45-46a0-ae27-0b4ba6558968",
+    "original_sha256": "fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa",
+    "runtime_revision": "513193c8a96f3de1c71a86291a679230817ce0b2",
+    "credits": null,
+    "usage_reason": "native subscription charge not reported",
+    "owner_judgment": "existing crate accepted for image-to-3D; not a general method verdict",
+    "evidence": [
+      "https://github.com/taskqorg/assetq/blob/d543672ffa8f816742135a03ee427a9c39ce0b2e/docs/evidence/4/native-receipt.json",
+      "https://github.com/taskqorg/assetq/blob/d543672ffa8f816742135a03ee427a9c39ce0b2e/docs/evidence/4/README.md"
+    ]
+  },
+  "image.worker.v1@5": {
+    "scope": "one bounded protected blue-wedge generation",
+    "observed_at": "2026-11-04",
+    "operation": "image.generate",
+    "technical": "completed original operation; failed 1024-axis validation; native-size import separately verified at version 6",
+    "general_dispatch": "refused",
+    "reason": "one qualified tool/output path does not qualify general dispatch; version 5 output exceeded its immutable request bounds",
+    "job": "006a1ef7-a38f-43ad-af9f-a61f51794cd2",
+    "original_sha256": "880bdc25d7add790a766bad2123aa36b4157c6585e991c8d07743cf0be35e960",
+    "runtime_revision": "70f85434546bd1c303ccdb7b0dd71866421627e2",
+    "credits": null,
+    "usage_reason": "152203 source tokens; subscription charge and image backend model unknown",
+    "owner_judgment": "pending",
+    "evidence": [
+      "https://github.com/taskqorg/assetq/blob/d543672ffa8f816742135a03ee427a9c39ce0b2e/docs/evidence/4/native-size-import.md"
+    ]
+  },
+  "model.meshy-prop.v1@2": {
+    "scope": "crate-to-prop pipeline check, meshy-t2, Smart Topology, 3000-triangle target, 2K PBR",
+    "observed_at": "2026-11-04",
+    "operation": "model.image_to_3d",
+    "technical": "managed original GLB/textures and nine authenticated hash-matched downloads; Blender validation passed",
+    "general_dispatch": "refused",
+    "reason": "operator binding, fresh provider/ledger and host qualification remain required; no general recommendation promoted",
+    "job": "eb75039d-87bb-498e-9808-6b52e43463dd",
+    "provider_operation": "01a1a6c5-4d6f-719f-a60b-8f04dd24c344",
+    "input_sha256": "fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa",
+    "original_sha256": "5e24db4bfe192b4cb294849fa0683a76d3cd2a7b46eaa5fbdec526da8f353c40",
+    "report_sha256": "1db28cbb5034c77000aed67cc73f5eac818c2e64969e65605da30c1a3211605c",
+    "credits": 15,
+    "workstream_credits_observed": 60,
+    "triangles": 2815,
+    "components": 424,
+    "dimensions": [
+      1.0,
+      1.0,
+      0.9281949996948242
+    ],
+    "owner_judgment": "accepted as a pipeline check, not as a finished game asset",
+    "evidence": [
+      "https://github.com/taskqorg/assetq/blob/d543672ffa8f816742135a03ee427a9c39ce0b2e/docs/evidence/6/README.md",
+      "https://github.com/taskqorg/assetq/issues/6#issuecomment-6634471512",
+      "https://github.com/taskqorg/assetq/issues/6#issuecomment-6634512869"
+    ],
+    "limits": [
+      "PM-attributed host observations; private raw receipts not independently inspected",
+      "bounded restart and storage faults qualified on separate isolated stores",
+      "backup/restore deferred and unknown; native agent-capacity telemetry open"
+    ]
+  }
+}

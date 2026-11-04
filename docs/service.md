@@ -42,9 +42,13 @@ All routes except `GET /v1/health` need `Authorization: Bearer <token>`. A token
 | `GET/POST /v1/methods` | Registry; a POST (owner) creates the next version |
 | `GET /v1/recommendations?use_case=&constraints={}`, `POST`, `POST /{id}/promote` | One promoted route for exact use-case/constraints scope, or an explicit none reason; agents propose, owners promote |
 | `GET/POST /v1/comparisons` | Dataset, evaluator and method versions, results and missing cases |
-| `GET /v1/status` | Jobs by phase, uncertain submissions, per-method outcomes and usage, provider health, store use, integrity and backup |
+| `GET/POST /v1/datasets`, `GET/POST /v1/evaluators` | Bounded project revision lists; owner registers immutable inputs/rubrics |
+| `GET /v1/comparisons/{id}`, `POST /{id}/run`, `POST /{id}/scores` | Fixed bounded job matrix, resumable synthetic admission, technical metrics and immutable human judgments |
+| `GET /v1/status` | Jobs by phase, uncertain submissions, per-method outcomes/usage, provider health, store/integrity/backup/restore observations and registry/evaluation revisions |
 
-A job request has `operation`, `method` (`id` or `id@version`), `text` (64 KiB at most), `attachments` (16 object IDs at most, same project), typed `constraints` declared by the method, `budget.max_credits` and `idempotency_key`. Unknown fields, including permissions or configuration, are refused.
+A job request has `operation`, `method` (`id` or `id@version`), `text` (64 KiB at most), `attachments` (16 object IDs at most, same project), typed `constraints` declared by the method, `budget.max_credits` and `idempotency_key`. Optional `recommendation` pins a promoted record ID to that exact method and constraints at admission; later promotion changes do not alter the job or an identical retry. Unknown fields, including permissions or configuration, are refused.
+
+[Method evaluation](method-evaluation.md) defines request shapes, comparison budgets, operation-scoped recommendation reads and qualification evidence. Unfiltered method reads retain their array shape; filtered reads return `{items,next}` with a cursor over scanned registry rows. Lists are bounded to 500 rows. Dataset/evaluator list cursors are `id@version`. Comparison admission only uses the explicitly synthetic provider in this delivery. Real-provider methods remain inspectable, with their scoped real receipts, existing native/operator prerequisites and no automatically promoted route. Schema-1 migration adds evaluation tables without rewriting existing methods, jobs, requests or provenance.
 
 ## Limits
 

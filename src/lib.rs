@@ -8,6 +8,7 @@ pub mod image_worker;
 pub mod meshy;
 pub mod model;
 pub mod provider;
+pub mod registry;
 pub mod store;
 pub mod traces;
 

@@ -955,6 +955,210 @@ fn registry_recommendations_and_comparisons() {
 }
 
 // R3: an owner token cannot inspect or promote another project's evidence.
+// Task #7 A2-A7/R5/R7: immutable inputs, bounded repeated jobs, restart-safe
+// identities and human judgment must survive registry and recommendation edits.
+#[test]
+fn registry_bounded_comparison_jobs_and_pins() {
+    use assetq::registry;
+    let f = fixture();
+    let mut c = f.client();
+    let (member, _) = project(&mut c, "bench", 64, 1);
+    let owner = Principal { project: member.project.clone(), role: "owner".into() };
+    let (foreign, _) = project(&mut c, "foreign-bench", 0, 1);
+    let dataset = json!({"id":"crate", "version":1, "document":{"operation":"synthetic.generate", "cases":[{"id":"blue", "text":"invented blue crate", "attachments":[]}]}});
+    assert_eq!(registry::register(&mut c, &member, "dataset", &dataset).unwrap_err().status, 403);
+    let frozen = registry::register(&mut c, &owner, "dataset", &dataset).unwrap();
+    assert_eq!(registry::register(&mut c, &owner, "dataset", &dataset).unwrap(), frozen);
+    let mut changed = dataset.clone();
+    changed["document"]["cases"][0]["text"] = json!("changed input");
+    assert_eq!(registry::register(&mut c, &owner, "dataset", &changed).unwrap_err().code, "immutable_revision");
+    registry::register(&mut c, &owner, "evaluator", &json!({"id":"quality", "version":1, "document":{"decision_rule":"technical validity, then owner quality, then lower measured credits", "quality_rubric":"0 unusable; 100 accepted invented crate"}})).unwrap();
+    let rec1 = db::propose_recommendation(
+        &mut c,
+        &member,
+        &json!({"use_case":"crate", "method":"synthetic.fake@1", "evidence":{"fixture":"invented"}, "observed_at":"2026-11-04T00:00:00Z"}),
+    )
+    .unwrap();
+    db::promote_recommendation(&mut c, &owner, rec1["id"].as_str().unwrap()).unwrap();
+    let mut request = req("recommended-pin", json!({}));
+    request["method"] = json!("synthetic.fake@1");
+    request["recommendation"] = rec1["id"].clone();
+    let pinned = db::submit_job(&mut c, &member, &request, &limits(), FAKE).unwrap().0;
+    let mut spec = db::builtin_methods()[0].3.clone();
+    spec["pipeline_revision"] = json!("2");
+    db::create_method_version(&mut c, &owner, &json!({"id":"synthetic.fake", "spec":spec})).unwrap();
+    let rec2 = db::propose_recommendation(&mut c, &member, &json!({"use_case":"crate", "method":"synthetic.fake@2", "evidence":{"fixture":"invented revision 2"}, "observed_at":"2026-11-04T01:00:00Z"})).unwrap();
+    db::promote_recommendation(&mut c, &owner, rec2["id"].as_str().unwrap()).unwrap();
+    assert_eq!(db::submit_job(&mut c, &member, &request, &limits(), FAKE).unwrap().0["id"], pinned["id"]);
+    let ctx = f.ctx(1 << 30);
+    drive(&mut c, &ctx, &owner.project, pinned["id"].as_str().unwrap(), phase("succeeded"));
+    assert_eq!(db::get_job(&mut c, &owner.project, pinned["id"].as_str().unwrap()).unwrap()["method"], "synthetic.fake@1");
+    let body = json!({"use_case":"crate", "dataset_version":"crate@1", "evaluator_version":"quality@1", "method_versions":["synthetic.fake@1", "synthetic.fake@2"],
+        "plan":{"dataset":"crate@1", "evaluator":"quality@1", "constraints":{}, "repeats":2, "max_jobs":4, "max_credits":4}});
+    let mut over = body.clone();
+    over["plan"]["max_jobs"] = json!(3);
+    assert_eq!(db::add_comparison(&mut c, &member, &over).unwrap_err().code, "bad_comparison");
+    over = body.clone();
+    over["plan"]["max_credits"] = json!(3);
+    assert_eq!(db::add_comparison(&mut c, &member, &over).unwrap_err().code, "bad_comparison");
+    let cmp = db::add_comparison(&mut c, &member, &body).unwrap();
+    let id = cmp["id"].as_str().unwrap();
+    assert_eq!(registry::result(&mut c, &foreign.project, id).unwrap_err().status, 404);
+    assert_eq!(registry::run(&mut c, &member, id, 1 << 30, FAKE).unwrap_err().status, 403);
+    let first = registry::run(&mut c, &owner, id, 1 << 30, FAKE).unwrap();
+    assert_eq!(first["state"], "incomplete");
+    assert_eq!(first["admission_refusal"]["error"], "concurrency_limit");
+    assert_eq!(first["samples"][0]["request"]["text"], "invented blue crate");
+    changed["version"] = json!(2);
+    registry::register(&mut c, &owner, "dataset", &changed).unwrap();
+    let mut c = f.client(); // A7: resume from persisted plan and jobs, no in-memory run state.
+    for sample in 0..4 {
+        let state = registry::run(&mut c, &owner, id, 1 << 30, FAKE).unwrap();
+        let job = state["samples"][sample]["job"]["id"].as_str().unwrap();
+        drive(&mut c, &ctx, &owner.project, job, phase("succeeded"));
+        registry::score(
+            &mut c,
+            &member,
+            id,
+            &json!({"sample":sample.to_string(),"score":80,"judgment":"invented fixture accepted","reviewer":"invented fixture reviewer"}),
+        )
+        .unwrap();
+    }
+    let result = registry::result(&mut c, &owner.project, id).unwrap();
+    assert_eq!(result["state"], "complete");
+    assert_eq!(result["failure_rate"], 0.0);
+    assert_eq!(result["credits"], 4);
+    assert_eq!(result["samples"][0]["technical_score"], 1);
+    assert!(result["samples"][0]["human_quality"]["observed_at"].is_string());
+    assert_eq!(result["plan"]["dataset"]["sha256"], frozen["sha256"]);
+    assert_eq!(result["human_judgments"], 4);
+    assert_eq!(result["method_metrics"][0]["human_score_mean"], 80.0);
+    assert!(result["samples"][0]["duration_ms"].as_i64().unwrap() >= 0);
+    assert_eq!(
+        registry::result(&mut c, &owner.project, id).unwrap(),
+        result,
+        "read-only reproducibility includes original jobs and manifest hashes"
+    );
+    assert_eq!(registry::run(&mut c, &owner, id, 1 << 30, FAKE).unwrap()["samples"], result["samples"]);
+    assert_eq!(
+        registry::score(
+            &mut c,
+            &member,
+            id,
+            &json!({"sample":"0","score":80,"judgment":"invented fixture accepted","reviewer":"invented fixture reviewer"})
+        )
+        .unwrap(),
+        result
+    );
+    assert_eq!(f.fake().submissions(), 5, "one pinned job plus four samples; resuming never replays");
+    assert_eq!(
+        registry::score(&mut c, &member, id, &json!({"sample":"0","score":10,"judgment":"changed","reviewer":"invented"}))
+            .unwrap_err()
+            .code,
+        "immutable_judgment"
+    );
+    assert_eq!(
+        registry::score(&mut c, &foreign, id, &json!({"sample":"0","score":80,"judgment":"invented","reviewer":"invented"}))
+            .unwrap_err()
+            .status,
+        404
+    );
+    let none = db::scoped_recommendations(&mut c, &owner.project, "crate", &json!({}), Some("image.generate")).unwrap();
+    assert!(none["recommended"].is_null());
+    assert!(!none["qualification_evidence"].as_array().unwrap().is_empty());
+    assert!(none["observed_at"].is_string());
+    assert!(none["revision"].is_string());
+    let filtered =
+        db::filter_methods(&mut c, &owner.project, &json!({"capability":"synthetic.fake","constraints":{"outputs":5}}), "", 500).unwrap();
+    assert!(filtered["items"].as_array().unwrap().is_empty());
+    let filtered =
+        db::filter_methods(&mut c, &owner.project, &json!({"operation":"synthetic.generate","constraints":{"outputs":2}}), "", 1).unwrap();
+    assert_eq!(filtered["items"].as_array().unwrap().len(), 1);
+    assert!(filtered["next"].is_string());
+    let status = db::status(&mut c, &owner.project, 1 << 30, FAKE).unwrap();
+    assert_eq!(status["restore"]["state"], "unknown");
+    assert!(status["revisions"]["registry"].is_string());
+    assert!(status["revisions"]["comparisons"].is_string());
+}
+
+// Task #7 A3/A4: cross-operation rankings cannot exist; an incomplete sample
+// or unreported usage cannot produce a perfect failure/cost result.
+#[test]
+fn registry_operation_separation_and_unknown_comparisons() {
+    use assetq::registry;
+    let f = fixture();
+    let mut c = f.client();
+    let (member, _) = project(&mut c, "bench-unknown", 16, 4);
+    let owner = Principal { project: member.project.clone(), role: "owner".into() };
+    let mixed = json!({"use_case":"mixed", "dataset_version":"invented-1", "evaluator_version":"invented-1", "method_versions":["image.worker.v1@5","model.meshy-prop.v1@2"],"results":{}});
+    assert_eq!(db::add_comparison(&mut c, &member, &mixed).unwrap_err().reason, "candidate operations differ");
+    registry::register(&mut c, &owner, "dataset", &json!({"id":"d", "version":1, "document":{"operation":"synthetic.generate","cases":[{"id":"a","text":"invented","attachments":[]}]}})).unwrap();
+    registry::register(
+        &mut c,
+        &owner,
+        "evaluator",
+        &json!({"id":"e","version":1,"document":{"decision_rule":"retain failures and unknowns","quality_rubric":"invented 0-100"}}),
+    )
+    .unwrap();
+    for constraints in [json!({"report_usage":false}), json!({"fail":true})] {
+        let body = json!({"use_case":"unknown", "dataset_version":"d@1", "evaluator_version":"e@1", "method_versions":["synthetic.fake@1"],
+            "plan":{"dataset":"d@1","evaluator":"e@1","constraints":constraints,"repeats":1,"max_jobs":1,"max_credits":1}});
+        let cmp = db::add_comparison(&mut c, &member, &body).unwrap();
+        let id = cmp["id"].as_str().unwrap();
+        let before = registry::result(&mut c, &owner.project, id).unwrap();
+        assert!(before["failure_rate"].is_null());
+        assert!(before["credits"].is_null());
+        let run = registry::run(&mut c, &owner, id, 1 << 30, FAKE).unwrap();
+        let job = run["samples"][0]["job"]["id"].as_str().unwrap();
+        drive(&mut c, &f.ctx(1 << 30), &owner.project, job, phase(if constraints["fail"] == true { "failed" } else { "succeeded" }));
+        let after = registry::result(&mut c, &owner.project, id).unwrap();
+        if constraints["fail"] == true {
+            assert_eq!(after["failures"], 1);
+            assert_eq!(after["failure_rate"], 1.0);
+        } else {
+            assert!(after["credits"].is_null());
+            assert_eq!(after["usage_unknown"], 1);
+            assert_eq!(after["state"], "incomplete");
+            assert!(after["samples"][0]["human_quality"].is_null());
+        }
+    }
+    registry::register(&mut c,&owner,"dataset",&json!({"id":"paid","version":1,"document":{"operation":"model.image_to_3d","cases":[{"id":"a","text":"invented","attachments":[]}]}})).unwrap();
+    let paid=db::add_comparison(&mut c,&member,&json!({"use_case":"paid","dataset_version":"paid@1","evaluator_version":"e@1","method_versions":["model.meshy-prop.v1@2"],"plan":{"dataset":"paid@1","evaluator":"e@1","constraints":{},"repeats":1,"max_jobs":1,"max_credits":15}})).unwrap();
+    assert_eq!(
+        registry::run(&mut c, &owner, paid["id"].as_str().unwrap(), 1 << 30, &["meshy"]).unwrap_err().code,
+        "experiment_not_authorized"
+    );
+    assert_eq!(registry::result(&mut c, &owner.project, paid["id"].as_str().unwrap()).unwrap()["terminal"], 0);
+    // A newer model/status is not a promotion, and identical use cases remain operation-scoped.
+    for (name, operation) in [("invented-image", "image.generate"), ("invented-mesh", "model.image_to_3d")] {
+        let mut spec = db::builtin_methods()[0].3.clone();
+        spec["operation"] = json!(operation);
+        db::create_method_version(&mut c, &owner, &json!({"id":name,"status":"recommended","spec":spec})).unwrap();
+        assert!(
+            db::scoped_recommendations(&mut c, &owner.project, "shared", &json!({}), Some(operation)).unwrap()["recommended"].is_null()
+        );
+        let rec = db::propose_recommendation(&mut c,&member,&json!({"use_case":"shared","method":format!("{name}@1"),"evidence":{"fixture":"invented"},"observed_at":"2026-11-04T00:00:00Z"})).unwrap();
+        db::promote_recommendation(&mut c, &owner, rec["id"].as_str().unwrap()).unwrap();
+    }
+    assert!(db::recommendations(&mut c, &owner.project, "shared", &json!({})).unwrap()["recommended"].is_null());
+    for op in ["image.generate", "model.image_to_3d"] {
+        assert_eq!(
+            db::scoped_recommendations(&mut c, &owner.project, "shared", &json!({}), Some(op)).unwrap()["recommended"]["operation"],
+            op
+        );
+    }
+    let evidence = registry::qualification("model.meshy-prop.v1@2");
+    assert_eq!(evidence["owner_judgment"], "accepted as a pipeline check, not as a finished game asset");
+    assert_eq!(evidence["credits"], 15);
+    assert_eq!(evidence["general_dispatch"], "refused");
+    let receipt: Value = serde_json::from_str(include_str!("../docs/evidence/4/native-receipt.json")).unwrap();
+    let evidence = registry::qualification("image.worker.v1@2");
+    assert_eq!(evidence["original_sha256"], receipt["original_sha256"]);
+    assert_eq!(evidence["job"], receipt["job_id"]);
+    assert!(evidence["credits"].is_null());
+}
+
+// R3: an owner token cannot inspect or promote another project's evidence.
 #[test]
 fn registry_scope_and_expired_fences() {
     let f = fixture();
@@ -1011,6 +1215,154 @@ fn registry_scope_and_expired_fences() {
     c.execute("UPDATE jobs SET created_at = now() - interval '2 days' WHERE id = $1", &[&id]).unwrap();
     let done = drive(&mut c, &ctx, &a.project, id, phase("cancelled"));
     assert_eq!(done["submissions"], 0);
+}
+
+// Task #7 A4-A6/R4/R5: bounded histories cannot hide a promoted route or
+// old comparisons, and unrelated specs cannot borrow real qualification.
+#[test]
+fn registry_publication_limits_and_receipt_identity() {
+    use assetq::registry;
+    let f = fixture();
+    let mut c = f.client();
+    let (member, _) = project(&mut c, "registry-limits", 8, 4);
+    let owner = Principal { project: member.project.clone(), role: "owner".into() };
+    let mut defects = vec![];
+    c.execute("DELETE FROM methods WHERE project=$1 AND id='model.meshy-prop.v1' AND version=2", &[&owner.project]).unwrap();
+    let custom = db::create_method_version(&mut c, &owner, &json!({"id":"model.meshy-prop.v1","spec":db::builtin_methods()[0].3})).unwrap();
+    assert_eq!(custom["version"], 2);
+    db::migrate(&mut c).unwrap();
+    let rows = db::list_methods(&mut c, &owner.project).unwrap();
+    let custom = rows.as_array().unwrap().iter().find(|m| m["id"] == "model.meshy-prop.v1" && m["version"] == 2).unwrap();
+    if !custom["qualification"].is_null() {
+        defects.push("different spec borrowed a real receipt");
+    }
+    let rec = db::propose_recommendation(
+        &mut c,
+        &member,
+        &json!({"use_case":"limit","method":"synthetic.fake@1","evidence":{"fixture":"invented"},"observed_at":"2026-11-04T00:00:00Z"}),
+    )
+    .unwrap();
+    let rid = rec["id"].as_str().unwrap();
+    db::promote_recommendation(&mut c, &owner, rid).unwrap();
+    // Invented fixture history, installed in one SQL statement to avoid 501 redundant writer setups.
+    c.execute("INSERT INTO recommendations (id,project,use_case,constraints,method_id,method_version,evidence,observed_at,state,proposed_by,created_at)
+        SELECT 'invented-proposal-' || n,r.project,r.use_case,r.constraints,r.method_id,r.method_version,r.evidence,r.observed_at,'proposed',r.proposed_by,now()+interval '1 second' FROM recommendations r CROSS JOIN generate_series(1,501) n WHERE r.id=$1", &[&rid]).unwrap();
+    if db::recommendations(&mut c, &owner.project, "limit", &json!({})).unwrap()["recommended"]["id"] != rid {
+        defects.push("history page hid promoted recommendation");
+    }
+    c.execute("INSERT INTO comparisons (id,use_case,dataset_version,evaluator_version,method_versions,results,missing_cases,created_by)
+        SELECT 'invented-history-' || lpad(n::text,4,'0'),'history','invented-d','invented-e','[\"synthetic.fake@1\"]'::jsonb,'{}'::jsonb,'[\"unmeasured\"]'::jsonb,$1 FROM generate_series(1,501) n", &[&owner.project]).unwrap();
+    let first = db::comparison_page(&mut c, &owner.project, Some("history"), "", 500).unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 500);
+    let last = db::comparison_page(&mut c, &owner.project, Some("history"), first["next"].as_str().unwrap(), 500).unwrap();
+    assert_eq!(last["items"].as_array().unwrap().len(), 1);
+    assert!(last["next"].is_null());
+    assert_eq!(
+        registry::result(&mut c, &owner.project, last["items"][0]["id"].as_str().unwrap()).unwrap()["missing_cases"][0],
+        "unmeasured"
+    );
+    registry::register(&mut c,&owner,"dataset",&json!({"id":"d","version":1,"document":{"operation":"synthetic.generate","cases":[{"id":"a","text":"invented","attachments":[]}]}})).unwrap();
+    registry::register(
+        &mut c,
+        &owner,
+        "evaluator",
+        &json!({"id":"e","version":1,"document":{"decision_rule":"observe only","quality_rubric":"invented"}}),
+    )
+    .unwrap();
+    let cmp = db::add_comparison(&mut c,&member,&json!({"use_case":"revision","dataset_version":"d@1","evaluator_version":"e@1","method_versions":["synthetic.fake@1"],"plan":{"dataset":"d@1","evaluator":"e@1","constraints":{},"repeats":1,"max_jobs":1,"max_credits":1}})).unwrap();
+    let id = cmp["id"].as_str().unwrap();
+    let before = db::status(&mut c, &owner.project, 1 << 30, FAKE).unwrap()["revisions"]["comparisons"].clone();
+    let run = registry::run(&mut c, &owner, id, 1 << 30, FAKE).unwrap();
+    let admitted = db::status(&mut c, &owner.project, 1 << 30, FAKE).unwrap()["revisions"]["comparisons"].clone();
+    if before == admitted {
+        defects.push("admission did not change control revision");
+    }
+    drive(&mut c, &f.ctx(1 << 30), &owner.project, run["samples"][0]["job"]["id"].as_str().unwrap(), phase("succeeded"));
+    let completed = db::status(&mut c, &owner.project, 1 << 30, FAKE).unwrap()["revisions"]["comparisons"].clone();
+    if admitted == completed {
+        defects.push("completion did not change control revision");
+    }
+    registry::score(&mut c, &member, id, &json!({"sample":"0","score":50,"judgment":"invented","reviewer":"invented"})).unwrap();
+    let scored = db::status(&mut c, &owner.project, 1 << 30, FAKE).unwrap()["revisions"]["comparisons"].clone();
+    if completed == scored {
+        defects.push("judgment did not change control revision");
+    }
+    assert!(defects.is_empty(), "R4/R5 publication defects: {defects:?}");
+}
+
+// Task #7 A1/A6: CLI, API and agent JSON share the same registry/comparison
+// records; anonymous and foreign callers cannot obtain project evidence.
+#[test]
+fn registry_cli_api_projection() {
+    let f = fixture();
+    let mut c = f.client();
+    let (_, member_token) = project(&mut c, "registry-cli", 4, 4);
+    let owner_token = db::create_token(&mut c, "registry-cli", "owner").unwrap();
+    let (_, foreign_token) = project(&mut c, "registry-cli-foreign", 0, 1);
+    // This fixture measures API projections, not two-second lease performance.
+    let mut child = env_cmd(&f)
+        .env("ASSETQ_LEASE_MS", "60000")
+        .args(["serve", "--listen", "127.0.0.1:0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("assetq listening on ").unwrap()) };
+    let file = f.dir.join("invented.json");
+    for (command, body) in [
+        (
+            "dataset-add",
+            json!({"id":"d","version":1,"document":{"operation":"synthetic.generate","cases":[{"id":"a","text":"invented fixture","attachments":[]}]}}),
+        ),
+        (
+            "evaluator-add",
+            json!({"id":"e","version":1,"document":{"decision_rule":"observe technical and human quality","quality_rubric":"invented 0-100"}}),
+        ),
+    ] {
+        std::fs::write(&file, body.to_string()).unwrap();
+        assert_eq!(cli(&f, &s, &owner_token, &[command, file.to_str().unwrap()])["version"], 1);
+    }
+    assert_eq!(cli(&f, &s, &member_token, &["datasets"])[0]["id"], "d");
+    assert_eq!(cli(&f, &s, &member_token, &["evaluators"])[0]["id"], "e");
+    let methods = cli(
+        &f,
+        &s,
+        &member_token,
+        &["methods", "--operation", "synthetic.generate", "--capability", "synthetic.fake", "--constraints", "{\"outputs\":1}"],
+    );
+    assert_eq!(methods["items"].as_array().unwrap().len(), 1);
+    let body = json!({"use_case":"crate","dataset_version":"d@1","evaluator_version":"e@1","method_versions":["synthetic.fake@1"],"plan":{"dataset":"d@1","evaluator":"e@1","constraints":{},"repeats":1,"max_jobs":1,"max_credits":1}});
+    std::fs::write(&file, body.to_string()).unwrap();
+    let cmp = cli(&f, &s, &member_token, &["comparison-add", file.to_str().unwrap()]);
+    let id = cmp["id"].as_str().unwrap();
+    assert_eq!(cli(&f, &s, &member_token, &["comparisons", "--limit", "1"])["items"][0]["id"], id);
+    let run = cli(&f, &s, &owner_token, &["comparison-run", id]);
+    wait_for(&f, &s, &member_token, run["samples"][0]["job"]["id"].as_str().unwrap(), "succeeded");
+    assert_eq!(cli(&f, &s, &member_token, &["comparison", id])["state"], "incomplete");
+    std::fs::write(&file, json!({"sample":"0","score":70,"judgment":"invented fixture","reviewer":"invented reviewer"}).to_string())
+        .unwrap();
+    let scored = cli(&f, &s, &member_token, &["comparison-score", id, file.to_str().unwrap()]);
+    assert_eq!(scored["state"], "complete");
+    assert_eq!(cli(&f, &s, &member_token, &["comparison", id]), scored);
+    let ops = cli(&f, &s, &member_token, &["ops"]);
+    assert!(ops["revisions"]["recommendations"].is_string());
+    assert_eq!(ops["restore"]["state"], "unknown");
+    let h = http();
+    let base = &s.url;
+    for path in ["status".to_string(), format!("comparisons/{id}")] {
+        assert_eq!(h.get(format!("{base}/v1/{path}")).call().unwrap().status().as_u16(), 401);
+    }
+    assert_eq!(
+        h.get(format!("{base}/v1/comparisons/{id}"))
+            .header("Authorization", format!("Bearer {foreign_token}"))
+            .call()
+            .unwrap()
+            .status()
+            .as_u16(),
+        404
+    );
 }
 
 // R7: a reservation is exclusive across database sessions and quota failure
