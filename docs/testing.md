@@ -23,6 +23,8 @@ Windows fixtures accept the same binaries with `.exe` suffixes and use a loopbac
 
 Windows runs unrelated Rust fixtures sequentially; concurrency cases retain their explicit competing callers. The slow-import fixture measures a real guarded metadata transaction, bounds its calibrated lease to ten seconds, and keeps both fetch and stream slower than that lease. Its forced-expiry, no-commit, attempts, submission and replay assertions remain unchanged. This calibrates the check; it does not qualify 250 ms production leases on Windows.
 
+The cancellation-order fixture's EOF marker precedes Python process exit. After asserting EOF and cancellation order, directory cleanup waits at most three seconds only for Windows sharing violation 32 to clear. This does not repeat the test or relax its success/work-error/cleanup-error assertions.
+
 ## Protected risks
 
 - R3/R5: project-scoped jobs, attachment/download access, method versions, comparisons and recommendation promotion; caller names never become storage paths.
