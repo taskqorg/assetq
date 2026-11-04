@@ -1,6 +1,6 @@
 # First two real asset journeys
 
-These checks implement AssetQ R2-R8. They are required outcomes; no real runs are claimed by this bootstrap.
+These checks implement AssetQ R2-R8. They are required outcomes; revision-specific evidence below distinguishes observed runs from remaining qualification.
 
 ## Image through a worker
 
@@ -33,6 +33,8 @@ Report actual triangles versus target, component count, dimensions, textures, GL
 | Deferred backup/restore qualification | New local and independent external qualification are nonblocking for initial delivery and remain unknown; claim verification only with consistent snapshots, isolated restore/hashes and authenticated retrieval evidence for that scope |
 
 ## Acceptance record
+
+The [Meshy crate operator example](evidence/5/operator-run/README.md) records the isolated pds18 run on `759fbd2`: nine committed items, provider-wait restart without resubmission, headless Blender validation and hash-matched authenticated downloads. It establishes the named technical A4/A5/A7 example, with owner visual acceptance pending. It does not qualify the managed pds18 service journey, website, other executors or a general Meshy recommendation.
 
 Meshy testing A6: reconcile balance and all attempts before spend, retain actual and cumulative cost evidence and stop on unknown usage. Initial testing has no cumulative credit ceiling; no purchases/top-ups are authorized. Per-job and other resource limits remain enforced.
 

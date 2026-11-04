@@ -1,6 +1,6 @@
 # One operator-bound Meshy qualification
 
-Task [#5](https://github.com/taskqorg/assetq/issues/5), A1-A7, AssetQ R2-R8. The [pipeline specification](../../meshy-pipeline.md) owns the recipe and recovery behavior. This is a prepared procedure, not a live receipt. The worker has made **zero Meshy submissions**. The [source manifest](source-manifest.json) identifies the unchanged accepted crate; [official verification](official-api-verification.json) records public documentation, not account qualification.
+Task [#5](https://github.com/taskqorg/assetq/issues/5), A1-A7, AssetQ R2-R8. The [pipeline specification](../../meshy-pipeline.md) owns the recipe and recovery behavior. The operator completed this procedure on `759fbd2`; [live evidence](operator-run/README.md) records its outcome. This procedure authorizes no further run. The worker has made **zero Meshy submissions**. The [source manifest](source-manifest.json) identifies the unchanged accepted crate; [official verification](official-api-verification.json) records public documentation, not account qualification.
 
 ## Authorized follow-up after the first operator run
 
@@ -105,4 +105,4 @@ Commit sanitized source/result manifests, measured triangle/component/dimension/
 
 ## Current worker evidence and open acceptance
 
-The worker's original Windows read-only preflight reported the Meshy key absent, Blender not supplied and no qualifying inherited memory boundary. The PM's first run spent 15 credits but did not establish adapter completion. The prerequisites above and a new exact-candidate operator run remain necessary for A4/A5/A7: original-ID polling/restart, adapter download/validation, real manifest, authenticated retrieval, usage and textured views. Final owner visual acceptance remains open.
+The worker's original Windows read-only preflight reported the Meshy key absent, Blender not supplied and no qualifying inherited memory boundary. The PM's first run spent 15 credits but did not establish adapter completion. The authorized corrected run now proves original-ID polling/restart, adapter download/validation, a nine-item manifest, authenticated retrieval, 15 actual credits and three textured views; see [run evidence](operator-run/README.md). Final owner visual acceptance and the managed production journey remain open.

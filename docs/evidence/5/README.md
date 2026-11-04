@@ -4,7 +4,7 @@ Task [#5](https://github.com/taskqorg/assetq/issues/5) requests:
 
 > Turn an immutable image asset into a retained textured GLB through a durable Meshy and headless Blender pipeline.
 
-The owning rules were updated before implementation in `assetq.md` and [Meshy pipeline](../../meshy-pipeline.md), retaining the [original owner request](../../intake/2026-11-01-owner-request.md). This candidate implements the bounded initial route. The PM's first operator run spent 15 credits and reached provider success, but the adapter rejected HTTP 202 and produced no manifest. **Adapter live completion and 3D visual acceptance remain unproved.**
+The owning rules were updated before implementation in `assetq.md` and [Meshy pipeline](../../meshy-pipeline.md), retaining the [original owner request](../../intake/2026-11-01-owner-request.md). The [corrected operator run](operator-run/README.md) on candidate `759fbd2` completed the durable Meshy/Blender path, including provider-wait restart and authenticated downloads. Its nine-item result costs 15 credits, with 30 observed cumulative workstream credits including the first attempt. **Owner 3D visual acceptance and the managed deployment journey remain separate and unproved.**
 
 ## Applied rules and observed checks
 
@@ -36,11 +36,11 @@ Full development logs are retained in the ignored `target/taskq-5` directory. Th
 
 [Official API receipt](official-api-verification.json) records unaltered HTTP-body hashes and fresh public source URLs. The official schema supports the explicit Smart Topology/meshy-t2/3000/2K PBR request, documents 15 credits and `consumed_credits`, and describes DELETE as permanent deletion rather than safe cancellation. Public docs do not establish account credit, prior workstream spend or provider/native qualification.
 
-## Remaining operator action
+## Native outcome and remaining scope
 
-The [operator procedure](operator.md) is the concrete next action. The worker's original Windows preflight reported Meshy credential **absent**, Blender **not supplied**, inherited memory boundary **unqualified**, and balance/prior ledger **unknown**. The PM subsequently ran the first paid example as recorded below; no worker dispatch, purchase, top-up, host-policy change or deployment is claimed.
+The PM completed the [operator procedure](operator.md) on the exact corrected candidate in an isolated pds18 store. [Sanitized receipts, source/result identity, measurements, cost and textured views](operator-run/README.md) establish the named A4/A5/A7 technical example. The worker imported that evidence without a new dispatch, purchase, top-up, host-policy change or deployment.
 
-A4/A5/A7 still require a successful authorized adapter run, actual charge and before/after ledger reconciliation, native measurements/textured views, real result manifest and authenticated downloads. Final 3D visual acceptance belongs to the owner. Managed pds18 retrieval is coordinated separately with #6; local results will not qualify that host. Green merge-result CI is still required before publication/acceptance.
+Owner visual acceptance remains pending. Managed pds18 deployment/retrieval through the production service is coordinated separately with #6; an isolated run hosted there does not qualify that journey, the website, another executor or a general recommendation. Green merge-result CI is still required before publication/acceptance. The operator ledger explicitly retains its limited inventory scope; do not infer an independent whole-account or Windows-store audit.
 
 ## Previous frozen candidate gate
 
@@ -56,8 +56,8 @@ PM note [6628734645](https://github.com/taskqorg/assetq/issues/5#issuecomment-66
 |---|---|---|
 | HTTP 202 ID acceptance (A3, R4/R5) | `cargo test --locked --lib meshy_accepted_post_retains_original_id_after_restart` fails with `Meshy HTTP 202; response retained only by provider, outcome requires reconciliation` | Same check passes for 200/201/202, retains the original ID across observer restart and refuses a second POST |
 | Former cumulative ceiling (amended A6, R1/R7) | `cargo test --locked --lib meshy_recipe_spend_and_input_boundaries` fails at 5000 prior credits | Same check passes; unknown/changed/insufficient balance, unknown spend and overflow refusals remain |
-| Missing temporary-quota prerequisite (R7) | PM observed `store_full` before POST with the 1 GiB default | Procedure now explicitly requires `ASSETQ_TEMP_QUOTA_BYTES=2147483648` and at least 1280 MiB measured room; native follow-up remains pending |
-| Blender allocation on 24-core Linux host (A4, R7) | PM observed `OIDN error: out of memory` under 2 GiB | Child now sets allocator arenas/OIDN threads to 2; procedure supplies 2048 KiB inherited stack and two allowed CPUs. PM reports those settings passed standalone validation; corrected adapter run remains pending |
+| Missing temporary-quota prerequisite (R7) | PM observed `store_full` before POST with the 1 GiB default | Procedure explicitly requires `ASSETQ_TEMP_QUOTA_BYTES=2147483648` and at least 1280 MiB measured room; the corrected operator run reaches its nine-item successful manifest |
+| Blender allocation on 24-core Linux host (A4, R7) | PM observed `OIDN error: out of memory` under 2 GiB | Fixed allocator arenas/OIDN threads at 2, 2048 KiB inherited stack and two allowed CPUs now produce `valid: true` and three hash-verified views in the corrected adapter run |
 | Windows cancellation fixture cleanup (R8) | Canonical gate at `ed08fae` failed after 28.14 seconds with sharing violation 32 at `protected.rs:583`, deleting the fixture directory after its EOF marker | Cleanup waits at most three seconds only for sharing violation 32; `cargo test --locked --lib image_worker_cancel_readback_precedes_native_eof` passes with all cancellation-order/error assertions retained |
 | Lost timeout evidence (R8) | Canonical run at `094438e` hit the 480-second Rust deadline (503.45 seconds overall) without partial Cargo output; `python3 scripts/test_check.py GateTrust.test_timeout_retains_partial_command_evidence` reproduces missing output | The same regression passes after retaining partial output on timeout; diagnostics also retain the command/deadline. No timeout or selected check was relaxed |
 
@@ -73,4 +73,4 @@ The second canonical timeout is preserved in `target/taskq-5/corrections-second-
 
 Combined corrected-candidate canonical elapsed time is 954.26 seconds across the cleanup failure, timeout and passing run. Read-only observation during the passing run showed its isolated service fixture active in `pg_database_size`, without a PostgreSQL lock wait; this does not identify the earlier timeout's cause. Windows timing variability, the `ubuntu-latest` budget and merge-result CI remain unqualified. No limit was raised or required check removed.
 
-The follow-up commit records only this result; implementation, tests, dependencies and recipe remain identical to the passing candidate. The worker sent no paid effect. Corrected-adapter native evidence, actual next-run usage, source/result manifests, authenticated downloads and owner 3D acceptance remain open under A4/A5/A7.
+Commit `759fbd2` recorded only that gate result; implementation, tests, dependencies and recipe remain identical to the passing candidate. The subsequent [operator evidence import](operator-run/README.md) likewise changes only evidence/documents, so the exact implementation gate is retained without rerunning it. Pinned contract lint and whitespace checks apply to this import. The worker sent no paid effect; final visual acceptance and the managed journey remain open.
