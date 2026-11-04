@@ -177,5 +177,6 @@ Langfuse can receive correlated traces and evaluation records; its outage cannot
 - [Meshy baseline](docs/meshy-baseline.md): source pipeline and scope limitations.
 - [Service](docs/service.md): lifecycle model, API, limits and immutable storage.
 - [Deployment](docs/deploy.md): candidate verification, host requirements, additive install and rollback.
+- [Management design](docs/design/management-site.md): browser scenarios, candidate references and acceptance gaps.
 
 <!-- contract-budget: bytes=61440 lines=300 -->
