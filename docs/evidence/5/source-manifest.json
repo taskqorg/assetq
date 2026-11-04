@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "original_asset_id": "2c887345-9f66-491f-8a0c-81d81cf0c4af",
+  "original_job_id": "0e1fdfd2-9f45-46a0-ae27-0b4ba6558968",
+  "original_method": "image.worker.v1@2",
+  "payload": "../4/crate-original.png",
+  "sha256": "fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa",
+  "bytes": 1936663,
+  "width": 1254,
+  "height": 1254,
+  "content_type": "image/png",
+  "regeneration": false,
+  "owner_acceptance": "https://github.com/taskqorg/assetq/issues/5#issuecomment-6558008920",
+  "local_copy_id": "2ba958bc-daec-4aab-a7cb-bc2d1b7c4bee",
+  "model_result": "operator-run/result.json"
+}

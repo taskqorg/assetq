@@ -30,6 +30,10 @@ impl Ctx {
             providers.push(Arc::new(crate::image_worker::ImageWorker::new(cfg.clone(), root.clone())?));
             providers.push(Arc::new(crate::image_worker::ImageWorker::legacy(cfg.clone(), root.clone())?));
         }
+        // Recovery is available without enabling any new paid dispatch.
+        if cfg.data_root.join("tmp/meshy/bound-job.json").is_file() {
+            providers.push(Arc::new(crate::meshy::Meshy::observer(cfg.clone()).map_err(std::io::Error::other)?));
+        }
         Ok(Ctx { cfg, store, providers })
     }
     pub fn provider_names(&self) -> Vec<&str> {
@@ -242,6 +246,15 @@ fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> 
                 }
                 if rows.len() != job.imported.len() {
                     problem = Some("imported objects and records differ".into());
+                }
+                if info.spec["provider"] == crate::meshy::PROVIDER {
+                    if let Some(op) = job.op_id.as_deref() {
+                        if let Err(reason) = ctx.provider(crate::meshy::PROVIDER)?.validate(op) {
+                            problem = Some(reason);
+                        }
+                    } else {
+                        problem = Some("Meshy validation has no original operation".into());
+                    }
                 }
                 if let Some(p) = problem {
                     event(c, ctx, id, &Event::Failed { fence: f, reason: format!("validation failed: {p}") }, 0)?;

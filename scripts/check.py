@@ -20,9 +20,14 @@ def run(*args, cwd=ROOT, timeout=120, env=None):
     # A Windows PostgreSQL child can inherit stdout past pg_ctl's exit.
     # A file keeps that handle from turning completion into an endless EOF wait.
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output:
-        result = subprocess.run(args, cwd=cwd, timeout=timeout, text=True, env=env,
-                                stdout=output, stderr=subprocess.STDOUT,
-                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        try:
+            result = subprocess.run(args, cwd=cwd, timeout=timeout, text=True, env=env,
+                                    stdout=output, stderr=subprocess.STDOUT,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except subprocess.TimeoutExpired as error:
+            output.seek(0)
+            error.stdout = output.read()
+            raise
         output.seek(0)
         text = output.read()
         if result.returncode:
@@ -75,6 +80,7 @@ def postgres_cluster():
 
 def rust_checks(name=None):
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
+    print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
     print(run("cargo", "fmt", "--check"), end="")
     with postgres_cluster() as pg:
         env = dict(os.environ, ASSETQ_TEST_PG=pg, ASSETQ_TEST_PG_BIN=str(pg_bin()))
@@ -141,5 +147,8 @@ if __name__ == "__main__":
         else:
             raise RuntimeError("usage: python3 scripts/check.py [--test NAME]")
     except (RuntimeError, subprocess.SubprocessError) as error:
-        print(getattr(error, "stdout", None) or str(error), file=sys.stderr)
+        evidence = getattr(error, "stdout", None)
+        if evidence:
+            print(evidence, file=sys.stderr)
+        print(str(error), file=sys.stderr)
         raise SystemExit(1)

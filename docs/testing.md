@@ -12,6 +12,7 @@ Run only the affected check while editing:
 cargo test --locked --lib store::tests
 cargo test --locked --lib provider::tests
 cargo test --locked --test traces
+python3 scripts/check.py --test meshy
 python3 scripts/check.py --test admission_idempotency_scope_and_typed_limits
 python3 scripts/check.py --test resource_bounds
 ```
@@ -21,6 +22,10 @@ The last command starts a disposable PostgreSQL cluster and filters Rust tests b
 Windows fixtures accept the same binaries with `.exe` suffixes and use a loopback-only temporary port instead of a Unix socket. Image worker development uses `cargo test --locked --lib image_worker` and `python3 scripts/check.py --test image_worker`; the filtered gate includes `python3 scripts/test_qualify_image.py` for the bounded operator driver.
 
 Windows runs unrelated Rust fixtures sequentially; concurrency cases retain their explicit competing callers. The slow-import fixture measures a real guarded metadata transaction, bounds its calibrated lease to ten seconds, and keeps both fetch and stream slower than that lease. Its forced-expiry, no-commit, attempts, submission and replay assertions remain unchanged. This calibrates the check; it does not qualify 250 ms production leases on Windows.
+
+The cancellation-order fixture's EOF marker precedes Python process exit. After asserting EOF and cancellation order, directory cleanup waits at most three seconds only for Windows sharing violation 32 to clear. This does not repeat the test or relax its success/work-error/cleanup-error assertions.
+
+On command timeout, the gate retains partial output and the failed command/deadline. The 480-second Rust command limit and 600-second canonical budget are unchanged; timeout is a failure, never a pass.
 
 ## Protected risks
 
@@ -32,3 +37,5 @@ Windows runs unrelated Rust fixtures sequentially; concurrency cases retain thei
 - A7/A8: real PostgreSQL transactions, a killed/restarted service through the CLI, streamed SHA-verified retrieval, genuine SQL dump/restore followed by API checks, and refusal of corrupt/missing restored payloads.
 
 `synthetic.fake` proves service semantics only. It never qualifies real image/3D generation, provider cost, native worker output, public browser authentication or the managed store.
+
+Meshy checks use a local HTTP fixture, counted-store receipts and isolated PostgreSQL; they protect HTTP 200/201/202 ID persistence, the single-POST barrier, lost reply/receipt recovery, retained completion without credentials, unknown spend/changed or insufficient balance refusal, non-destructive cancellation and retained originals after failed validation. Reconciled testing beyond the former cumulative ceiling is allowed. The canonical gate also runs `scripts/test_validate_meshy.py` for connectivity/world dimensions, UV/PBR presence, texture bounds and nonfinite geometry. Its invented scene does not qualify native Blender. The live operator run, memory-boundary readback, actual Meshy charge and textured views remain separate.

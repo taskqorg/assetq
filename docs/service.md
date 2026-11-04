@@ -1,6 +1,6 @@
 # Service, lifecycle and storage
 
-One Rust binary (`assetq`) provides the HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic fixture provider and an optional [Codex image worker](image-worker.md). Meshy and managed deployment qualification remain separate. Deployment and rollback: [deploy](deploy.md).
+One Rust binary (`assetq`) provides the HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic fixture provider, an optional [Codex image worker](image-worker.md) and the bounded [Meshy pipeline](meshy-pipeline.md). Native/provider and managed deployment qualification remain separate. Deployment and rollback: [deploy](deploy.md).
 
 ## Lifecycle model
 
@@ -25,6 +25,8 @@ Executors claim fenced work with `FOR UPDATE SKIP LOCKED`. A submission persists
 `synthetic.fake@1` keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@2` and `@3` retain their original specifications; experimental version 4 pins the corrected protected runtime. General generation dispatch refuses pending current tool qualification, while configured observers can retain/import existing operations with `synthetic: false`. Version 5 uses structured Runtime inputs. Operator-bound version 6 imports an existing completed native image without generation, using the same provider lifecycle and a new immutable source-linked request. The separately approved [single local qualification job](evidence/4/bounded-image-job.md) integrates runner-owned slot/preparation/reconciliation without changing this executable job model or enabling general dispatch. Versions 1 and 5 use provider `agentq.image` with capability `image_generation`; versions 2-4 keep their original runtime-specific specifications. Version 1 and `model.meshy-prop.v1@1` stay disabled; startup migration rewrites a built-in row from an earlier seed only when it is disabled and no job or recommendation references it. No recommendation is promoted automatically.
 
 ## API
+
+`model.meshy-prop.v1@2` preserves disabled version 1 and declares the explicit 15-credit prop recipe. `meshy-admit` exposes admission with zero executors. Only `meshy-serve` can bind an accepted initial job to protected operator preflight; general paid dispatch stays refused. After restart, the normal server discovers retained Meshy receipts and observes without dispatch authority. Fully retained completions recover without provider credentials or a live API. Original GLB/maps import before the Meshy validation hook can fail the job, so failed validation retains retrievable objects without a success manifest. [Operator qualification](evidence/5/operator.md) remains required; experimental registry presence is not native qualification.
 
 All routes except `GET /v1/health` need `Authorization: Bearer <token>`. A token is a project-scoped grant with role `member` or `owner`; only its SHA-256 is stored. Methods, recommendations and comparisons are scoped to that project, including owner edits and promotions. Built-in method versions are seeded into each project. Machine routes never trust browser cookies or identity headers; the separate site task must use an explicitly scoped credential adapter without a wildcard auth exemption. The canonical HTTPS origin is `https://assets.ufobe.com`; this binary binds only to loopback. A foreign project's job or object reads as `404`. Errors are `{"error": code, "reason": text}`.
 
@@ -70,7 +72,7 @@ Unknown stays explicit. Provider health, store integrity and backup read `unknow
 
 ## Not in this build
 
-Meshy, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy. The qualified native image route does not qualify another client, host or managed storage deployment.
+General Meshy dispatch, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy. The bounded Meshy adapter requires separate native/provider qualification. The qualified native image route does not qualify another client, host or managed storage deployment.
 
 ## Recovery and restore checks
 

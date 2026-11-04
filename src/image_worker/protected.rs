@@ -580,7 +580,19 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             assert!(eof.exists(), "owned fixture input did not close after cleanup");
-            fs::remove_dir_all(&dir).unwrap();
+            // EOF precedes Python exit; Windows can still hold the fixture's working directory.
+            let until = Instant::now() + Duration::from_secs(3);
+            loop {
+                match fs::remove_dir_all(&dir) {
+                    Err(e) if cfg!(windows) && e.raw_os_error() == Some(32) && Instant::now() < until => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    result => {
+                        result.unwrap();
+                        break;
+                    }
+                }
+            }
             assert_eq!(work.is_err(), outcome == "work-error");
             if outcome == "cleanup-error" {
                 assert_eq!(cleanup.unwrap_err(), "invented cancellation unknown");
