@@ -2,12 +2,13 @@
 //! observe provider operations without holding executor capacity (R2, R6).
 
 use crate::db::{self, NewObject};
-use crate::model::{CancelState, EffectState, Event, Job};
+use crate::model::{CancelState, EffectState, Event, Job, MAX_OUTPUTS};
 use crate::provider::{Poll, Provider, Submit};
-use crate::store::Store;
+use crate::store::{Store, StoreError};
 use crate::{Config, Error, Result};
 use postgres::Client;
 use serde_json::{Value, json};
+use std::io::Read;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -226,6 +227,13 @@ fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> 
                         problem = Some(format!("{key} has undeclared type {ct}"));
                     } else if let Err(e) = ctx.store.verify(&sha, size as u64) {
                         problem = Some(format!("{key}: {e}"));
+                    } else if ct == "image/png" {
+                        let mut header = vec![];
+                        let read = ctx.store.open_object(&sha).and_then(|f| f.take(24).read_to_end(&mut header));
+                        let refusal = read.err().map(|e| e.to_string()).or_else(|| png_problem(&header, &info.request["constraints"]));
+                        if let Some(p) = refusal {
+                            problem = Some(format!("{key}: {p}"));
+                        }
                     }
                 }
                 if rows.len() != job.imported.len() {
@@ -243,6 +251,22 @@ fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> 
             }
         };
     }
+}
+
+// ponytail: header only, enough for the size limit; a full bitmap decode arrives with the first real image method.
+/// Refuse a PNG whose IHDR is invalid or beyond the request's size constraints.
+fn png_problem(header: &[u8], constraints: &Value) -> Option<String> {
+    if header.len() < 24 || &header[..8] != b"\x89PNG\r\n\x1a\n" || &header[12..16] != b"IHDR" {
+        return Some("invalid PNG header".into());
+    }
+    let dimension = |at: usize| u32::from_be_bytes([header[at], header[at + 1], header[at + 2], header[at + 3]]) as u64;
+    let (width, height) = (dimension(16), dimension(20));
+    if width == 0 || height == 0 {
+        return Some("invalid PNG header".into());
+    }
+    let exceeds = |value: u64, limit: &str| constraints[limit].as_u64().is_some_and(|max| value > max);
+    (exceeds(width, "max_width") || exceeds(height, "max_height"))
+        .then(|| format!("PNG dimensions {width}x{height} exceed worker/request limits"))
 }
 
 fn expired(c: &mut Client, ctx: &Ctx, id: &str) -> Result<bool> {
@@ -354,7 +378,14 @@ fn put_output(
         let stored = match ctx.store.put_locked(src, ctx.cfg.max_upload_bytes, room) {
             Ok(s) => s,
             Err(e) => {
-                event(c, ctx, id, &Event::Paused { fence: job.fence, reason: format!("import of {key} failed: {e}") }, ctx.cfg.poll_ms)?;
+                let reason = format!("import of {key} failed: {e}");
+                // An oversize output is definitive; every other store failure can resume.
+                let outcome = if matches!(e, StoreError::TooLarge(_)) {
+                    Event::Failed { fence: job.fence, reason: format!("validation failed: {reason}") }
+                } else {
+                    Event::Paused { fence: job.fence, reason }
+                };
+                event(c, ctx, id, &outcome, ctx.cfg.poll_ms)?;
                 return Ok(None);
             }
         };
@@ -473,6 +504,11 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
             } else {
                 match provider.poll(&op) {
                     Ok(Poll::Pending) | Err(_) => return Ok(true),
+                    Ok(Poll::Done { outputs, credits }) if !(1..=MAX_OUTPUTS).contains(&outputs) => Event::ProviderFailed {
+                        op_id: op,
+                        reason: format!("validation failed: completion must have 1..={MAX_OUTPUTS} outputs, reported {outputs}"),
+                        credits,
+                    },
                     Ok(Poll::Done { outputs, credits }) => Event::ProviderCompleted { op_id: op, outputs, credits },
                     Ok(Poll::Failed { reason, credits }) => Event::ProviderFailed { op_id: op, reason, credits },
                 }
@@ -482,4 +518,30 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
     };
     event(c, ctx, &id, &e, 0)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn header(width: u32, height: u32) -> Vec<u8> {
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend(width.to_be_bytes());
+        png.extend(height.to_be_bytes());
+        png
+    }
+
+    // R4/R6: the assetq#4 output was 1254 by 1254 against a 1024 request limit.
+    #[test]
+    fn png_problem_refuses_only_invalid_or_oversize_headers() {
+        let limit = json!({"max_width": 1024, "max_height": 1024});
+        assert_eq!(png_problem(&header(1254, 1254), &limit).unwrap(), "PNG dimensions 1254x1254 exceed worker/request limits");
+        assert!(png_problem(&header(1024, 1025), &limit).is_some(), "each axis is limited");
+        assert!(png_problem(&header(1025, 1024), &limit).is_some(), "each axis is limited");
+        assert_eq!(png_problem(&header(1024, 1024), &limit), None);
+        assert_eq!(png_problem(&header(1254, 1254), &json!({})), None, "no declared limit refuses nothing");
+        for invalid in [header(0, 8), header(8, 0), b"not a png".to_vec(), vec![0; 24], header(8, 8)[..23].to_vec()] {
+            assert_eq!(png_problem(&invalid, &limit).unwrap(), "invalid PNG header");
+        }
+    }
 }
