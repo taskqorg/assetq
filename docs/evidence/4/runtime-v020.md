@@ -1,5 +1,7 @@
 # Structured runtime adoption
 
+Current bounded-delivery result: [native tool run and successful retained import](native-size-import.md#native-operator-result), with the [A1-A6 evidence matrix](image-qualification-next.md#acceptance-readback). The earlier open statements below describe their captured candidates; general dispatch remains refused and adapter source/build CI mapping remains unknown.
+
 This candidate applies AssetQ R1-R8 to task [#4](https://github.com/taskqorg/assetq/issues/4). It implements the continuation request, retained verbatim: "Done: agentq tag runtime-v0.2.0 -> 70f85434546bd1c303ccdb7b0dd71866421627e2 (Test push run 41620673560 green). Pin agentq-runtime tag runtime-v0.2.0 and migrate A2/R3."
 
 ## Published input and consumer changes

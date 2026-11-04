@@ -1,5 +1,7 @@
 # TaskQ adapter qualification and anchor promotion
 
+Current bounded-delivery result: [native tool run and successful retained import](native-size-import.md#native-operator-result), with the [A1-A6 evidence matrix](image-qualification-next.md#acceptance-readback). The earlier open statements below describe their captured candidates; general dispatch remains refused and adapter source/build CI mapping remains unknown.
+
 ## Installed 4.6.66 qualification candidate
 
 AssetQ R1/R3-R5/R8; continuation [note 6603148665](https://github.com/taskqorg/assetq/issues/4#issuecomment-6603148665) directs the current refresh. Original request: "PM ran the operator handoff on Mac: stopped before launch. Pinned adapter (TaskQ 4.6.58, f8b04708…5df4) refuses current host policy: 'host.json: claim must be any or labelled' (Mac claim is spillover since 4.6.6x). No slot, operation or native effect created. Host policy stays. Next: repin ADAPTER_SHA256 to the installed TaskQ 4.6.66 app-server adapter, qualify it, then ask PM again for the slot handoff; driver ready."

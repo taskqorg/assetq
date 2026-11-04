@@ -4,16 +4,18 @@ Task [#4](https://github.com/taskqorg/assetq/issues/4), AssetQ R1-R8. The exact 
 
 ## Acceptance readback
 
-| Item | Established | Remaining |
-|---|---|---|
-| A1 | Published Runtime pin, inherited optional optimization/account/model, protected authority and non-generating transport | Runner-owned automatic slot/preparation/completion integration and qualified current image capability |
-| A2 | Historical durable API text/attachment run, original bitmap/preview/provenance/import/retrieval; deterministic structured Runtime inputs | Current protected generation through that durable API and its full recovery/slot journey |
-| A3 | Historical real native image tool, saved path and original PNG | Actual selected current tool and artifact path; catalogue/schema/old bitmap alone are insufficient |
-| A4 | Explicit new-dispatch refusal, no direct paid API or alternate worker; prepared protected transport | Capability-specific refusal or real evidence from the selected current image worker |
-| A5 | Owner-accepted original crate and immutable provenance retained | Preserve it as the 3D input; do not regenerate or replay it |
-| A6 | Deterministic duplicates/interruption/absent optimizer/retrieval and historical bounded real worker run; current non-generating cancel/reconcile/release | Current protected durable generation qualification; actual or explicitly unknown usage |
+The [bounded native run](bounded-image-run.md) and [successful native-size recovery](native-size-import.md#native-operator-result) supply the final local qualification evidence. The owner-approved native-size method preserves the original 1024-bound failure and imports unchanged bytes in a new job, without another turn.
 
-No full acceptance item is claimed complete merely from the non-generating native PASS. No new backup work, host activation or website qualification belongs to this step.
+| Item | Established | Limit or separate acceptance |
+|---|---|---|
+| A1 | Contract-first R2-R8 integration; published Runtime `runtime-v0.2.0` / `70f85434546bd1c303ccdb7b0dd71866421627e2`; inherited account/model/optional optimization; runner-bound slot, independent preparation and whole-operation reconciliation | General dispatch remains refused as explicitly required; installed adapter source/build-to-CI mapping unknown |
+| A2 | Verified text/swatch input through Runtime; native progress, cancellation observations and control interruption; source-linked v6 manifest with original, preview, hashes/dimensions/provenance and authenticated retrieval | Source v5 fails its original 1024 limit; cancellation remains uncertain, not confirmed |
+| A3 | Actual selected protected Codex `imageGeneration` completion, allowed saved path and original 1254 PNG; unchanged original imported and independently hash-checked | No <=1024 guarantee on approved v6 import; no procedural/SVG substitute |
+| A4 | Explicit capability/authority refusal, prepared protected path and deterministic refusal coverage; no direct paid API or automatic alternative | Bounded operator route only; no general dispatch enablement |
+| A5 | Owner-accepted original crate `2c887345-9f66-491f-8a0c-81d81cf0c4af` retained as initial 3D input; no replay | Blue-wedge visual acceptance remains pending |
+| A6 | Deterministic duplicates/interruption/absent optimizer/retrieval; one approved protected turn, duplicate across interruption, same operation, original-slot release, both replay audits and recovered immutable retrieval | 152,203 source tokens reported; subscription charge and image backend model unknown; zero new Runtime inputs for import |
+
+This evidence supports review of the bounded delivery; it does not promote general generation. Green merge-result CI remains a publication gate (R8). Managed-host, website and deferred backup/restore qualification are separate.
 
 ## Approved bounded job
 
@@ -27,6 +29,6 @@ Approved decision: permit one distinct, isolated local qualification job after t
 - Bounds: one concurrent job, at most 600 seconds generating plus 30 seconds observing interruption; existing file/storage/free-space/metadata limits remain enforced. Original PNG at most 64 MiB, journal at most 32 MiB, with the existing temporary reservation. No paid API spend or account purchase. Actual native/tool/backend usage and subscription charge are recorded when reported, otherwise explicitly unknown; they are not asserted to be zero.
 - Result: retain native tool and terminal evidence, original artifact path and unchanged bytes, input identities, dimensions/hash/preview, immutable result manifest and authenticated hash-verified retrieval. Exercise duplicate request and control-service interruption against the same operation; no replay. A missing tool refuses precisely and stops. Unknown work keeps reservations until original-operation reconciliation; no successful completion is inferred from transport exit.
 
-Implementation and the runnable operator recipe are recorded in [bounded image job](bounded-image-job.md); native execution remains open.
+Implementation and the operator recipe are recorded in [bounded image job](bounded-image-job.md). The authorization was consumed once; [native execution](bounded-image-run.md) and [native-size import](native-size-import.md#native-operator-result) retain its result. No second turn is authorized.
 
 The alternative considered was to keep generation refused with no new effects. That preserves the current authority boundary, but A3 and the protected generation journey remain incomplete. The recommendation is one bounded job because it can establish the required tool/output and durable-path evidence while preserving the accepted crate. Neither choice waives acceptance or promotes an unqualified method.
