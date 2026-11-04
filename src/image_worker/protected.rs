@@ -580,19 +580,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(5));
             }
             assert!(eof.exists(), "owned fixture input did not close after cleanup");
-            // EOF precedes Python exit; Windows can still hold the fixture's working directory.
-            let until = Instant::now() + Duration::from_secs(3);
-            loop {
-                match fs::remove_dir_all(&dir) {
-                    Err(e) if cfg!(windows) && e.raw_os_error() == Some(32) && Instant::now() < until => {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    result => {
-                        result.unwrap();
-                        break;
-                    }
-                }
-            }
+            remove_fixture_dir(&dir);
             assert_eq!(work.is_err(), outcome == "work-error");
             if outcome == "cleanup-error" {
                 assert_eq!(cleanup.unwrap_err(), "invented cancellation unknown");
@@ -604,6 +592,22 @@ mod tests {
             with_run::<()>(Err("invented open failure".into()), |_| panic!("failed open ran work"), || Ok(json!("cleanup attempted")));
         assert_eq!(work.unwrap_err(), "invented open failure");
         assert_eq!(cleanup.unwrap(), json!("cleanup attempted"));
+    }
+
+    fn remove_fixture_dir(dir: &Path) {
+        // EOF precedes Python exit; Windows can still hold the fixture's working directory.
+        let until = Instant::now() + Duration::from_secs(3);
+        loop {
+            match fs::remove_dir_all(dir) {
+                Err(e) if cfg!(windows) && e.raw_os_error() == Some(32) && Instant::now() < until => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                result => {
+                    result.unwrap();
+                    break;
+                }
+            }
+        }
     }
 
     // R3/R4/R8: delayed catalogue replies need a matching ID; notifications, foreign
@@ -646,8 +650,9 @@ mod tests {
             let messages: Vec<Value> = fs::read_to_string(&trace).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
             assert_eq!(messages.iter().filter(|m| m["method"] == "model/list").count(), 1);
             assert!(!messages.iter().any(|m| m["method"] == "turn/start"));
+            drop(run);
             drop(log);
-            fs::remove_dir_all(&dir).unwrap();
+            remove_fixture_dir(&dir);
             if outcome == "catalogue-missing" {
                 assert!(result.unwrap_err().contains("catalogue response unobserved"));
             } else {

@@ -136,6 +136,7 @@ pub fn migrate(c: &mut Client) -> Result<()> {
         tx.batch_execute(SCHEMA)?;
         tx.execute("INSERT INTO schema_version (version) VALUES (1)", &[])?;
     }
+    tx.batch_execute(include_str!("registry.sql"))?;
     // Rename the runtime-specific image route seeded by earlier builds to the capability name. Only the
     // disabled, never-referenced built-in row changes; a row any job or recommendation resolved keeps its spec (R5).
     let image = builtin_methods().into_iter().find(|m| m.0 == "image.worker.v1").expect("built-in image method").3;
@@ -424,13 +425,43 @@ pub fn set_acceptance(c: &mut Client, p: &Principal, id: &str, value: &str) -> R
 const METHOD_STATUSES: &[&str] = &["experimental", "recommended", "deprecated", "disabled"];
 
 pub fn list_methods(c: &mut impl GenericClient, project: &str) -> Result<Value> {
-    let rows =
-        c.query("SELECT id, version, status, spec, created_at::text FROM methods WHERE project = $1 ORDER BY id, version", &[&project])?;
+    let rows = c.query(
+        "SELECT id, version, status, spec, created_at::text FROM methods WHERE project = $1 ORDER BY id, version LIMIT 500",
+        &[&project],
+    )?;
     Ok(Value::Array(rows.iter().map(method_json).collect()))
 }
 
 fn method_json(r: &postgres::Row) -> Value {
-    json!({"id": r.get::<_, String>(0), "version": r.get::<_, i32>(1), "status": r.get::<_, String>(2), "spec": r.get::<_, Value>(3), "created_at": r.get::<_, String>(4)})
+    let name = format!("{}@{}", r.get::<_, String>(0), r.get::<_, i32>(1));
+    let spec: Value = r.get(3);
+    json!({"id": r.get::<_, String>(0), "version": r.get::<_, i32>(1), "status": r.get::<_, String>(2), "spec": spec, "created_at": r.get::<_, String>(4), "qualification": crate::registry::qualified_spec(&name, &spec)})
+}
+
+pub fn filter_methods(c: &mut Client, project: &str, filters: &Value, after: &str, limit: i64) -> Result<Value> {
+    let constraints = filters.get("constraints").cloned().unwrap_or(json!({}));
+    if !constraints.is_object() {
+        return Err(Error::new(422, "bad_constraints", "constraints must be an object"));
+    }
+    let rows = c.query(
+        "SELECT id,version,status,spec,created_at::text FROM methods WHERE project=$1
+        AND ($2::text IS NULL OR spec->>'operation'=$2) AND ($3::text IS NULL OR status=$3)
+        AND ($4::text IS NULL OR (spec->'capabilities') ? $4) AND id || '@' || version > $5
+        ORDER BY id || '@' || version LIMIT $6",
+        &[&project, &filters["operation"].as_str(), &filters["status"].as_str(), &filters["capability"].as_str(), &after, &(limit + 1)],
+    )?;
+    // Bound the scan as well as the response; a cursor is over registry rows, before constraint filtering.
+    let next = (rows.len() as i64 > limit).then(|| {
+        let r = &rows[limit as usize - 1];
+        format!("{}@{}", r.get::<_, String>(0), r.get::<_, i32>(1))
+    });
+    let items: Vec<Value> = rows
+        .iter()
+        .take(limit as usize)
+        .map(method_json)
+        .filter(|m| validate_constraints(&m["spec"]["parameters"], &constraints).is_ok())
+        .collect();
+    Ok(json!({"items": items, "next": next}))
 }
 
 /// Resolve `id` or `id@version`. Unversioned picks the newest recommended or
@@ -532,7 +563,7 @@ fn validate_spec(spec: &Value) -> Result<()> {
 }
 
 /// Typed constraints: every key must be declared with a matching type.
-fn validate_constraints(params: &Value, constraints: &Value) -> Result<()> {
+pub(crate) fn validate_constraints(params: &Value, constraints: &Value) -> Result<()> {
     let Some(obj) = constraints.as_object() else {
         return Err(Error::new(422, "bad_constraints", "constraints must be an object"));
     };
@@ -589,12 +620,16 @@ pub fn submit_job(c: &mut Client, p: &Principal, req: &Value, limits: &Limits, p
     let constraints = req.get("constraints").cloned().unwrap_or(json!({}));
     let budget = req["budget"]["max_credits"].as_u64().ok_or_else(|| bad("budget.max_credits required"))?;
     if let Some(k) = req.as_object().unwrap().keys().find(|k| {
-        !["project", "operation", "method", "text", "attachments", "constraints", "budget", "idempotency_key"].contains(&k.as_str())
+        !["project", "operation", "method", "text", "attachments", "constraints", "budget", "idempotency_key", "recommendation"]
+            .contains(&k.as_str())
     }) {
         // A request cannot carry permissions or configuration (R3).
         return Err(bad(&format!("unknown field {k}")));
     }
-    let canonical = json!({"operation": operation, "method": method_name, "text": text, "attachments": attachments, "constraints": constraints, "budget": {"max_credits": budget}});
+    let mut canonical = json!({"operation": operation, "method": method_name, "text": text, "attachments": attachments, "constraints": constraints, "budget": {"max_credits": budget}});
+    if let Some(rec) = req.get("recommendation") {
+        canonical["recommendation"] = rec.clone();
+    }
     let hash = sha256_hex(canonical.to_string().as_bytes());
 
     let mut tx = write_tx(c, false)?;
@@ -610,6 +645,18 @@ pub fn submit_job(c: &mut Client, p: &Principal, req: &Value, limits: &Limits, p
         return Ok((get_job(c, &p.project, &id)?, false));
     }
     let (mid, mver, spec) = resolve_method(&mut tx, &p.project, method_name)?;
+    if let Some(rec) = req.get("recommendation") {
+        let id = rec.as_str().ok_or_else(|| bad("recommendation must be an ID"))?;
+        let pinned = tx
+            .query_opt(
+                "SELECT method_id,method_version,constraints FROM recommendations WHERE id=$1 AND project=$2 AND state='promoted'",
+                &[&id, &p.project],
+            )?
+            .ok_or_else(|| Error::new(422, "recommendation_unavailable", "no promoted recommendation in this project"))?;
+        if pinned.get::<_, String>(0) != mid || pinned.get::<_, i32>(1) != mver || pinned.get::<_, Value>(2) != constraints {
+            return Err(Error::new(422, "recommendation_mismatch", "request must retain the exact recommended method and constraints"));
+        }
+    }
     if spec["operation"].as_str() != Some(operation) {
         return Err(Error::new(422, "operation_mismatch", format!("{mid}@{mver} performs {}", spec["operation"])));
     }
@@ -841,12 +888,13 @@ pub fn promote_recommendation(c: &mut Client, p: &Principal, id: &str) -> Result
     p.require_owner()?;
     let mut tx = write_tx(c, false)?;
     let r = tx.query_opt(
-        "SELECT use_case, constraints FROM recommendations WHERE id = $1 AND project = $2 AND state = 'proposed' FOR UPDATE",
+        "SELECT r.use_case, r.constraints, m.spec->>'operation' FROM recommendations r JOIN methods m ON m.project=r.project AND m.id=r.method_id AND m.version=r.method_version WHERE r.id = $1 AND r.project = $2 AND r.state = 'proposed' FOR UPDATE OF r",
         &[&id, &p.project],
     )?;
     let r = r.ok_or_else(|| Error::new(404, "not_found", "no proposed recommendation"))?;
     let use_case: String = r.get(0);
     let constraints: Value = r.get(1);
+    let operation: String = r.get(2);
     let previous = tx.query(
         "SELECT id FROM recommendations WHERE use_case = $1 AND project = $2 AND constraints = $3 AND state = 'promoted'",
         &[&use_case, &p.project, &constraints],
@@ -857,15 +905,15 @@ pub fn promote_recommendation(c: &mut Client, p: &Principal, id: &str) -> Result
     charge(&mut tx, constraints.to_string().len())?;
     tx.query_one("SELECT 1 FROM projects WHERE id = $1 FOR UPDATE", &[&p.project])?;
     tx.execute(
-        "UPDATE recommendations SET state = 'withdrawn' WHERE use_case = $1 AND project = $2 AND constraints = $3 AND state = 'promoted'",
-        &[&use_case, &p.project, &constraints],
+        "UPDATE recommendations r SET state = 'withdrawn' FROM methods m WHERE r.use_case = $1 AND r.project = $2 AND r.constraints = $3 AND r.state = 'promoted' AND m.project=r.project AND m.id=r.method_id AND m.version=r.method_version AND m.spec->>'operation'=$4",
+        &[&use_case, &p.project, &constraints, &operation],
     )?;
     tx.execute("UPDATE recommendations SET state = 'promoted', promoted_by = $2 WHERE id = $1", &[&id, &p.project])?;
     commit_write(tx)?;
     get_recommendation(c, &p.project, id)
 }
 
-const REC_COLS: &str = "r.id, r.use_case, r.constraints, r.method_id, r.method_version, r.evidence, r.observed_at::text, r.state, r.proposed_by, r.promoted_by, m.status";
+const REC_COLS: &str = "r.id, r.use_case, r.constraints, r.method_id, r.method_version, r.evidence, r.observed_at::text, r.state, r.proposed_by, r.promoted_by, m.status, m.spec->>'operation'";
 
 fn rec_json(r: &postgres::Row) -> Value {
     json!({
@@ -873,6 +921,7 @@ fn rec_json(r: &postgres::Row) -> Value {
         "method": format!("{}@{}", r.get::<_, String>(3), r.get::<_, i32>(4)), "evidence": r.get::<_, Value>(5),
         "observed_at": r.get::<_, String>(6), "state": r.get::<_, String>(7), "proposed_by": r.get::<_, String>(8),
         "promoted_by": r.get::<_, Option<String>>(9), "method_status": r.get::<_, String>(10),
+        "operation": r.get::<_, String>(11),
     })
 }
 
@@ -888,24 +937,48 @@ fn get_recommendation(c: &mut impl GenericClient, project: &str, id: &str) -> Re
 
 /// One qualified route for the use case, or an explicit "none qualified".
 pub fn recommendations(c: &mut impl GenericClient, project: &str, use_case: &str, constraints: &Value) -> Result<Value> {
+    scoped_recommendations(c, project, use_case, constraints, None)
+}
+
+pub fn scoped_recommendations(
+    c: &mut impl GenericClient,
+    project: &str,
+    use_case: &str,
+    constraints: &Value,
+    operation: Option<&str>,
+) -> Result<Value> {
     let rows = c.query(
-        &format!("SELECT {REC_COLS} FROM recommendations r JOIN methods m ON m.id = r.method_id AND m.version = r.method_version AND m.project = r.project WHERE r.use_case = $1 AND r.project = $2 ORDER BY r.created_at DESC"),
-        &[&use_case, &project],
+        &format!("SELECT {REC_COLS} FROM recommendations r JOIN methods m ON m.id = r.method_id AND m.version = r.method_version AND m.project = r.project WHERE r.use_case = $1 AND r.project = $2 AND r.constraints=$3 AND ($4::text IS NULL OR m.spec->>'operation'=$4) ORDER BY r.created_at DESC, r.id LIMIT 501"),
+        &[&use_case, &project, constraints, &operation],
     )?;
-    let all: Vec<Value> = rows.iter().map(rec_json).collect();
-    let qualified = all
+    let records_truncated = rows.len() > 500;
+    let all: Vec<Value> = rows.iter().take(500).map(rec_json).collect();
+    // Eligibility cannot depend on the bounded history page.
+    let eligible: Vec<Value> = c.query(
+        &format!("SELECT {REC_COLS} FROM recommendations r JOIN methods m ON m.id=r.method_id AND m.version=r.method_version AND m.project=r.project WHERE r.use_case=$1 AND r.project=$2 AND r.constraints=$3 AND r.state='promoted' AND m.status IN ('experimental','recommended') AND ($4::text IS NULL OR m.spec->>'operation'=$4) ORDER BY r.id LIMIT 2"),
+        &[&use_case, &project, constraints, &operation])?.iter().map(rec_json).collect();
+    let qualified = (eligible.len() == 1).then(|| eligible[0].clone());
+    let reason = if qualified.is_some() {
+        Value::Null
+    } else if eligible.len() > 1 {
+        json!("multiple operations match; specify operation")
+    } else {
+        json!("no promoted recommendation with an enabled method for this operation/use case/constraints")
+    };
+    let receipt_methods: Vec<Value> = c.query("SELECT id,version,status,spec,created_at::text FROM methods WHERE project=$1 AND ((id='image.worker.v1' AND version IN (2,5)) OR (id='model.meshy-prop.v1' AND version=2)) ORDER BY id,version", &[&project])?.iter().map(method_json).collect();
+    let evidence: Vec<Value> = receipt_methods
         .iter()
-        .find(|r| {
-            r["state"] == "promoted"
-                && &r["constraints"] == constraints
-                && r["method_status"] != "disabled"
-                && r["method_status"] != "deprecated"
-        })
-        .cloned();
-    let reason =
-        if qualified.is_some() { Value::Null } else { json!("no promoted recommendation with an enabled method for this use case") };
-    Ok(json!({"use_case": use_case, "recommended": qualified, "none_reason": reason, "records": all,
-              "note": "recommendations are evidence records, separate from provider health"}))
+        .filter(|m| operation.is_none_or(|op| m["spec"]["operation"] == op))
+        .filter(|m| !m["qualification"].is_null())
+        .map(|m| json!({"method": format!("{}@{}", m["id"].as_str().unwrap(),m["version"]), "qualification": m["qualification"]}))
+        .collect();
+    let revision = sha256_hex(json!({"records": all, "evidence": evidence, "eligible": eligible}).to_string().as_bytes());
+    let observed: String = c.query_one("SELECT now()::text", &[])?.get(0);
+    Ok(
+        json!({"use_case": use_case, "operation": operation, "constraints": constraints, "recommended": qualified, "none_reason": reason, "records": all, "records_truncated":records_truncated,
+              "revision": revision, "observed_at": observed, "qualification_evidence": evidence,
+              "note": "recommendations are evidence records, separate from provider health"}),
+    )
 }
 
 pub fn add_comparison(c: &mut Client, p: &Principal, body: &Value) -> Result<Value> {
@@ -913,46 +986,75 @@ pub fn add_comparison(c: &mut Client, p: &Principal, body: &Value) -> Result<Val
     let (use_case, dataset, evaluator) = (s("use_case")?, s("dataset_version")?, s("evaluator_version")?);
     let methods = body
         .get("method_versions")
-        .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()))
+        .filter(|v| v.as_array().is_some_and(|a| !a.is_empty() && a.len() <= 32))
         .ok_or_else(|| Error::new(422, "bad_comparison", "method_versions required"))?;
+    let mut operation = None;
     for m in methods.as_array().unwrap() {
         let name =
             m.as_str().filter(|m| m.contains('@')).ok_or_else(|| Error::new(422, "bad_comparison", "method_versions are id@version"))?;
         let (id, v) = name.split_once('@').unwrap();
         let v: i32 = v.parse().map_err(|_| Error::new(422, "bad_comparison", "bad version"))?;
-        if c.query_opt("SELECT 1 FROM methods WHERE id = $1 AND version = $2 AND project = $3", &[&id, &v, &p.project])?.is_none() {
-            return Err(Error::new(422, "bad_comparison", format!("unknown method {name}")));
+        if v <= 0 || name != format!("{id}@{v}") {
+            return Err(Error::new(422, "bad_comparison", "method version must use canonical positive decimal notation"));
         }
+        let row = c
+            .query_opt("SELECT spec->>'operation' FROM methods WHERE id = $1 AND version = $2 AND project = $3", &[&id, &v, &p.project])?
+            .ok_or_else(|| Error::new(422, "bad_comparison", format!("unknown method {name}")))?;
+        let op: String = row.get(0);
+        if operation.as_ref().is_some_and(|previous| previous != &op) {
+            return Err(Error::new(422, "bad_comparison", "candidate operations differ"));
+        }
+        operation = Some(op);
     }
-    let results = body.get("results").cloned().ok_or_else(|| Error::new(422, "bad_comparison", "results required"))?;
+    let plan = if body.get("plan").is_some() { Some(crate::registry::prepare(c, p, body)?) } else { None };
+    let results = body
+        .get("results")
+        .cloned()
+        .or_else(|| plan.as_ref().map(|_| json!({"state":"incomplete"})))
+        .ok_or_else(|| Error::new(422, "bad_comparison", "results required"))?;
     let missing = body.get("missing_cases").cloned().unwrap_or(json!([]));
     let id = new_id();
     let mut tx = write_tx(c, false)?;
-    charge(&mut tx, body.to_string().len())?;
+    charge(&mut tx, body.to_string().len() + plan.as_ref().map_or(0, |v| v.to_string().len()))?;
     tx.execute(
         "INSERT INTO comparisons (id, use_case, dataset_version, evaluator_version, method_versions, results, missing_cases, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         &[&id, &use_case, &dataset, &evaluator, methods, &results, &missing, &p.project],
     )?;
+    if let Some(plan) = plan {
+        tx.execute("INSERT INTO benchmark_plans (comparison,project,plan) VALUES ($1,$2,$3)", &[&id, &p.project, &plan])?;
+    }
     commit_write(tx)?;
     Ok(json!({"id": id}))
 }
 
+const COMPARISON_COLS: &str =
+    "id, use_case, dataset_version, evaluator_version, method_versions, results, missing_cases, created_by, created_at::text";
+
+fn comparison_json(r: &postgres::Row) -> Value {
+    json!({"id":r.get::<_,String>(0), "use_case":r.get::<_,String>(1), "dataset_version":r.get::<_,String>(2),
+        "evaluator_version":r.get::<_,String>(3), "method_versions":r.get::<_,Value>(4), "results":r.get::<_,Value>(5),
+        "missing_cases":r.get::<_,Value>(6), "created_by":r.get::<_,String>(7), "created_at":r.get::<_,String>(8)})
+}
+
+pub fn get_comparison(c: &mut Client, project: &str, id: &str) -> Result<Value> {
+    c.query_opt(&format!("SELECT {COMPARISON_COLS} FROM comparisons WHERE created_by=$1 AND id=$2"), &[&project, &id])?
+        .map(|r| comparison_json(&r))
+        .ok_or_else(|| Error::new(404, "not_found", "no comparison in this project"))
+}
+
+pub fn comparison_page(c: &mut Client, project: &str, use_case: Option<&str>, after: &str, limit: i64) -> Result<Value> {
+    let rows = c.query(&format!("SELECT {COMPARISON_COLS} FROM comparisons WHERE created_by=$1 AND ($2::text IS NULL OR use_case=$2) AND id > $3 ORDER BY id LIMIT $4"), &[&project, &use_case, &after, &(limit+1)])?;
+    let items: Vec<Value> = rows.iter().take(limit as usize).map(comparison_json).collect();
+    let next = (rows.len() as i64 > limit).then(|| items.last().unwrap()["id"].clone());
+    Ok(json!({"items":items,"next":next}))
+}
+
 pub fn list_comparisons(c: &mut impl GenericClient, project: &str, use_case: Option<&str>) -> Result<Value> {
     let rows = c.query(
-        "SELECT id, use_case, dataset_version, evaluator_version, method_versions, results, missing_cases, created_by, created_at::text FROM comparisons WHERE created_by = $2 AND ($1::text IS NULL OR use_case = $1) ORDER BY created_at",
+        "SELECT id, use_case, dataset_version, evaluator_version, method_versions, results, missing_cases, created_by, created_at::text FROM comparisons WHERE created_by = $2 AND ($1::text IS NULL OR use_case = $1) ORDER BY created_at LIMIT 500",
         &[&use_case, &project],
     )?;
-    Ok(Value::Array(
-        rows.iter()
-            .map(|r| {
-                json!({
-                    "id": r.get::<_, String>(0), "use_case": r.get::<_, String>(1), "dataset_version": r.get::<_, String>(2),
-                    "evaluator_version": r.get::<_, String>(3), "method_versions": r.get::<_, Value>(4), "results": r.get::<_, Value>(5),
-                    "missing_cases": r.get::<_, Value>(6), "created_by": r.get::<_, String>(7), "created_at": r.get::<_, String>(8),
-                })
-            })
-            .collect(),
-    ))
+    Ok(Value::Array(rows.iter().map(comparison_json).collect()))
 }
 
 pub fn observe(c: &mut Client, kind: &str, subject: &str, value: &Value) -> Result<()> {
@@ -975,14 +1077,16 @@ pub fn status(c: &mut impl GenericClient, project: &str, quota: u64, providers: 
     let uncertain: i64 = c.query_one("SELECT count(*) FROM jobs WHERE project = $1 AND state->>'effect' IN ('uncertain', 'intended') AND phase NOT IN ('succeeded','failed','cancelled')", &[&project])?.get(0);
     let leased: i64 = c.query_one("SELECT count(*) FROM jobs WHERE project = $1 AND lease_owner IS NOT NULL", &[&project])?.get(0);
     let mut methods = vec![];
-    for r in c.query("SELECT method_id || '@' || method_version, phase, count(*), count(*) FILTER (WHERE state->>'usage_credits' IS NULL AND (state->>'submissions')::int > 0), coalesce(sum((state->>'usage_credits')::bigint), 0)::bigint FROM jobs WHERE project = $1 GROUP BY 1, 2 ORDER BY 1, 2", &[&project])? {
+    for r in c.query("SELECT method_id || '@' || method_version, phase, count(*), count(*) FILTER (WHERE state->>'usage_credits' IS NULL AND (state->>'submissions')::int > 0), coalesce(sum((state->>'usage_credits')::bigint), 0)::bigint FROM jobs WHERE project = $1 GROUP BY 1, 2 ORDER BY 1, 2 LIMIT 501", &[&project])? {
         methods.push(json!({"method": r.get::<_, String>(0), "phase": r.get::<_, String>(1), "jobs": r.get::<_, i64>(2), "usage_unknown": r.get::<_, i64>(3), "credits_reported": r.get::<_, i64>(4)}));
     }
+    let methods_truncated = methods.len() > 500;
+    methods.truncate(500);
     let used = used_bytes(c)?;
     let mut obs = serde_json::Map::new();
     for r in c.query(
-        "SELECT kind || ':' || subject, value, observed_at::text FROM observations WHERE observed_at > now() - interval '5 minutes'",
-        &[],
+        "SELECT kind || ':' || subject, value, observed_at::text FROM observations WHERE observed_at > now() - interval '5 minutes' AND ((kind IN ('backup','restore','integrity') AND subject='store') OR (kind='provider' AND subject=ANY($1)))",
+        &[&providers],
     )? {
         obs.insert(r.get(0), json!({"value": r.get::<_, Value>(1), "observed_at": r.get::<_, String>(2)}));
     }
@@ -1002,13 +1106,45 @@ pub fn status(c: &mut impl GenericClient, project: &str, quota: u64, providers: 
         .get("integrity:store")
         .cloned()
         .unwrap_or_else(|| json!({"state": "unknown", "reason": "no fresh full integrity scan recorded"}));
+    let restore = obs.get("restore:store").cloned().unwrap_or_else(
+        || json!({"state":"unknown", "reason":"backup/restore qualification deferred; no fresh scoped restore observation"}),
+    );
+    let mut revisions = serde_json::Map::new();
+    for (kind, sql) in [
+        (
+            "registry",
+            "SELECT count(*)::text || ':' || coalesce(bit_xor(hashtextextended(id || '@' || version || status || spec::text,0)),0)::text FROM methods WHERE project=$1",
+        ),
+        (
+            "comparisons",
+            "SELECT count(*)::text || ':' || coalesce(bit_xor(hashtextextended(identity,0)),0)::text FROM (
+                SELECT id AS identity FROM comparisons WHERE created_by=$1
+                UNION ALL SELECT j.id || j.state::text FROM jobs j JOIN benchmark_plans b ON b.project=j.project AND j.idempotency_key LIKE 'comparison:' || b.comparison || ':%' WHERE b.project=$1
+                UNION ALL SELECT s.comparison || s.sample || s.judgment::text FROM benchmark_scores s JOIN benchmark_plans b ON b.comparison=s.comparison WHERE b.project=$1) entries",
+        ),
+        (
+            "recommendations",
+            "SELECT count(*)::text || ':' || coalesce(bit_xor(hashtextextended(id || state,0)),0)::text FROM recommendations WHERE project=$1",
+        ),
+        (
+            "evaluations",
+            "SELECT count(*)::text || ':' || coalesce(bit_xor(hashtextextended(id || version || sha256,0)),0)::text FROM benchmark_revisions WHERE project=$1",
+        ),
+    ] {
+        revisions.insert(kind.into(), json!(c.query_one(sql, &[&project])?.get::<_, String>(0)));
+    }
+    revisions.insert("qualification".into(), json!(sha256_hex(include_bytes!("method-evidence.json"))));
     Ok(json!({
         "project": project,
         "jobs": {"by_phase": phases, "uncertain_submissions": uncertain, "leased": leased},
         "methods": methods,
+        "method_outcomes_truncated": methods_truncated,
         "providers": provider_health,
         "store": {"used_bytes": used, "quota_bytes": quota, "full": used >= quota, "integrity": integrity},
         "backup": backup,
+        "restore": restore,
+        "revisions": revisions,
+        "integration": {"origin":"https://assets.ufobe.com", "control_path":"/v1/status", "asset_authority":"project-scoped AssetQ API", "host_observations_owner":"ServerQ", "dashq":"summary metadata and deep links only"},
         "states": "generation success (job phase), asset validation (manifest) and owner acceptance (object acceptance) are separate fields",
     }))
 }

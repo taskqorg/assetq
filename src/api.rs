@@ -195,7 +195,20 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
         }
         (Method::Get, ["v1", "jobs", id, "result"]) => ok(db::job_result(c, &pid, id)?),
         (Method::Post, ["v1", "jobs", id, "cancel"]) => ok(db::cancel_job(c, &pid, id)?),
-        (Method::Get, ["v1", "methods"]) => ok(db::list_methods(c, &pid)?),
+        (Method::Get, ["v1", "methods"]) => {
+            if q.is_empty() {
+                return ok(db::list_methods(c, &pid)?);
+            }
+            let constraints: Value = serde_json::from_str(&param("constraints").unwrap_or("{}".into()))
+                .map_err(|_| Error::new(422, "bad_constraints", "constraints must be JSON"))?;
+            ok(db::filter_methods(
+                c,
+                &pid,
+                &json!({"operation":param("operation"), "capability":param("capability"), "status":param("status"), "constraints":constraints}),
+                &param("after").unwrap_or_default(),
+                limit,
+            )?)
+        }
         (Method::Post, ["v1", "methods"]) => {
             let body = read_json(req)?;
             Ok(Reply::Json(201, db::create_method_version(c, &p, &body)?))
@@ -207,17 +220,40 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
             if !constraints.is_object() {
                 return Err(Error::new(422, "bad_constraints", "constraints must be an object"));
             }
-            ok(db::recommendations(c, &pid, &uc, &constraints)?)
+            ok(db::scoped_recommendations(c, &pid, &uc, &constraints, param("operation").as_deref())?)
         }
         (Method::Post, ["v1", "recommendations"]) => {
             let body = read_json(req)?;
             Ok(Reply::Json(201, db::propose_recommendation(c, &p, &body)?))
         }
         (Method::Post, ["v1", "recommendations", id, "promote"]) => ok(db::promote_recommendation(c, &p, id)?),
-        (Method::Get, ["v1", "comparisons"]) => ok(db::list_comparisons(c, &pid, param("use_case").as_deref())?),
+        (Method::Get, ["v1", "comparisons"]) => {
+            if param("after").is_some() || param("limit").is_some() {
+                ok(db::comparison_page(c, &pid, param("use_case").as_deref(), &param("after").unwrap_or_default(), limit)?)
+            } else {
+                ok(db::list_comparisons(c, &pid, param("use_case").as_deref())?)
+            }
+        }
         (Method::Post, ["v1", "comparisons"]) => {
             let body = read_json(req)?;
             Ok(Reply::Json(201, db::add_comparison(c, &p, &body)?))
+        }
+        (Method::Get, ["v1", "comparisons", id]) => ok(crate::registry::result(c, &pid, id)?),
+        (Method::Post, ["v1", "comparisons", id, "run"]) => ok(crate::registry::run(c, &p, id, ctx.cfg.quota_bytes, &providers)?),
+        (Method::Post, ["v1", "comparisons", id, "scores"]) => {
+            let body = read_json(req)?;
+            ok(crate::registry::score(c, &p, id, &body)?)
+        }
+        (Method::Get, ["v1", kind @ ("datasets" | "evaluators")]) => ok(crate::registry::revisions(
+            c,
+            &pid,
+            if *kind == "datasets" { "dataset" } else { "evaluator" },
+            &param("after").unwrap_or_default(),
+            limit,
+        )?),
+        (Method::Post, ["v1", kind @ ("datasets" | "evaluators")]) => {
+            let body = read_json(req)?;
+            Ok(Reply::Json(201, crate::registry::register(c, &p, if *kind == "datasets" { "dataset" } else { "evaluator" }, &body)?))
         }
         (Method::Get, ["v1", "status"]) => {
             let mut status = db::status(c, &pid, ctx.cfg.quota_bytes, &providers)?;
