@@ -1,0 +1,20 @@
+pricing 200
+image-to-3d 200
+balance 200
+pricing {'sha256': '4edb110aeffa7b339b28551c74a925efe0808924536da11d14f2a40b92b48102', 'bytes': 229749, 'missing': []}
+image-to-3d {'sha256': 'ff883d2e442f246b793ad56e36222e41f31666db65ff5005a837a3b228c396cb', 'bytes': 647061, 'missing': []}
+balance {'sha256': 'f135d6b41b0fdaae1112657a72d9f147b45230af9becfe5d2c9c0696e29be635', 'bytes': 213668, 'missing': []}
+balance 5485 account task counts {'i23': 1, 'multi': 0, 't23': 0}
+[12:31:34] meshy-serve <loopback>
+assetq listening on <loopback>
+[12:31:40] job waiting 0 submitted 01a1a68b-1231-7340-84d5-e22ba3cbedf0 1 None
+[12:31:40] provider 01a1a68b-1231-7340-84d5-e22ba3cbedf0 status IN_PROGRESS
+[12:31:40] restart control 2951230
+[12:31:41] serve <loopback>
+restart submit created False same job True same provider True submissions 1
+[12:33:12] job succeeded 3 done 01a1a68b-1231-7340-84d5-e22ba3cbedf0 1 None
+[12:33:12] final succeeded 3 done 01a1a68b-1231-7340-84d5-e22ba3cbedf0 1 None
+{"balance":5470,"monthly_credits":2970,"permanent_credits":2500,"monthly_resets_at":1796103446000}
+
+{'id': '01a1a68b-1231-7340-84d5-e22ba3cbedf0', 'status': 'SUCCEEDED', 'progress': 100, 'consumed_credits': 15, 'ai_model': None, 'created_at': 1793795495489, 'started_at': 1793795495498, 'finished_at': 1793795541429} err None
+[12:33:12] DRIVER-END

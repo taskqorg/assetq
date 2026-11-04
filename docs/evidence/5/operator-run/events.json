@@ -1,0 +1,170 @@
+[
+  {
+    "seq": 1,
+    "event": {
+      "type": "accepted",
+      "steps": [
+        "provider.submit",
+        "provider.import",
+        "validate"
+      ],
+      "method": "model.meshy-prop.v1@2"
+    },
+    "at": "2026-11-04 12:27:56.615499+00"
+  },
+  {
+    "seq": 2,
+    "event": {
+      "type": "claimed",
+      "fence": 1,
+      "owner": "host:2951230:0"
+    },
+    "at": "2026-11-04 12:31:34.09258+00"
+  },
+  {
+    "seq": 3,
+    "event": {
+      "type": "dispatch_intended",
+      "fence": 1,
+      "effect_id": "70f5e704-6b10-46bd-b559-c335a85cc2be"
+    },
+    "at": "2026-11-04 12:31:34.120719+00"
+  },
+  {
+    "seq": 4,
+    "event": {
+      "type": "submit_acked",
+      "fence": 1,
+      "op_id": "01a1a68b-1231-7340-84d5-e22ba3cbedf0",
+      "effect_id": "70f5e704-6b10-46bd-b559-c335a85cc2be"
+    },
+    "at": "2026-11-04 12:31:35.658497+00"
+  },
+  {
+    "seq": 5,
+    "event": {
+      "type": "provider_completed",
+      "op_id": "01a1a68b-1231-7340-84d5-e22ba3cbedf0",
+      "credits": 15,
+      "outputs": 9
+    },
+    "at": "2026-11-04 12:33:08.765865+00"
+  },
+  {
+    "seq": 6,
+    "event": {
+      "type": "claimed",
+      "fence": 2,
+      "owner": "host:2951893:0"
+    },
+    "at": "2026-11-04 12:33:08.775094+00"
+  },
+  {
+    "seq": 7,
+    "event": {
+      "key": "output-0",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.00726+00"
+  },
+  {
+    "seq": 8,
+    "event": {
+      "key": "output-1",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.16313+00"
+  },
+  {
+    "seq": 9,
+    "event": {
+      "key": "output-2",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.198857+00"
+  },
+  {
+    "seq": 10,
+    "event": {
+      "key": "output-3",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.251015+00"
+  },
+  {
+    "seq": 11,
+    "event": {
+      "key": "output-4",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.369151+00"
+  },
+  {
+    "seq": 12,
+    "event": {
+      "key": "output-5",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.40151+00"
+  },
+  {
+    "seq": 13,
+    "event": {
+      "key": "output-6",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.433345+00"
+  },
+  {
+    "seq": 14,
+    "event": {
+      "key": "output-7",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.474045+00"
+  },
+  {
+    "seq": 15,
+    "event": {
+      "key": "output-8",
+      "type": "object_imported",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.504352+00"
+  },
+  {
+    "seq": 16,
+    "event": {
+      "step": 1,
+      "type": "step_completed",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.518788+00"
+  },
+  {
+    "seq": 17,
+    "event": {
+      "step": 2,
+      "type": "step_completed",
+      "fence": 2
+    },
+    "at": "2026-11-04 12:33:09.684881+00"
+  },
+  {
+    "seq": 18,
+    "event": {
+      "type": "manifest_committed",
+      "fence": 2,
+      "items": 9
+    },
+    "at": "2026-11-04 12:33:09.8131+00"
+  }
+]
