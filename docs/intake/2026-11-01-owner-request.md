@@ -17,6 +17,14 @@ The owner accepted the architecture discussed in this chat: AgentQ owns a reusab
 - Repository visibility: first "Закрытый"; after GitHub refused branch protection on the current private plan, the owner changed the decision: "ок сделай публичным". Repository: public `taskqorg/assetq`; protected main and CI remain required.
 - Asked whether to authorize a bounded Meshy run without purchases/top-ups, the owner answered: "1000". Record a cumulative 1000-credit maximum for this initial workstream, with no purchase or top-up.
 
+## Meshy testing spend amendment
+
+Task #5 answer [6629641665](https://github.com/taskqorg/assetq/issues/5#issuecomment-6629641665) supersedes the original cumulative Meshy cap and the unchanged-ceiling statement in the website direction below:
+
+> Amend A6: uncapped testing - + follows the latest owner direction; - removes the cumulative spend guard. Amend owning rules; keep cost evidence.
+
+Initial testing now retains actual/cumulative costs without a cumulative credit ceiling. Unknown usage, reconciliation, no purchases/top-ups and per-job/resource protections remain required.
+
 ## Preserved broader requirements
 
 The earlier request also requires text and attachment inputs, image/video/3D/audio and other asset kinds, durable jobs lasting hours, alternative APIs/models/pipelines, adding and changing methods, comparative tests, agent-and-human recommendations, operational control and owned asset storage on pds18. The two initial methods are the first implementation scope, not deletion of those requirements.

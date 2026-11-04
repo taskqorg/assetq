@@ -110,7 +110,9 @@ A runtime is eligible only after AgentQ qualifies its tool and output path. Text
 
 **Image to 3D prop (`model.meshy-prop.v1`).** Resolve a verified input image; submit a versioned Meshy image-to-3D request with explicit `meshy-t2`, Smart Topology, a 3000-triangle target and 2K PBR as the starting recipe. Preserve source GLB/textures, then validate and render with headless Blender. Provider support and current cost require fresh verification before dispatch.
 
-Meshy dispatch uses an operator-bound accepted job, a freshly reconciled account/workstream ledger and the cumulative 1000-credit ceiling, with no purchases or top-ups. Unknown prior spend, balance, parameter support or executor qualification refuses new effects.
+Meshy dispatch uses an operator-bound accepted job and a freshly reconciled account/workstream ledger, with no purchases or top-ups. Unknown prior spend, balance, parameter support or executor qualification refuses new effects.
+
+Initial Meshy testing has no cumulative credit ceiling; retain actual and cumulative cost evidence without refusing on cumulative spend. Per-job limits and all other R7 bounds remain enforced.
 
 Persist intent before the only POST; a missing reply without a verified original provider ID remains uncertain indefinitely, never authorizes another POST. Cancellation preserves remote results and unknown charges; do not delete a provider task to simulate cancellation.
 

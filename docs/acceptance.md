@@ -34,6 +34,8 @@ Report actual triangles versus target, component count, dimensions, textures, GL
 
 ## Acceptance record
 
+Meshy testing A6: reconcile balance and all attempts before spend, retain actual and cumulative cost evidence and stop on unknown usage. Initial testing has no cumulative credit ceiling; no purchases/top-ups are authorized. Per-job and other resource limits remain enforced.
+
 Keep exact source and binary identities, method versions, input/output hashes, job/provider IDs, request/cost ledger, check commands, actual outcomes and limitations with each task's evidence. No credentials or private infrastructure locators go to public boards. Owner visual acceptance stays separate from technical completion.
 
 ## Website and API origin

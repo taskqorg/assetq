@@ -49,7 +49,7 @@ The PM created a ten-minute heartbeat in the existing owner chat. It follows thi
 
 ## Spend and operational boundaries
 
-Meshy authorization: at most 1000 credits total for the initial AssetQ example/qualification work, with no purchase or top-up. This is a cumulative ceiling, not an instruction to spend it. Reconcile balance and all prior authorized AssetQ attempts before each paid submission; preserve a durable ledger and stop on unknown spend or an insufficient remaining allowance.
+Initial Meshy testing has no cumulative credit ceiling and permits no purchase or top-up. Reconcile balance and all prior authorized AssetQ attempts before each paid submission; preserve actual and cumulative cost evidence and stop on unknown spend or insufficient account balance. Per-job limits, exclusive operator binding and other resource bounds remain enforced.
 
 No other paid-provider budget is implied. Native subscription image generation uses the selected qualified worker and existing account; any paid API fallback needs a separate decision. Do not change worker models, effort, permissions or ordinary host capacity.
 

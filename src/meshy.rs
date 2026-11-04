@@ -17,7 +17,6 @@ use std::{
 pub const PROVIDER: &str = "meshy";
 pub const SOURCE: &str = "fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa";
 const PRICE: u64 = 15;
-const CAP: u64 = 1000;
 const RECEIPT_LIMIT: u64 = 2 << 20;
 const RENDER_RESERVE: u64 = 32 << 20;
 const OUTPUT_RESERVE: u64 = 640 << 20;
@@ -47,7 +46,7 @@ pub fn preflight(blender: Option<&Path>) -> Res<Value> {
         "memory_limit_bytes":memory.as_ref().ok(),"memory_unknown_reason":memory.err(),
         "blender_sha256":blender_hash.as_ref().ok().and_then(|h|h.as_ref()),"blender_unknown_reason":blender_hash.err().or_else(||blender.is_none().then(||"Blender executable not supplied".into())),
         "protected_meshy_key":if std::env::var("MESHY_API_KEY").ok().is_some_and(|k|!k.is_empty()) {"present"} else {"absent"},
-        "source_sha256":SOURCE,"expected_recipe":recipe(),"expected_credits":PRICE,"cumulative_cap":CAP,
+        "source_sha256":SOURCE,"expected_recipe":recipe(),"expected_credits":PRICE,"cumulative_cap":null,"spend_policy":"uncapped_initial_testing",
         "ledger":"unknown until independent operator reconciliation","provider_qualification":"unproved"}))
 }
 
@@ -176,7 +175,7 @@ impl Meshy {
         };
         let mut r = result.map_err(|_| "Meshy transport failed; original operation/charge unknown")?;
         let status = r.status().as_u16();
-        if status != 200 && status != 201 {
+        if !matches!(status, 200 | 201 | 202) {
             return Err(format!("Meshy HTTP {status}; response retained only by provider, outcome requires reconciliation"));
         }
         let bytes = r
@@ -399,7 +398,7 @@ impl Meshy {
         let credits = task["consumed_credits"].as_u64();
         let evidence = json!({"provider":PROVIDER,"provider_id":op,"source_sha256":SOURCE,"recipe":recipe(),
             "consumed_credits":task.get("consumed_credits"),"texture_model":task.get("texture_model"),
-            "ledger":{"cap":CAP,"prior_credits":prior,"expected_credits":PRICE,"actual_credits":credits,
+            "ledger":{"cap":null,"spend_policy":"uncapped_initial_testing","prior_credits":prior,"expected_credits":PRICE,"actual_credits":credits,
                 "cumulative_credits":prior.zip(credits).and_then(|(a,b)|a.checked_add(b)),"balance_before":preflight["balance"]["balance"],
                 "balance_after":"unknown until independent account reconciliation","no_purchases":true},
             "texture_model_unknown_reason":"unreported provider defaults are not inferred","validation":report,
@@ -470,6 +469,7 @@ impl Meshy {
         self.save(&dir.join("validation-started.json"), &start_receipt)?;
         let mut command = Command::new(executable);
         command.env_clear();
+        command.env("MALLOC_ARENA_MAX", "2").env("OIDN_NUM_THREADS", "2");
         for name in ["PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP"] {
             if let Some(value) = std::env::var_os(name) {
                 command.env(name, value);
@@ -678,8 +678,8 @@ fn spend_check(prior: Option<u64>, balance: Option<u64>, expected: Option<u64>) 
     let (Some(prior), Some(balance), Some(expected)) = (prior, balance, expected) else {
         return Err("Meshy prior spend or balance unknown; no paid effect".into());
     };
-    if prior.checked_add(PRICE).is_none_or(|n| n > CAP) || balance < PRICE || balance != expected {
-        return Err("Meshy cumulative cap exhausted or balance changed; reconcile before spend".into());
+    if prior.checked_add(PRICE).is_none() || balance < PRICE || balance != expected {
+        return Err("Meshy ledger overflow, insufficient balance or balance changed; reconcile before spend".into());
     }
     Ok(())
 }
@@ -960,8 +960,8 @@ mod tests {
             "should_texture":true,"enable_pbr":true,"texture_resolution":"2k","target_formats":["glb"]})
         );
         assert!(spend_check(Some(985), Some(15), Some(15)).is_ok());
+        assert!(spend_check(Some(5000), Some(15), Some(15)).is_ok(), "A6 permits reconciled testing beyond the old cap");
         for (prior, balance, expected) in [
-            (Some(986), Some(15), Some(15)),
             (None, Some(1000), Some(1000)),
             (Some(0), None, None),
             (Some(u64::MAX), Some(1000), Some(1000)),
@@ -998,6 +998,41 @@ mod tests {
         huge["accessors"] = json!([{"count":2_000_001}]);
         assert!(glb_check(&glb(huge)).is_err());
         assert!(glb_check(b"not a GLB").is_err());
+    }
+
+    // A3, R4/R5: Meshy's HTTP 202 acceptance must retain the original ID across restart without a second POST.
+    #[test]
+    fn meshy_accepted_post_retains_original_id_after_restart() {
+        for status in [200, 201, 202] {
+            let mut p = fixture();
+            let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+            p.base = format!("http://{}", server.server_addr());
+            let effect = uuid::Uuid::new_v4().to_string();
+            let op = uuid::Uuid::new_v4().to_string();
+            fs::create_dir_all(p.dir(&effect).unwrap()).unwrap();
+            let reply = json!({"result":op});
+            let thread = std::thread::spawn(move || {
+                let req = server.recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+                assert_eq!(req.method(), &tiny_http::Method::Post);
+                assert_eq!(req.url(), "/openapi/v1/image-to-3d");
+                req.respond(tiny_http::Response::from_string(reply.to_string()).with_status_code(status)).unwrap();
+                server
+            });
+            let accepted = {
+                let _lock = p.store.writer_lock().unwrap();
+                p.post_once(&effect, &json!("invented-job"), &recipe())
+            };
+            let server = thread.join().unwrap();
+            assert_eq!(accepted.unwrap(), op, "HTTP {status} must preserve provider acceptance");
+            let restarted = Meshy::observer(p.cfg.clone()).unwrap();
+            assert_eq!(restarted.lookup(&effect).unwrap(), Some(op));
+            {
+                let _lock = restarted.store.writer_lock().unwrap();
+                assert!(restarted.post_once(&effect, &json!("invented-job"), &recipe()).is_err());
+            }
+            assert!(server.recv_timeout(Duration::from_millis(50)).unwrap().is_none(), "accepted POST cannot replay");
+            fs::remove_dir_all(&p.cfg.data_root).unwrap();
+        }
     }
 
     // A3, R4/R6: lost POST reply and failed receipt persistence both preserve uncertainty across restart.

@@ -2,13 +2,34 @@
 
 Task [#5](https://github.com/taskqorg/assetq/issues/5), A1-A7, AssetQ R2-R8. The [pipeline specification](../../meshy-pipeline.md) owns the recipe and recovery behavior. This is a prepared procedure, not a live receipt. The worker has made **zero Meshy submissions**. The [source manifest](source-manifest.json) identifies the unchanged accepted crate; [official verification](official-api-verification.json) records public documentation, not account qualification.
 
+## Authorized follow-up after the first operator run
+
+PM note [6628734645](https://github.com/taskqorg/assetq/issues/5#issuecomment-6628734645) reports one POST on candidate `1df7046`, provider task `01a1a625-c6c6-75c8-bcc0-4b738fb2603b`, terminal `SUCCEEDED`, and 15 credits spent (5500 to 5485). The adapter rejected HTTP 202, leaving its job waiting/effect uncertain without a manifest. Standalone validation passed; adapter polling, download, validation, manifest, usage and provider-wait restart remain unproved. Preserve that store and ledger; do not repair its receipts or submit it again.
+
+The PM reconciled that POST through the provider list and explicitly authorized one fresh store and new job for the next operator run. Carry `prior_credits: 15` into its binding, plus any other independently reconciled attempts; refresh balance rather than copying 5485. This is a separately authorized example, not an automatic uncertain-operation retry. No operator-reconcile path for the earlier task is provided.
+
+Owner answer [6629641665](https://github.com/taskqorg/assetq/issues/5#issuecomment-6629641665) amends A6: initial testing has no cumulative credit ceiling. Keep cost evidence, reconciliation, no purchases/top-ups and per-job/resource bounds. Unknown usage still refuses new effects.
+
 ## Prerequisites and authority
 
 Use the existing operator channel on a qualified executor. A TaskQ worker cannot run `meshy-serve`; never remove role variables or change grants to bypass that refusal. Do not install credentials, buy credits, change production settings or deploy this candidate through this procedure.
 
-The operator must supply an existing protected Meshy API credential, scoped AssetQ credential, dedicated qualification PostgreSQL/database configuration and one authoritative data root for this entire initial workstream. Reconcile **all** AssetQ attempts and stores against the account ledger; prior spend is unknown until that inventory is complete. Ensure no other executor can dispatch workstream effects during this run. A clone-local directory cannot establish cross-host exclusivity. Preserve the original ledgers and store; never initialize unknown spend to zero.
+The operator must supply an existing protected Meshy API credential, scoped AssetQ credential, dedicated qualification PostgreSQL/database configuration and one authoritative data root for this authorized run. Reconcile **all** AssetQ attempts and stores against the account ledger; prior spend is unknown until that inventory is complete. Ensure no other executor can dispatch workstream effects during this run. A clone-local directory cannot establish cross-host exclusivity. Preserve the original ledgers and stores; never initialize unknown spend to zero.
 
-Qualify the exact headless Blender artifact and inherited resource boundary before binding the job. The adapter reads an existing Windows job-object process/job memory limit or Unix address-space limit and requires 512 MiB through 2 GiB. It changes no limit. Children inherit that boundary and receive only PATH/system/temp environment values; API/database credentials are excluded. Blender has a 120-second local deadline, 512-by-512 views, two CPU render threads and bounded input counts/texture headers. The initial run needs at least 1280 MiB of available object/temporary capacity above existing floors for its conservative 640 MiB reservation and actual writes. Native enforcement and actual rendering still require operator evidence on the selected host.
+Qualify the exact headless Blender artifact and inherited resource boundary before binding the job. The adapter reads an existing Windows job-object process/job memory limit or Unix address-space limit and requires 512 MiB through 2 GiB. It changes no limit. Children inherit that boundary and receive only PATH/system/temp environment values plus fixed `MALLOC_ARENA_MAX=2` and `OIDN_NUM_THREADS=2`; API/database credentials are excluded. Blender has a 120-second local deadline, 512-by-512 views, two CPU render threads and bounded input counts/texture headers.
+
+Set `ASSETQ_TEMP_QUOTA_BYTES=2147483648` for this isolated run and retain it across admission, dispatch and restart. The 1 GiB default cannot admit the 1280 MiB room check. Ensure `ASSETQ_QUOTA_BYTES` and actual free disk space above the configured floor also leave at least 1280 MiB available after source import, for the conservative 640 MiB reservation and actual writes. Do not lower floors or change production quotas to make this pass.
+
+On the Linux executor, use a 2048 KiB inherited stack and exactly two allowed CPUs for preflight, admission, dispatch and ordinary observation restarts. On the PM's 24-core host, the 2 GiB memory boundary alone failed with `OIDN error: out of memory`; stack 2048 KiB, two CPUs and the allocator/OIDN settings above passed standalone validation. Within the operator's isolated allocation, the process-local wrapper is:
+
+```text
+prlimit --stack=2097152:2097152 -- taskset --cpu-list <two-allowed-cpu-ids> assetq meshy-preflight <qualified-blender-executable>
+prlimit --stack=2097152:2097152 -- taskset --cpu-list <two-allowed-cpu-ids> assetq meshy-admit
+prlimit --stack=2097152:2097152 -- taskset --cpu-list <two-allowed-cpu-ids> assetq meshy-serve <accepted-job-id> <private-profile.json>
+prlimit --stack=2097152:2097152 -- taskset --cpu-list <two-allowed-cpu-ids> assetq serve
+```
+
+Replace the placeholders with two CPUs allowed by the existing allocation. Retain `prlimit --pid <assetq-pid> --as --stack` and `taskset --pid --cpu-list <assetq-pid>` readback with the memory and binary receipts. These commands inherit the already qualified memory boundary; they grant no host access. A different platform needs equivalent independently qualified native bounds before dispatch. Native enforcement and adapter rendering still require operator evidence on the selected candidate.
 
 Run the read-only command on the exact candidate:
 
@@ -32,7 +53,7 @@ Use its printed loopback endpoint as `ASSETQ_URL`; `ASSETQ_TOKEN` stays in prote
 
 ```text
 assetq upload docs/evidence/4/crate-original.png --type image/png
-assetq submit --method model.meshy-prop.v1@2 --operation model.image_to_3d --key assetq-20261101-meshy-prop --budget 15 --attach <local-object-id>
+assetq submit --method model.meshy-prop.v1@2 --operation model.image_to_3d --key assetq-20261104-meshy-prop-followup --budget 15 --attach <local-object-id>
 ```
 
 Repeat the identical submit once: it must return the same job with `created: false`. Retain both responses, source object metadata and a hash-verified authenticated source download. The new local object ID is a copy; the provenance links the original crate asset and unchanged hash. Do not relabel a copy as the original record.
@@ -63,7 +84,7 @@ Use the same retained database/data root, `ASSETQ_EXECUTORS=1`, `ASSETQ_MAX_EXEC
 assetq meshy-serve <accepted-job-id> <private-profile.json>
 ```
 
-The adapter verifies the exact registry version, source bytes, binary hashes, memory boundary, profile freshness and fresh balance. It persists intent before its only POST. A missing POST reply or missing original ID receipt stays uncertain; never rerun in another directory, clear a selector or create a replacement request. A preflight refusal is retained evidence, not a paid-generation success.
+The adapter verifies the exact registry version, source bytes, binary hashes, memory boundary, profile freshness and fresh balance. It persists intent before its only POST and retains the provider ID from HTTP 200/201/202. A missing POST reply or missing original ID receipt stays uncertain; never clear a selector, change directories or create a replacement request to bypass that uncertainty. The separately authorized follow-up above is the only fresh-run exception. A preflight refusal is retained evidence, not a paid-generation success.
 
 ## Observe, restart and retain results
 
@@ -84,4 +105,4 @@ Commit sanitized source/result manifests, measured triangle/component/dimension/
 
 ## Current worker evidence and open acceptance
 
-Windows read-only preflight reports the Meshy key absent, Blender not supplied and no qualifying inherited memory boundary; ledger/balance remain unknown. No paid effect or host configuration change was attempted. The operator prerequisites above are the concrete remaining action for A4/A5/A7. The canonical gate and fake-provider checks qualify implementation/recovery only; native rendering, actual spend, downloadable real GLB and final owner visual acceptance remain open.
+The worker's original Windows read-only preflight reported the Meshy key absent, Blender not supplied and no qualifying inherited memory boundary. The PM's first run spent 15 credits but did not establish adapter completion. The prerequisites above and a new exact-candidate operator run remain necessary for A4/A5/A7: original-ID polling/restart, adapter download/validation, real manifest, authenticated retrieval, usage and textured views. Final owner visual acceptance remains open.
