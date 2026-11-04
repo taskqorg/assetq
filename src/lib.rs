@@ -2,6 +2,7 @@
 //! immutable filesystem object store. See `assetq.md` and `docs/service.md`.
 
 pub mod api;
+pub mod browser;
 pub mod db;
 pub mod exec;
 pub mod image_worker;

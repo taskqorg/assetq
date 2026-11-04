@@ -16,6 +16,8 @@ python3 scripts/check.py --test meshy
 python3 scripts/check.py --test admission_idempotency_scope_and_typed_limits
 python3 scripts/check.py --test resource_bounds
 python3 scripts/check.py --test registry
+python3 scripts/check.py --test management
+node --test --test-reporter=tap scripts/test_web.cjs
 ```
 
 The last command starts a disposable PostgreSQL cluster and filters Rust tests by name. Set `ASSETQ_PG_BIN` to a directory containing `initdb`, `pg_ctl`, `pg_dump` and `psql` when discovery does not find them. Run as an ordinary unprivileged user. Fixtures create unique databases and temporary directories; they never use production configuration or credentials. A sandbox refusal is `sandbox-blocked`, never a passing database or service check.
@@ -38,6 +40,10 @@ On command timeout, the gate retains partial output and the failed command/deadl
 - A7/A8: real PostgreSQL transactions, a killed/restarted service through the CLI, streamed SHA-verified retrieval, genuine SQL dump/restore followed by API checks, and refusal of corrupt/missing restored payloads.
 
 `synthetic.fake` proves service semantics only. It never qualifies real image/3D generation, provider cost, native worker output, public browser authentication or the managed store.
+
+Management fixtures protect proxy-proof/session subject binding, existing-token revocation, canonical-origin/CSRF refusal, separate machine authentication, private search and PNG preview, immutable download bytes and durable admission across session termination. They use the retained public #5 render bytes in an isolated store, not the managed image/GLB records. Browser geometry, interaction journeys and production guard qualification remain separate.
+
+The core gate includes JavaScript syntax and form-to-API payload checks. These preserve exact pins, original request keys and versioned registry/evaluation fields while rejecting invalid numeric bounds and request-supplied authority fields. Node uses its TAP reporter so Windows terminals without Unicode checkmark support retain the same assertions and outcomes. No existing lifecycle assertion or native/provider gate is weakened.
 
 Task #7 registry fixtures protect immutable dataset/evaluator identity, matching operations, bounded repeated samples, partial admission and resume without replay, original manifests, missing human judgments and unknown usage, typed method filters and job pins across recommendation promotion. They reuse the same PostgreSQL runner and executor fixtures; they authorize no real-provider experiments. The canonical gate discovers these tests with the existing Rust suite.
 

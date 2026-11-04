@@ -1,6 +1,6 @@
 # Management site design package
 
-First design checkpoint for [task #9](https://github.com/taskqorg/assetq/issues/9), not an implemented or approved website. The owning requirements are [AssetQ R1-R9](../../assetq.md), [website acceptance](../acceptance.md#website-and-api-origin) and the [service contract](../service.md). Apply the pinned specq design workflow, operator rules D1-D14 and fidelity rules F1-F7.
+Design and acceptance package for [task #9](https://github.com/taskqorg/assetq/issues/9). The owner selected the table library and shared visual style in answer [6638318903](https://github.com/taskqorg/assetq/issues/9#issuecomment-6638318903). This approval does not prove implementation or live acceptance. The owning requirements are [AssetQ R1-R9](../../assetq.md), [website acceptance](../acceptance.md#website-and-api-origin) and the [service contract](../service.md). Apply the pinned specq design workflow, operator rules D1-D14 and fidelity rules F1-F7.
 
 ## Request and baseline
 
@@ -16,7 +16,7 @@ The intake's Meshy testing amendment supersedes its historical 1000-credit ceili
 
 ## Scenarios and navigation proposal
 
-These are proposals for owner review, not new decided behavior. All routes below are browser views under `https://assets.ufobe.com`; `/v1` retains its published machine contract. A project in a URL selects only an already authorized scope.
+These browser journeys implement the existing task acceptance and selected table structure. All routes below are browser views under `https://assets.ufobe.com`; `/v1` retains its published machine contract. A project in a URL selects only an already authorized scope.
 
 | ID / acceptance | Intent and action | Observable result and recovery | Proposed destination |
 |---|---|---|---|
@@ -40,15 +40,13 @@ Method detail exposes operation, provider/model/API/pipeline revisions, supporte
 
 Comparison detail keeps each case and repeat visible with output links, technical outcome, human judgment, credits, elapsed time, failures and missing reasons. Resume reuses sample identities. Project members can append permitted judgments; reviewer attribution is not claimed to be verified person identity. Owner-only proposal promotion displays exact scope/evidence and a confirmation of the affected scope. No automatic winner or promotion is added.
 
-## Visual choice
+## Accepted visual reference
 
 The review set contains three static design compositions at 1440 by 1000 logical pixels, scale 1. They are not screenshots of a running browser or proof of interactions. Editable layout data is in [reference-scenes.json](management-site/reference-scenes.json); PNGs are the visual review artifacts.
 
-1. **Visual library with adjacent detail — recommended.** [Library](management-site/library.png) groups retained renders and a file fallback while keeping identity and source beside the selection. Benefit: recognize assets and inspect provenance without losing search context. Cost: fewer metadata rows fit at once.
-2. **Table library with adjacent detail.** [Table alternative](management-site/table.png) uses the same records, selection and detail. Benefit: scan file metadata faster. Cost: smaller thumbnails make visual recognition slower. This is an alternative default, not a second required interface or a new view toggle.
-3. [Benchmark detail](management-site/benchmark.png) carries the recommended typography, navigation and evidence hierarchy into comparison work. Its sample plan/results are explicitly invented layout fixtures, not a real experiment, recommendation or new dispatch authority.
+The [table library with adjacent detail](management-site/table.png) is the accepted default. The prior visual-library alternative is retained only as historical review evidence; no view toggle is required. [Benchmark detail](management-site/benchmark.png) carries the shared styling into comparison work; its invented metrics are layout fixtures, not an actual experiment or recommendation.
 
-Proposed styling: neutral light surfaces, restrained blue selection/actions, 16 px body text, at least 14 px secondary text, 24 px section headings, visible keyboard focus and 4.5:1 text contrast. Colors never supply status meaning alone. Implement using shared CSS tokens after approval. Narrow layouts reflow detail beneath the list; ordinary text/forms do not require horizontal scrolling. Respect browser/system text scaling and theme preference.
+Accepted styling: neutral light surfaces, restrained blue selection/actions, 16 px body text, at least 14 px secondary text, 24 px section headings, visible keyboard focus and 4.5:1 text contrast. Colors never supply status meaning alone. Implement using shared CSS tokens. Narrow layouts reflow detail beneath the list; ordinary text/forms do not require horizontal scrolling. Respect browser/system text scaling and theme preference.
 
 The only actual imagery is the already published isolated #5 render set. `view-front.png` and `view-side.png` are retained Blender views, not the source PNG or managed #6 model. The selected GLB is `8d702403-0bf1-40de-baed-ad5c8ebbbbd7`, 6,424,280 bytes, 3022 triangles, 447 components, 15 reported credits and 313.20 seconds for that isolated job. Source: [operator evidence](../evidence/5/operator-run/README.md). The project display label and friendly object names are layout fixtures. Live acceptance must use the actual managed IDs from [#6](../evidence/6/README.md), not substitute these images or invent measurements.
 
@@ -66,7 +64,7 @@ The only actual imagery is the already published isolated #5 render set. `view-f
 | Denied / every view, preview, download and mutation | No foreign object/name/count; no private flash before scope check; safe sign-in/project recovery | Anonymous, foreign-project, member-versus-owner and revoked/expired sessions; missing/wrong CSRF and origin |
 | Dense/long/boundary / all views | Long names/IDs, 32 samples, limit errors and pagination remain readable; no hidden evidence | 1440, 1024 and 390 px widths; 100/200% text; light/dark; keyboard focus, scroll and error recovery |
 
-All runtime/matrix cells above are **Not tested** at this checkpoint. The static compositions demonstrate only proposed information hierarchy and density in one light-theme size. Browser access is unavailable in the current tool session; this is not a product failure or a passing browser check.
+All browser/matrix cells above are **Not tested** at this checkpoint. Isolated HTTP and form-payload evidence is recorded separately in [candidate evidence](../evidence/9-management-site.md). The static compositions demonstrate only proposed information hierarchy and density in one light-theme size. Browser access is unavailable in the current tool session; this is not a product failure or a passing browser check.
 
 ## Foundation and security handoff
 
@@ -76,7 +74,7 @@ Required work after approval:
 
 - Extend the existing project-scoped `GET /v1/objects` query with bounded text/type filters; do not search only a downloaded first page or create another catalog. Specify searchable existing name, source prompt and method fields in `docs/service.md` before code. Project selection resolves an authorized grant before query/count/pagination.
 - Add an authenticated preview contract without weakening original download behavior. Decode/validate supported raster bytes under bounds; use only verified retained render relationships for GLB. MIME supplied at upload is not evidence that bytes are safe to inline. Unsupported/active formats get file-type/download fallback, with private/no-store/nosniff responses.
-- Qualify the existing host guard and verified identity-to-project/role mapping before defining the browser adapter's exact routes/session mechanism in `docs/service.md`. Keep credentials server-side. Unverified headers or caller project text cannot create authority. Session expiry/logout/revocation, secure cookies, session-bound CSRF and same-origin checks must cover every browser mutation, including upload/cancel/scoring/promotion.
+- Qualify the existing host guard and verified identity-to-project/role mapping before enabling the browser adapter specified in `docs/service.md`. Keep credentials server-side. Unverified headers or caller project text cannot create authority. Session expiry/logout/revocation, secure cookies, session-bound CSRF and same-origin checks must cover every browser mutation, including upload/cancel/scoring/promotion.
 - Render untrusted names, prompts and judgments as text, with a restrictive content-security policy. Do not cache private data in shared/service-worker caches; clear it on session/project change. Preserve recovery/cancellation writes under resource exhaustion.
 - Reuse `/v1/jobs`, `/v1/methods`, `/v1/comparisons`, datasets/evaluators, recommendations and status. Preserve synthetic-only comparison execution and general native dispatch refusal. Method qualification, provider health, technical validation and owner judgment remain separate.
 
@@ -84,16 +82,16 @@ The exact host guard, authorized mappings and HTTPS configuration were not inspe
 
 ## Delivery and remaining acceptance
 
-Before implementation, the owner chooses the library structure and approves the representative visual candidate. Record the answer on #9, then promote only the selected proposal into the owning contract/service/design specification before dependent code (R1; design workflow steps 5-8). Reuse the same task/worktree/PR; an ask does not complete A1.
+The table candidate is approved by answer 6638318903. Its selected structure is recorded in the owning contract before implementation (R1; design workflow steps 5-8). Continue in the same task/worktree/PR; final acceptance still requires executable and live evidence.
 
 After implementation, run affected browser/API checks against the frozen candidate, the R8 canonical gate and merge-result CI. Package the exact source commit, executable/UI digests, fixture identities, screenshots and interaction evidence. Mocks never qualify actual image/3D retrieval or the live host (A6/A7).
 
 For A8, prepare a restricted handoff through the private host task: named DNS ownership/current target/TTL, exact Caddy site and existing guard, loopback upstream/service identity, signed candidate digest, origin/CSRF/session mapping, TLS checks, retained active jobs and site-specific rollback/readback commands. Concrete values and host receipts remain unknown until inspected there. Publish only `assets.ufobe.com`; preserve other records/sites/services and existing backups. A deployed authenticated journey remains required for final acceptance.
 
-Current verdict: A1 **partial** (scenario/behavior/visual package prepared; approval pending); A2-A8 **Not implemented/Not tested by this change**. No website, binary, backend route, host configuration or provider state changed. New backup/restore qualification remains deferred/unknown under the contract.
+Current verdict: the owner-approved table structure and browser/API implementation are present; the [candidate evidence](../evidence/9-management-site.md) separates isolated tests from outstanding browser, packaging and deployed acceptance. No host configuration or provider state changed. Backup/restore qualification remains deferred/unknown.
 
 ## Checkpoint verification
 
 The three static images were rendered and visually inspected. Their text stays inside the 1440 by 1000 canvas; this does not prove browser layout, control behavior or responsive states. Scene data, image dimensions, source-image references, local document links and text-token contrast are checked separately from runtime acceptance.
 
-`python3 scripts/check.py` passed its contract/whitespace and Python fixture checks, then failed at `cargo fmt --check`: `cargo-fmt.exe` is not installed for `stable-x86_64-pc-windows-gnu`. Rust/database checks did not run. No test, assertion, dependency or gate was changed to bypass this host gap. The full canonical gate is **not passed**; merge-result CI and actual browser/API checks remain required for final delivery.
+The first checkpoint's `python3 scripts/check.py` stopped because the Windows GNU formatter was missing. Subsequent development uses a checksum-verified temporary formatter and the existing temporary PostgreSQL tools; the focused management checks passed. Current canonical/candidate and remaining platform outcomes are retained in [candidate evidence](../evidence/9-management-site.md) and the task. Static references never prove actual browser/API acceptance.

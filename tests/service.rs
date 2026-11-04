@@ -1411,6 +1411,195 @@ fn http() -> ureq::Agent {
     ureq::Agent::config_builder().http_status_as_error(false).build().into()
 }
 
+// R3/R5/R9: browser proof, sessions and CSRF cannot widen the shared API grant;
+// search and preview must protect private objects before any file access.
+#[test]
+fn management_browser_scope_csrf_search_preview_and_durable_request() {
+    let f = fixture();
+    let ctx = Arc::new(f.ctx(64 << 20));
+    let mut c = f.client();
+    let (_, member) = project(&mut c, "web-a", 20, 8);
+    let (_, foreign) = project(&mut c, "web-b", 20, 8);
+    let owner = db::create_token(&mut c, "web-a", "owner").unwrap();
+    let guard = uuid::Uuid::new_v4().simple().to_string();
+    let browser = Arc::new(
+        assetq::browser::Browser::from_json(
+            &json!({"guard_secret":guard,
+        "subjects":{"invented-member":[member],"invented-owner":[owner],"invented-foreign":[foreign]}})
+            .to_string(),
+        )
+        .unwrap(),
+    );
+    let server = Arc::new(api::bind("127.0.0.1:0").unwrap());
+    let base = format!("http://{}", server.server_addr().to_ip().unwrap());
+    api::serve_with_browser(ctx.clone(), server, 3, Some(browser));
+    let h = http();
+    let get = |path: &str, subject: &str, cookie: &str| {
+        h.get(format!("{base}{path}"))
+            .header("Host", "assets.ufobe.com")
+            .header("X-AssetQ-Guard", &guard)
+            .header("X-AssetQ-Subject", subject)
+            .header("Cookie", cookie)
+    };
+    let post = |path: &str, subject: &str, cookie: &str, csrf: &str| {
+        h.post(format!("{base}{path}"))
+            .header("Host", "assets.ufobe.com")
+            .header("X-AssetQ-Guard", &guard)
+            .header("X-AssetQ-Subject", subject)
+            .header("Cookie", cookie)
+            .header("Origin", assetq::browser::ORIGIN)
+            .header("X-CSRF-Token", csrf)
+    };
+    let mut r = get("/browser/session", "invented-member", "").call().unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    let set_cookie = r.headers()["Set-Cookie"].to_str().unwrap().to_owned();
+    assert!(set_cookie.contains("Secure; HttpOnly; SameSite=Strict"));
+    let cookie = set_cookie.split(';').next().unwrap();
+    let s: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
+    assert_eq!(s["projects"], json!([{"id":"web-a","role":"member"}]));
+    let csrf = s["csrf"].as_str().unwrap();
+    for path in ["/assets", "/jobs/new", "/benchmarks/new", "/ui/app.js", "/ui/style.css"] {
+        let response = get(path, "invented-member", cookie).call().unwrap();
+        assert_eq!(response.status().as_u16(), 200);
+        assert_eq!(response.headers()["Cache-Control"], "private, no-store");
+        assert!(response.headers()["Content-Security-Policy"].to_str().unwrap().contains("frame-ancestors 'none'"));
+    }
+    assert_eq!(h.get(format!("{base}/browser/session")).call().unwrap().status().as_u16(), 403);
+    assert_eq!(get("/browser/session", "not-mapped", cookie).call().unwrap().status().as_u16(), 403);
+    assert_eq!(get("/browser/v1/objects?project=web-a", "invented-owner", cookie).call().unwrap().status().as_u16(), 403);
+    assert_eq!(get("/browser/v1/objects?project=web-b", "invented-member", cookie).call().unwrap().status().as_u16(), 403);
+    assert_eq!(get("/browser/v1/objects?project=web-a&project=web-b", "invented-member", cookie).call().unwrap().status().as_u16(), 403);
+    assert_eq!(get("/v1/objects", "invented-member", cookie).call().unwrap().status().as_u16(), 401);
+    // Existing published render bytes, imported into an isolated fixture only.
+    let png = include_bytes!("../docs/evidence/5/operator-run/view-front.png");
+    assert_eq!(
+        post("/browser/v1/uploads?project=web-a", "invented-member", cookie, "wrong")
+            .header("Content-Type", "image/png")
+            .send(png.as_slice())
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    assert_eq!(
+        post("/browser/v1/uploads?project=web-a", "invented-member", cookie, csrf)
+            .header("Origin", "https://invented.invalid")
+            .header("Content-Type", "image/png")
+            .send(png.as_slice())
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    let mut r = post("/browser/v1/uploads?project=web-a", "invented-member", cookie, csrf)
+        .header("Content-Type", "image/png")
+        .header("X-Asset-Name", "Crate front.png")
+        .send(png.as_slice())
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 201);
+    let o: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
+    let id = o["id"].as_str().unwrap();
+    assert_eq!(o["sha256"], db::sha256_hex(png));
+    let mut r = get("/browser/v1/objects?project=web-a&q=CRATE&type=image", "invented-member", cookie).call().unwrap();
+    let found: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
+    assert_eq!(found["items"].as_array().unwrap().len(), 1);
+    assert_eq!(found["items"][0]["id"], id);
+    assert_eq!(db::search_objects(&mut c, "web-a", None, 50, "%", "").unwrap()["items"], json!([]));
+    assert_eq!(db::search_objects(&mut c, "web-b", None, 50, "crate", "").unwrap()["items"], json!([]));
+    assert_eq!(db::search_objects(&mut c, "web-a", None, 50, "crate", "model").unwrap()["items"], json!([]));
+    assert_eq!(db::search_objects(&mut c, "web-a", None, 50, &"x".repeat(257), "").unwrap_err().code, "bad_search");
+    let mut r = get(&format!("/browser/v1/objects/{id}/preview?project=web-a"), "invented-member", cookie).call().unwrap();
+    assert_eq!(r.status().as_u16(), 200);
+    let bytes = r.body_mut().read_to_vec().unwrap();
+    let decoded = image::load_from_memory(&bytes).unwrap();
+    assert!(decoded.width() <= 512 && decoded.height() <= 512);
+    let mut r = get(&format!("/browser/v1/objects/{id}/content?project=web-a"), "invented-member", cookie).call().unwrap();
+    assert_eq!(r.headers()["Content-Disposition"], "attachment");
+    assert_eq!(r.body_mut().read_to_vec().unwrap(), png);
+    // An upload's MIME label alone never makes it safe to preview.
+    let mut r = post("/browser/v1/uploads?project=web-a", "invented-member", cookie, csrf)
+        .header("Content-Type", "image/png")
+        .send(&b"invented invalid PNG"[..])
+        .unwrap();
+    let bad: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
+    assert_eq!(
+        get(&format!("/browser/v1/objects/{}/preview?project=web-a", bad["id"].as_str().unwrap()), "invented-member", cookie)
+            .call()
+            .unwrap()
+            .status()
+            .as_u16(),
+        415
+    );
+    let r = get("/browser/session", "invented-foreign", "").call().unwrap();
+    let fc = r.headers()["Set-Cookie"].to_str().unwrap().split(';').next().unwrap().to_owned();
+    for suffix in ["", "/preview", "/related", "/content"] {
+        assert_eq!(
+            get(&format!("/browser/v1/objects/{id}{suffix}?project=web-b"), "invented-foreign", &fc).call().unwrap().status().as_u16(),
+            404
+        );
+    }
+    let body = json!({"method":"synthetic.fake@1","operation":"synthetic.generate","text":"literal source needle","attachments":[id],"constraints":{},"budget":{"max_credits":1},"idempotency_key":"browser-original"});
+    let mut r = post("/browser/v1/jobs?project=web-a", "invented-member", cookie, csrf)
+        .header("Content-Type", "application/json")
+        .send(body.to_string())
+        .unwrap();
+    assert_eq!(r.status().as_u16(), 201);
+    let job: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
+    let jid = job["job"]["id"].as_str().unwrap();
+    assert_eq!(db::job_by_key(&mut c, "web-a", "browser-original").unwrap()["id"], jid);
+    assert_eq!(db::job_by_key(&mut c, "web-b", "browser-original").unwrap_err().status, 404);
+    assert_eq!(db::get_method(&mut c, "web-a", "image.worker.v1", "1").unwrap()["status"], "disabled");
+    assert_eq!(db::get_method(&mut c, "web-a", "image.worker.v1", "01").unwrap_err().status, 422);
+    assert_eq!(
+        post("/browser/v1/jobs?project=web-a", "invented-member", cookie, csrf)
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .unwrap()
+            .status()
+            .as_u16(),
+        200
+    );
+    let mut changed = body.clone();
+    changed["text"] = json!("changed");
+    assert_eq!(
+        post("/browser/v1/jobs?project=web-a", "invented-member", cookie, csrf)
+            .header("Content-Type", "application/json")
+            .send(changed.to_string())
+            .unwrap()
+            .status()
+            .as_u16(),
+        409
+    );
+    assert_eq!(
+        post("/browser/v1/methods?project=web-a", "invented-member", cookie, csrf)
+            .header("Content-Type", "application/json")
+            .send("{}")
+            .unwrap()
+            .status()
+            .as_u16(),
+        403
+    );
+    for _ in 0..4 {
+        exec::tick(&mut c, &ctx, "browser-fixture").unwrap();
+    }
+    assert_eq!(db::get_job(&mut c, "web-a", jid).unwrap()["phase"], "succeeded");
+    let related = db::related_objects(&mut c, "web-a", id, None, 1).unwrap();
+    assert_eq!(related["children"].as_array().unwrap().len(), 1);
+    assert!(related["next_children"].is_string());
+    assert_eq!(db::search_objects(&mut c, "web-a", None, 50, "SOURCE NEEDLE", "").unwrap()["items"].as_array().unwrap().len(), 1);
+    assert_eq!(post("/browser/logout", "invented-member", cookie, csrf).send("").unwrap().status().as_u16(), 200);
+    assert_eq!(get("/browser/v1/jobs?project=web-a", "invented-member", cookie).call().unwrap().status().as_u16(), 403);
+    // Ending/reopening a browser session never ends or repeats the durable job.
+    let r = get("/browser/session", "invented-member", "").call().unwrap();
+    let new_cookie = r.headers()["Set-Cookie"].to_str().unwrap().split(';').next().unwrap().to_owned();
+    assert_eq!(
+        get(&format!("/browser/v1/jobs/{jid}?project=web-a"), "invented-member", &new_cookie).call().unwrap().status().as_u16(),
+        200
+    );
+    c.execute("UPDATE tokens SET revoked_at=now() WHERE hash=$1", &[&db::sha256_hex(member.as_bytes())]).unwrap();
+    assert_eq!(get("/browser/v1/objects?project=web-a", "invented-member", &new_cookie).call().unwrap().status().as_u16(), 403);
+}
+
 #[test]
 fn http_streaming_upload_download_and_scope() {
     let f = fixture();

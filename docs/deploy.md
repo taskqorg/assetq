@@ -66,6 +66,29 @@ For retained results, use `assetq result <job-id>` to obtain actual manifest obj
 
 ## Rollback
 
+### Management website candidate
+
+The binary embeds `web/index.html`, `web/style.css`, `web/requests.js` and `web/app.js`; `candidate.json.embedded_ui` records their digests. There is no static storage listener or separate asset catalog. The service defaults to browser-disabled and continues serving the compatible Bearer-only `/v1` API. The approved table reference and browser qualification ledger are in [management design](design/management-site.md).
+
+The private host task supplies `ASSETQ_BROWSER_CONFIG`, pointing to an owner-only regular JSON file of at most 64 KiB, readable by the service identity. Its `guard_secret` and `subjects` mapping bind verified existing host identities to existing scoped project tokens. Do not create grants or change models/accounts/budgets as part of site activation. An illustrative shape with invented values is:
+
+```json
+{
+  "guard_secret": "invented-secret-do-not-use-in-production",
+  "subjects": {"invented-host-subject": ["invented-existing-project-token"]}
+}
+```
+
+The host's current sign-in implementation must be inspected before adapting its proof to the browser headers described in [service](service.md#management-browser-boundary). Strip client identity/proof headers, preserve the existing guard, and set verified identity/proof only on its authenticated loopback upstream. `/v1` needs its own scoped Bearer authentication and no wildcard browser-auth exemption. A header name or an accessible HTML page does not establish that this integration is qualified.
+
+Before publication retain the exact approved candidate/archive/executable/UI digests; current DNS ownership/target/TTL; only the `assets.ufobe.com` Caddy site and guard; loopback listener/service identity; protected mapping identity; TLS/origin results; active job/provider identities; and previous site/candidate/configuration recovery references. Keep concrete protected values and the host task identity in restricted evidence. This Windows source task has not inspected those inputs and authorizes no host effect.
+
+Qualify anonymous and spoofed/foreign/expired/revoked access, member-versus-owner mutations and missing/wrong CSRF/origin. Confirm real PNG/GLB/renders and original download hashes with the actual managed records, direct URLs, Back/Forward, retained filters, text/attachment admission, durable progress/cancel/results, exact method versions and bounded synthetic comparisons. General provider dispatch remains refused. Record browser geometry/focus at the design matrix sizes and actual sign-in behavior separately from isolated HTTP fixtures.
+
+Prepare site-specific rollback before a controlled additive activation: restore only the named prior DNS/site/upstream/configuration and previous immutable executable, then verify other sites and the retained jobs/assets on the same database/data root. Restarting the control process loses only ephemeral browser sessions and requires host sign-in again; it never cancels or replays jobs. No destructive migration, object deletion, grant change, unrelated restart or backup outage is part of this handoff.
+
+### Existing service rollback
+
 - Stop the unit, point `current` at the previous release, start the unit. Jobs, events, effects and objects stay in PostgreSQL and the data root; executors resume from stored state.
 - The first activation rolls back by stopping and disabling the unit. Keep the database and data root for inspection; remove them only through a separate reviewed decision.
 - Schema version 1 is the only schema. A later schema change must ship with its own forward-compatible migration and rollback notes.

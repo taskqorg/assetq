@@ -42,6 +42,8 @@ Browser identity and API credentials remain separate, project-scoped authorities
 
 Apply the [specq design workflow](https://github.com/taskqorg/specq/blob/main/design/workflow.md) before implementing a new visual candidate. Include empty, loading, long-running, cancelled, failed, stale/unknown and permission-denied states. Accept the actual browser and API journeys separately from mockups.
 
+The asset library uses a table with retained thumbnails and adjacent selected detail, with detail below the list on narrow screens. Browser routes, shared API extensions, session authority and the accepted visual reference are specified in [management design](docs/design/management-site.md) and [service](docs/service.md).
+
 ## Versioned methods and recommendations
 
 Each method names its operation, supported inputs and outputs, provider/model/API and pipeline revisions, parameter schema, capability requirements, limitations, provenance and validation recipe. Adding or editing a method creates a version; running jobs retain their resolved version.
