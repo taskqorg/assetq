@@ -193,6 +193,11 @@ fn prepared(dir: &Path) -> Res<(ProtectedHost, ProtectedPreparation)> {
     Ok((host, preparation))
 }
 
+pub(super) fn prepared_home(dir: &Path) -> Res<PathBuf> {
+    let (_, preparation) = prepared(dir)?;
+    Ok(PathBuf::from(preparation.checkpoint()["receipt"]["prepared"]["authority"]["account_home"].as_str().ok_or("prepared home missing")?))
+}
+
 pub(super) fn cancel_prepared(dir: &Path) -> Res<Value> {
     let (host, preparation) = prepared(dir)?;
     let receipt = host.cancel(preparation.request(), Instant::now() + Duration::from_secs(5))?;

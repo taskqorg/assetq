@@ -26,6 +26,8 @@ A protected worker's supervisor exit proves only transport termination. Without 
 
 Keep the Runtime transport alive until the original host cancellation readback finishes, including after work errors. Opening or cancellation failures remain unknown; cancellation acknowledgment alone never confirms descendant completion or releases capacity.
 
+An operation that reports completion but whose output fails import validation ends the job `failed` with the validation reason, releases its reservations and is never resubmitted; any imported output stays retained outside a manifest. An outcome stays unknown only while no completion report exists.
+
 The first implementation supports a registered bounded sequence of steps, including external waiting and local validation. It does not require a general workflow editor. Executors can run on qualified hosts distinct from the storage/control host.
 
 ## Web management and API
@@ -60,7 +62,7 @@ The runtime owns structured text/image forwarding and read-only account identity
 
 Existing operation receipts retain their original runtime pin and remain observable without replay. The protected app-server path inherits the existing account, model, permissions and optional optimization.
 
-The structured runtime pipeline is method version 5; versions 2, 3 and 4 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
+The structured generation pipeline is method version 5; versions 2, 3, 4 and 5 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
 
 New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
 
@@ -95,6 +97,10 @@ One concurrent job has at most 600 seconds generating plus 30 seconds observing 
 The runner retains Runtime through cancellation, then uses AgentQ original-operation reconciliation before terminal publication and slot release. A restart observes retained preparation/turn receipts without relaunch; missing terminal or descendant evidence preserves unknown and reservations. The executable job model remains the lifecycle owner.
 
 Qualification requires duplicate-request, control-service interruption, original-tool/path, immutable import and authenticated retrieval evidence; a missing tool refuses precisely.
+
+Native-size import is `image.worker.v1@6`, operation `image.import_native`: import one retained original from an explicitly operator-bound, completed generation without a new Runtime input. Preserve original PNG bytes and dimensions under the existing 64 MiB, 16-million-pixel and 4096-axis safety bounds. No <=1024 output guarantee or resampling applies.
+
+The new import job retains the source job/effect, request, method, attachments, tool/path, Runtime checkpoint, hashes and usage. Version 5's 1024-bound request remains unchanged and fails precisely after verified original-operation completion. The accepted crate remains the 3D input. General generation stays refused; importing a retained image never authorizes replay.
 
 A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
 

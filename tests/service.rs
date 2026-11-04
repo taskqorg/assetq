@@ -15,6 +15,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 struct Fixture {
@@ -492,6 +493,144 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
         }
         assert_eq!(j["submissions"], 1);
         assert_eq!(f.fake().submissions(), 1);
+        db::audit_job(&mut c, id).unwrap();
+    }
+}
+
+/// Scripts what a provider reports after the fake accepted the submission.
+struct ReportingProvider {
+    fake: FakeProvider,
+    unknown_polls: AtomicUsize,
+    outputs: usize,
+    body: Vec<u8>,
+}
+
+impl ReportingProvider {
+    fn new(fake: FakeProvider, unknown_polls: usize, outputs: usize, body: Vec<u8>) -> Arc<ReportingProvider> {
+        Arc::new(ReportingProvider { fake, unknown_polls: AtomicUsize::new(unknown_polls), outputs, body })
+    }
+}
+
+impl Provider for ReportingProvider {
+    fn name(&self) -> &str {
+        self.fake.name()
+    }
+    fn submit(&self, effect: &str, request: &Value) -> Submit {
+        self.fake.submit(effect, request)
+    }
+    fn lookup(&self, effect: &str) -> Result<Option<String>, String> {
+        self.fake.lookup(effect)
+    }
+    fn poll(&self, op: &str) -> Result<Poll, String> {
+        if self.unknown_polls.load(Ordering::SeqCst) > 0 {
+            self.unknown_polls.fetch_sub(1, Ordering::SeqCst);
+            return Err("no completion report".into());
+        }
+        Ok(match self.fake.poll(op)? {
+            Poll::Done { credits, .. } => Poll::Done { outputs: self.outputs, credits },
+            other => other,
+        })
+    }
+    fn fetch(&self, _: &str, _: usize) -> Result<Output, String> {
+        Ok(Output { content_type: "image/png".into(), reader: Box::new(std::io::Cursor::new(self.body.clone())), evidence: Value::Null })
+    }
+    fn cancel(&self, op: &str) -> Result<bool, String> {
+        self.fake.cancel(op)
+    }
+}
+
+/// A PNG signature and IHDR chunk, which is all the import gate reads.
+fn png_header(width: u32, height: u32) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend(width.to_be_bytes());
+    png.extend(height.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    png
+}
+
+/// Registers `synthetic.fake@2`: PNG output, size constraints, three credits.
+fn register_png_method(c: &mut Client, project: &str) {
+    let token = db::create_token(c, project, "owner").unwrap();
+    let owner = db::authenticate(c, &token).unwrap();
+    let mut spec = db::builtin_methods()[0].3.clone();
+    spec["outputs"] = json!(["image/png"]);
+    spec["max_credits"] = json!(3);
+    for limit in ["max_width", "max_height"] {
+        spec["parameters"][limit] = json!({"type": "integer", "min": 1, "max": 4096});
+    }
+    db::create_method_version(c, &owner, &json!({"id": "synthetic.fake", "status": "experimental", "spec": spec})).unwrap();
+}
+
+fn png_req(key: &str, limit: u32) -> Value {
+    json!({"method": "synthetic.fake@2", "operation": "synthetic.generate", "idempotency_key": key, "text": "blue wedge",
+           "constraints": {"max_width": limit, "max_height": limit}, "budget": {"max_credits": 3}})
+}
+
+// R4/R6/R7: the assetq#4 run stayed `waiting` with its reservations after a
+// completed turn returned a 1254 by 1254 PNG against a 1024 limit. A missing
+// report stays unknown; a completed report is definitive and never replays.
+#[test]
+fn completed_turn_with_oversize_png_fails_and_releases_reservations() {
+    let f = fixture();
+    let mut c = f.client();
+    // Budget 4: the replacement fits only if spend falls from 3 reserved to 1 reported.
+    let (p, _) = project(&mut c, "oversize", 4, 1);
+    register_png_method(&mut c, "oversize");
+    let mut ctx = f.ctx(1 << 30);
+    ctx.providers = vec![ReportingProvider::new(f.fake(), 2, 1, png_header(1254, 1254))];
+    let (j, _) = db::submit_job(&mut c, &p, &png_req("oversize", 1024), &limits(), FAKE).unwrap();
+    let id = j["id"].as_str().unwrap();
+    drive(&mut c, &ctx, &p.project, id, phase("waiting"));
+
+    exec::tick(&mut c, &ctx, "it-executor").unwrap();
+    assert_eq!(db::get_job(&mut c, &p.project, id).unwrap()["phase"], "waiting", "no completion report stays unknown");
+    let held = db::submit_job(&mut c, &p, &png_req("replacement", 2048), &limits(), FAKE).unwrap_err();
+    assert_eq!(held.code, "concurrency_limit", "unknown keeps its reservations");
+
+    let failed = drive(&mut c, &ctx, &p.project, id, phase("failed"));
+    let reason = failed["reason"].as_str().unwrap();
+    assert!(reason.contains("validation failed") && reason.contains("PNG dimensions 1254x1254 exceed"), "{reason}");
+    assert_eq!(failed["submissions"], 1);
+    assert_eq!(failed["usage"]["credits"], 1);
+    assert_eq!(f.fake().submissions(), 1, "a refused output never resubmits");
+    let result = db::job_result(&mut c, &p.project, id).unwrap();
+    assert_eq!(result["status"], "failed");
+    assert!(result["manifest"].is_null());
+    let retained: i64 = c.query_one("SELECT count(*) FROM objects WHERE job_id = $1", &[&id]).unwrap().get(0);
+    assert_eq!(retained, 1, "the refused output stays retained");
+    db::audit_job(&mut c, id).unwrap();
+
+    // The same bytes under a larger request limit: only the limit refused them.
+    let (next, _) = db::submit_job(&mut c, &p, &png_req("replacement", 2048), &limits(), FAKE).unwrap();
+    let next = next["id"].as_str().unwrap();
+    drive(&mut c, &ctx, &p.project, next, phase("succeeded"));
+    assert_eq!(db::job_result(&mut c, &p.project, next).unwrap()["manifest"]["items"][0]["content_type"], "image/png");
+}
+
+// R4/R6: every other refusal of a completed report is also terminal, so none of
+// them can pause or wait until the execution deadline.
+#[test]
+fn completed_turn_with_unimportable_output_fails_with_its_reason() {
+    for (key, outputs, body, limit, want) in [
+        ("invalid-png", 1, b"this file is not a PNG at all".to_vec(), 1 << 20, "invalid PNG"),
+        ("too-large", 1, png_header(16, 16), 8, "too_large"),
+        ("no-outputs", 0, vec![], 1 << 20, "1..=16 outputs"),
+        ("many-outputs", 17, vec![], 1 << 20, "1..=16 outputs"),
+    ] {
+        let f = fixture();
+        let mut c = f.client();
+        let (p, _) = project(&mut c, "refused", 4, 1);
+        register_png_method(&mut c, "refused");
+        let mut ctx = f.ctx(1 << 30);
+        ctx.cfg.max_upload_bytes = limit;
+        ctx.providers = vec![ReportingProvider::new(f.fake(), 0, outputs, body)];
+        let (j, _) = db::submit_job(&mut c, &p, &png_req(key, 1024), &limits(), FAKE).unwrap();
+        let id = j["id"].as_str().unwrap();
+        let failed = drive(&mut c, &ctx, &p.project, id, phase("failed"));
+        let reason = failed["reason"].as_str().unwrap();
+        assert!(reason.contains(want), "{key}: {reason}");
+        assert_eq!(failed["submissions"], 1, "{key}");
+        assert_eq!(f.fake().submissions(), 1, "{key}");
         db::audit_job(&mut c, id).unwrap();
     }
 }

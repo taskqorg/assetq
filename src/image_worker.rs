@@ -19,6 +19,7 @@ use std::{
 };
 
 pub mod protected;
+pub mod retained;
 
 pub const PIN: &str = "70f85434546bd1c303ccdb7b0dd71866421627e2";
 pub const PROVIDER: &str = "agentq.image";
@@ -30,7 +31,7 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant preparation and native/descendant completion integration unqualified; current image tool unqualified; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant launch is limited to the consumed qualification; general image dispatch unavailable; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
@@ -72,6 +73,7 @@ pub struct ImageWorker {
     cfg: Config,
     root: PathBuf,
     qualification: Option<(String, PathBuf)>,
+    retained: Option<retained::Source>,
 }
 
 impl ImageWorker {
@@ -80,7 +82,7 @@ impl ImageWorker {
             return Err(std::io::Error::other("image worker root must be an existing absolute directory"));
         }
         fs::create_dir_all(cfg.data_root.join("tmp/image-worker"))?;
-        Ok(Self { cfg, root, provider: PROVIDER, qualification: None })
+        Ok(Self { cfg, root, provider: PROVIDER, qualification: None, retained: None })
     }
     /// Explicit local operator entry only; never populated by API or environment.
     pub fn qualification_job(cfg: Config, root: PathBuf, job: &str, adapter: &Path) -> Res<Self> {
@@ -156,6 +158,9 @@ impl Provider for ImageWorker {
         self.provider
     }
     fn submit(&self, effect: &str, request: &Value) -> Submit {
+        if self.retained.is_some() {
+            return retained::submit(self, effect, request);
+        }
         let adapter = match self.authorize(effect, request) {
             Ok(adapter) => adapter,
             Err(reason) => return Submit::Refused(reason),
@@ -243,6 +248,12 @@ impl Provider for ImageWorker {
                 credits: Some(0),
             });
         }
+        if self.retained.is_some()
+            && !dir.join("result.json").exists()
+            && read_json(&dir.join("request.json"))?["request"]["method"] == "image.worker.v1@6"
+        {
+            retained::resume(self, op)?;
+        }
         if dir.join("preparation.json").exists() && !dir.join("result.json").exists() && !runner_alive(&dir)? {
             protected::cancel_prepared(&dir)?;
             recover_native(&dir)?;
@@ -266,7 +277,7 @@ impl Provider for ImageWorker {
         match result["status"].as_str() {
             Some("completed") => {
                 verify_outputs(&dir, &result)?;
-                Ok(Poll::Done { outputs: 3, credits: None })
+                Ok(Poll::Done { outputs: 3, credits: (result["retained_import"] == true).then_some(0) })
             }
             Some("cancelled") if result["exit_confirmed"] == true => Ok(Poll::Cancelled),
             Some("refused" | "failed") => Ok(Poll::Failed {
@@ -274,7 +285,7 @@ impl Provider for ImageWorker {
                     .as_str()
                     .unwrap_or("capability_unavailable: native image tool did not produce a qualified bitmap")
                     .into(),
-                credits: None,
+                credits: (result["retained_import"] == true).then_some(0),
             }),
             _ => Err("native terminal/exit evidence incomplete".into()),
         }
@@ -560,6 +571,8 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
                             );
                             return Ok(result);
                         };
+                        result["native_outcome"] = json!(report.outcome);
+                        save(&dir.join("native-report.json"), &result)?;
                         return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
                     }
                     if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
@@ -691,6 +704,71 @@ fn decode_png(bytes: &[u8], constraints: &Value) -> Res<image::DynamicImage> {
     image::DynamicImage::from_decoder(decoder).map_err(|e| format!("PNG decode failed: {e}"))
 }
 
+fn original_png(cfg: &Config, home: &Path, item: &Value, constraints: &Value) -> crate::Result<(Vec<u8>, image::DynamicImage)> {
+    let invalid = |reason: &str| crate::Error::new(422, "image_validation", reason);
+    let unknown = |reason| crate::Error::new(503, "image_observation", reason);
+    if item["status"] != "completed" || !item["failure"].is_null() || item["id"].as_str().is_none_or(str::is_empty) {
+        return Err(invalid("native image tool did not complete successfully"));
+    }
+    let allowed = home
+        .join("generated_images")
+        .canonicalize()
+        .map_err(|_| unknown("native generated_images output directory unavailable".to_string()))?;
+    let path = PathBuf::from(item["savedPath"].as_str().ok_or_else(|| invalid("native image tool savedPath absent"))?)
+        .canonicalize()
+        .map_err(|e| unknown(e.to_string()))?;
+    if !path.starts_with(&allowed) || !path.is_file() {
+        return Err(invalid("native image artifact outside the qualified generated_images path"));
+    }
+    let limit = cfg.max_upload_bytes.min(IMAGE_LIMIT);
+    if fs::metadata(&path).map_err(|e| unknown(e.to_string()))?.len() > limit {
+        return Err(invalid("native PNG exceeds configured byte limit"));
+    }
+    let original = read_bounded(&path, limit).map_err(unknown)?;
+    let decoded = decode_png(&original, constraints).map_err(|reason| invalid(&reason))?;
+    if decoded.width() > 4096 || decoded.height() > 4096 {
+        return Err(invalid("native PNG exceeds 4096-axis safety limit"));
+    }
+    Ok((original, decoded))
+}
+
+// AgentQ restores its terminal report offline; there is no new transport or input.
+fn completed_report(dir: &Path, root: &Path, home: &Path) -> Res<Value> {
+    if dir.join("native-report.json").exists() {
+        let report = read_json(&dir.join("native-report.json"))?;
+        if report["native_outcome"] != "ok" {
+            return Err("original Runtime completion not successful; no import".into());
+        }
+        return Ok(report);
+    }
+    let bytes = read_bounded(&dir.join("native.jsonl"), LOG_LIMIT)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| "native journal encoding invalid")?;
+    let mut checkpoint = None;
+    for line in text.lines() {
+        let event: Value = serde_json::from_str(line).map_err(|_| "native journal invalid")?;
+        if event["direction"] == "runtime-checkpoint" {
+            checkpoint = Some(event["message"].clone());
+        }
+    }
+    let checkpoint = checkpoint.ok_or("original Runtime checkpoint missing; no import or replay")?;
+    let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
+    let mut launch = runtime_launch(root, home, Instant::now() + Duration::from_secs(5));
+    // Reconstruct the operator launch's explicit marker offline; ambient worker markers must not change its scope.
+    launch.env.push(("AGENTQ_LAUNCHER".into(), "assetq".into()));
+    let run = runtime.recover(&checkpoint, &launch)?;
+    let native = runtime.report(&run)?;
+    if native.outcome != "ok" {
+        return Err("original Runtime completion unsuccessful; no import".into());
+    }
+    let mut report = agentq_runtime::cli::report_json(&native);
+    report["native_outcome"] = json!(native.outcome);
+    report["thread"] = json!(runtime.session_id(&run));
+    report["turn"] = checkpoint["app"]["turn"].clone();
+    report["optimization"] = json!({"unknown":"historical optimization receipt absent; no configuration change"});
+    seal(&dir.join("native-report.json"), &report)?;
+    Ok(report)
+}
+
 fn complete(
     cfg: &Config,
     dir: &Path,
@@ -700,17 +778,15 @@ fn complete(
     attachments: &[Value],
     constraints: &Value,
 ) -> Res<Value> {
-    if item["status"] != "completed" || !item["failure"].is_null() || item["id"].as_str().is_none_or(str::is_empty) {
-        return Err("native image tool did not complete successfully".into());
-    }
-    let allowed = home.join("generated_images").canonicalize().map_err(|_| "native generated_images output directory unavailable")?;
-    let path =
-        PathBuf::from(item["savedPath"].as_str().ok_or("native image tool savedPath absent")?).canonicalize().map_err(|e| e.to_string())?;
-    if !path.starts_with(&allowed) || !path.is_file() {
-        return Err("native image artifact outside the qualified generated_images path".into());
-    }
-    let original = read_bounded(&path, cfg.max_upload_bytes.min(IMAGE_LIMIT))?;
-    let decoded = decode_png(&original, constraints)?;
+    let (original, decoded) = match original_png(cfg, home, item, constraints) {
+        Ok(image) => image,
+        Err(error) if error.code == "image_validation" => {
+            report["status"] = json!("failed");
+            report["reason"] = json!(format!("validation failed: {}", error.reason));
+            return Ok(report);
+        }
+        Err(error) => return Err(error.reason),
+    };
     save_bytes(&dir.join("original.png"), &original)?;
     let mut preview = std::io::Cursor::new(vec![]);
     decoded.thumbnail(512, 512).write_to(&mut preview, image::ImageFormat::Png).map_err(|e| e.to_string())?;
@@ -725,7 +801,7 @@ fn complete(
         outputs.push(json!({"sha256":db::sha256_hex(&bytes),"size":bytes.len(),"evidence":{
             "role":(["original","preview","native_evidence"][index]),"runtime_revision":PIN,"native_thread":report["thread"],"native_turn":report["turn"],
             "native_image_item_id":item["id"],"dimensions":if index==0 { evidence["dimensions"].clone() } else if index==1 { json!({"width":decoded.thumbnail(512,512).width(),"height":decoded.thumbnail(512,512).height()}) } else { Value::Null },
-            "source_sha256":evidence["original_sha256"],"usage":report["usage"],"usage_credits":null,"usage_unknown_reason":"native subscription image charge not reported"}}));
+            "source_sha256":evidence["original_sha256"],"source_generation":report["source_generation"],"usage":report["usage"],"usage_credits":null,"usage_unknown_reason":"native subscription image charge not reported"}}));
     }
     report["status"] = json!("completed");
     report["outputs"] = json!(outputs);
@@ -748,7 +824,7 @@ fn verify_outputs(dir: &Path, result: &Value) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (PathBuf, Config, ImageWorker) {
+    pub(super) fn fixture() -> (PathBuf, Config, ImageWorker) {
         let dir = std::env::temp_dir().join(format!("aq-image-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         let cfg = Config {
@@ -887,6 +963,44 @@ mod tests {
         assert!(spool.join("request.json").exists());
         fs::remove_dir_all(dir).unwrap();
     }
+    // R4/R6/R7: completed output refusal is terminal after whole-operation proof,
+    // never unknown; the source bytes and no-replay barrier remain intact.
+    #[test]
+    fn image_worker_completed_oversize_turn_is_failed_not_unknown() {
+        let (dir, cfg, worker) = fixture();
+        let home = dir.join("native-home");
+        fs::create_dir_all(home.join("generated_images")).unwrap();
+        let image = home.join("generated_images/invented.png");
+        image::RgbImage::new(1254, 1254).save(&image).unwrap();
+        let bytes = fs::read(&image).unwrap();
+        let op = db::new_id();
+        let spool = worker.reserve(&op, &json!({"constraints":{"max_width":1024,"max_height":1024}})).unwrap();
+        let item = json!({"id":"invented-tool","type":"imageGeneration","status":"completed","failure":null,"savedPath":image});
+        let refused = complete(
+            &cfg,
+            &spool,
+            &home,
+            &item,
+            json!({"usage":{"total_tokens":152203}}),
+            &[],
+            &json!({"max_width":1024,"max_height":1024}),
+        )
+        .unwrap();
+        assert_eq!(refused["status"], "failed");
+        assert!(refused["reason"].as_str().unwrap().contains("PNG dimensions exceed worker/request limits"));
+        assert_eq!(refused["usage"]["total_tokens"], 152203);
+        retain_observation(&spool, &Ok(refused)).unwrap();
+        assert!(recover_native_with(&spool, || Err("completion unknown".into())).is_err());
+        assert_eq!(fs::metadata(spool.join("reservation")).unwrap().len(), RESERVATION);
+        recover_native_with(&spool, || Ok(())).unwrap();
+        assert!(matches!(worker.poll(&op), Ok(Poll::Failed { credits: None, .. })));
+        assert_eq!(fs::metadata(spool.join("reservation")).unwrap().len(), 0);
+        assert_eq!(fs::read(image).unwrap(), bytes);
+        assert!(worker.reserve(&op, &json!({})).is_err());
+        assert!(!spool.join("original.png").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     // R5: a runtime upgrade must not change the accepted crate's immutable method.
     #[test]
     fn image_worker_retains_original_method_when_registering_protected_version() {
@@ -979,7 +1093,9 @@ mod tests {
         let mut forged = item.clone();
         forged["savedPath"] = json!(dir.join("foreign.png"));
         fs::write(dir.join("foreign.png"), &original).unwrap();
-        assert!(complete(&cfg, &spool, &home, &forged, json!({}), &[], &json!({})).unwrap_err().contains("outside"));
+        let refused = complete(&cfg, &spool, &home, &forged, json!({}), &[], &json!({})).unwrap();
+        assert_eq!(refused["status"], "failed");
+        assert!(refused["reason"].as_str().unwrap().contains("outside"));
         fs::write(spool.join("preview.png"), b"corrupt").unwrap();
         assert!(worker.fetch(&op, 0).is_err());
         fs::remove_dir_all(dir).unwrap();
@@ -996,6 +1112,47 @@ mod tests {
         journal(&mut file, "received", &event).unwrap();
         assert_eq!(native_image(&dir, Some("t"), Some("u")).unwrap().unwrap()["id"], "i");
         assert!(native_image(&dir, Some("foreign"), Some("u")).unwrap().is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R4/R5: offline recovery must retain the operator launch scope under a worker
+    // environment and obtain the same terminal report without another input.
+    #[test]
+    fn image_worker_completed_report_recovery_preserves_operator_marker() {
+        let (dir, _cfg, _worker) = fixture();
+        let home = dir.join("invented-home");
+        fs::create_dir(&home).unwrap();
+        let trace = dir.join("wire.jsonl");
+        let mut launch = runtime_launch(&dir, &home, Instant::now() + Duration::from_secs(10));
+        launch.env.push(("AGENTQ_LAUNCHER".into(), "assetq".into()));
+        launch.install = Some(dir.join("absent-optimizer"));
+        launch.command = vec![
+            if cfg!(windows) { "python" } else { "python3" }.into(),
+            "-u".into(),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-runtime.py").into_os_string(),
+            trace.clone().into_os_string(),
+            "chatgpt".into(),
+            "openai".into(),
+            "complete".into(),
+        ];
+        let runtime = agent::runtime("codex").unwrap();
+        let mut run = runtime.launch(&launch).unwrap();
+        let mut log = File::create(dir.join("native.jsonl")).unwrap();
+        runtime_start(runtime, &mut run, &dir, &mut log, &[Part::Text("invented fixture input".into())]).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        while runtime.report(&run).is_err() && Instant::now() < until {
+            runtime.poll(&mut run).unwrap();
+            runtime_progress(runtime, &mut run, &mut log).unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(runtime.report(&run).unwrap().outcome, "ok");
+        drop(run);
+        let report = completed_report(&dir, &dir, &home).unwrap();
+        assert_eq!(report["native_outcome"], "ok");
+        assert_eq!(completed_report(&dir, &dir, &home).unwrap(), report);
+        let wire = fs::read_to_string(trace).unwrap();
+        let inputs = wire.lines().filter(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "turn/start").count();
+        assert_eq!(inputs, 1);
         fs::remove_dir_all(dir).unwrap();
     }
 

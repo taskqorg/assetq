@@ -35,3 +35,7 @@ Reported native usage: 152,203 total tokens (151,480 input of which 120,960 cach
 The native image tool and its saved-path route work under the protected composed launch (A3 tool/output path observed). The tool ignored the requested 1024 limit and returned 1254 by 1254, the same size as the accepted crate. AssetQ correctly refused to import an out-of-bounds bitmap and replayed nothing, but it recorded this as unknown turn result instead of a precise terminal refusal, so the job stays `waiting` with its reservations.
 
 Open: a method decision on the size limit (accept the native fixed size, or downscale as a declared derived output while preserving the original), and a terminal refusal path for a completed turn whose output fails validation. Duplicate request, control interruption, one-submission and no-replay evidence are observed; immutable import and authenticated retrieval (A2/A6) remain unproved. Private spool, cluster and logs are retained for recovery; no rerun was made.
+
+## Native-size follow-up
+
+Owner answer 6624256251 approves importing this retained native-size PNG unchanged, with no new turn and no <=1024 guarantee. The [native-size follow-up](native-size-import.md) preserves this failed qualification as historical evidence, adds precise terminal validation failure, and prepares a new source-linked version 6 import. This does not rewrite the original 1024 request or report a success manifest before retrieval passes.

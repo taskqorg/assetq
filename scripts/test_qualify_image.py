@@ -8,6 +8,7 @@ from unittest.mock import patch
 import unittest
 
 from qualify_image import TEXT, exercise, main, swatch
+from import_retained_image import import_request, main as retained_main
 
 
 class QualificationDriver(unittest.TestCase):
@@ -19,6 +20,22 @@ class QualificationDriver(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "worker cannot control"):
                     main()
             self.assertFalse(directory.exists())
+
+    def test_retained_import_keeps_source_and_refuses_worker_before_effects(self):
+        source={"id":"invented-source","request":{"text":"original text","attachments":["invented-attachment"],"constraints":{"max_width":1024}}}
+        body=import_request(source)
+        self.assertEqual(body,import_request(source))
+        self.assertEqual(body["operation"],"image.import_native")
+        self.assertEqual(body["attachments"],source["request"]["attachments"])
+        self.assertEqual(body["constraints"],{"source_job":"invented-source"})
+        self.assertEqual(source["request"]["constraints"],{"max_width":1024})
+        with tempfile.TemporaryDirectory() as root:
+            new=Path(root)/"absent"
+            args=["import_retained_image.py","--binary","absent","--workspace",root,"--directory",str(new),"--sha256","0"*64]
+            with patch("sys.argv",args),patch.dict("os.environ",{"TASKQ_ATTEMPT":"invented-worker"}):
+                with self.assertRaisesRegex(RuntimeError,"worker cannot reconcile"):
+                    retained_main()
+            self.assertFalse(new.exists())
 
     def test_brief_matches_scoped_runner_and_input_is_labeled_separately(self):
         source = (Path(__file__).resolve().parents[1] / "src/image_worker.rs").read_text()
