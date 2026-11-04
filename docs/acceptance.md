@@ -34,6 +34,8 @@ Report actual triangles versus target, component count, dimensions, textures, GL
 
 ## Acceptance record
 
+The [managed-delivery record](evidence/6/README.md) attributes the managed downloads/isolation and the separate bounded isolated restart to PM observations on `ed30cd1`. It retains the owner's historical A1 outage exception, the first run's deadline deviation, the 60-credit observed ledger and the open native-capacity, managed fault/rollback, restore and model-visual verdicts. Neither a later isolated pass nor current-store integrity rewrites those gaps.
+
 The [Meshy crate operator example](evidence/5/operator-run/README.md) records the isolated pds18 run on `759fbd2`: nine committed items, provider-wait restart without resubmission, headless Blender validation and hash-matched authenticated downloads. It establishes the named technical A4/A5/A7 example, with owner visual acceptance pending. It does not qualify the managed pds18 service journey, website, other executors or a general Meshy recommendation.
 
 Meshy testing A6: reconcile balance and all attempts before spend, retain actual and cumulative cost evidence and stop on unknown usage. Initial testing has no cumulative credit ceiling; no purchases/top-ups are authorized. Per-job and other resource limits remain enforced.

@@ -54,6 +54,16 @@ Verify private values for all bounds before preparing activation. All service/ex
 6. Point a `current` symlink at the release and start a service unit running `assetq serve --listen 127.0.0.1:<port>` as `assetq` with the environment file. Reuse the host's existing CoreQ lifecycle/install and service mechanism; this candidate ships no parallel launcher or service installer.
 7. Verify `GET /v1/health`, `assetq ops`, one upload and a hash-verified download with a test grant.
 
+## Qualification readback
+
+The [managed-delivery evidence](evidence/6/README.md) records candidate `ed30cd1`, exact archive/binary identities, the owner-accepted historical activation outage, managed authenticated retrieval and a separate bounded isolated restart. It does not grant another restart or paid run. Its current-store `restore-check` observation is not backup/restore qualification.
+
+Before a separately approved control-process restart, retain the exact listener, protected database/data-root identity, candidate digest, resource limits, job/provider IDs and execution deadline. Restart on the same explicit `--listen 127.0.0.1:<port>` selection; default-port availability does not establish the intended service identity. Read back that the same provider operation is observed and the execution deadline is unchanged. A bind failure is a failed restart, not a reason to extend the deadline or stop another listener.
+
+The Meshy one-effect selector deliberately refuses another POST in a previously used store. Preserve it and the original receipts. The completed operator examples authorize only original-operation observation and authenticated retrieval; removing the selector, changing stores or repeating `submit` with a fresh key does not grant a new paid effect. The separately authorized isolated A3 repeat is retained as a distinct example, not a managed-store recovery claim.
+
+For retained results, use `assetq result <job-id>` to obtain actual manifest object IDs and `assetq download <object-id> <new-local-file>` through the existing scoped API. Compare each payload's SHA-256 and byte count with its manifest, including the source image, GLB and original texture maps. Keep payloads private and report technical, managed-live, restore and owner-visual verdicts separately.
+
 ## Rollback
 
 - Stop the unit, point `current` at the previous release, start the unit. Jobs, events, effects and objects stay in PostgreSQL and the data root; executors resume from stored state.
