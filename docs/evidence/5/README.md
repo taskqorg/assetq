@@ -66,3 +66,11 @@ PM note [6628734645](https://github.com/taskqorg/assetq/issues/5#issuecomment-66
 `python3 scripts/check.py --test meshy` passes seven adapter checks and the isolated PostgreSQL validation-retention fixture, plus formatting, four image-driver and two measurement checks. The first corrected-candidate canonical run passed contract lint/whitespace and 26 Rust core checks, but failed the Windows cleanup above before service checks. Its log/receipt are preserved as `target/taskq-5/corrections-first-canonical-failure.*`; this failure is not reported as a passing gate.
 
 The second canonical timeout is preserved in `target/taskq-5/corrections-second-canonical-timeout.*`. Its last running Rust test is unknown because the prior checker discarded that output; the diagnostic fix enables a meaningful next observation. Repeated Windows runs have exceeded 600 seconds cumulatively and do not establish the named `ubuntu-latest` budget or merge-result CI.
+
+## Corrected candidate gate
+
+`python3 scripts/check.py` **PASS** on Windows at `36737d62f092cbf6affddcfb0aa6928239761573`, Rust 1.95.0, 422.67 seconds including setup. Results: five checker, four image-driver, two measurement, 27 Rust core, 30 isolated PostgreSQL service and two trace checks; contract lint, formatting, whitespace and doctest invocation passed. The service suite took 380.76 seconds. Logs and receipt are `target/taskq-5/corrections-canonical.log` and `corrections-canonical-receipt.json`.
+
+Combined corrected-candidate canonical elapsed time is 954.26 seconds across the cleanup failure, timeout and passing run. Read-only observation during the passing run showed its isolated service fixture active in `pg_database_size`, without a PostgreSQL lock wait; this does not identify the earlier timeout's cause. Windows timing variability, the `ubuntu-latest` budget and merge-result CI remain unqualified. No limit was raised or required check removed.
+
+The follow-up commit records only this result; implementation, tests, dependencies and recipe remain identical to the passing candidate. The worker sent no paid effect. Corrected-adapter native evidence, actual next-run usage, source/result manifests, authenticated downloads and owner 3D acceptance remain open under A4/A5/A7.
