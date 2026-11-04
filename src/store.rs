@@ -93,7 +93,33 @@ impl Store {
             let stat = unsafe { stat.assume_init() };
             (stat.f_bavail as u64).checked_mul(stat.f_frsize as u64).ok_or_else(|| io::Error::other("available space overflow"))
         }
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetVolumePathNameW};
+            let mut volume = None;
+            let mut available = u64::MAX;
+            for directory in [&self.root, &self.root.join("tmp"), &self.root.join("objects")] {
+                let path: Vec<u16> = directory.canonicalize()?.as_os_str().encode_wide().chain(Some(0)).collect();
+                let mut mount = vec![0u16; 32768];
+                // Both APIs initialize their outputs on success; junctions resolve to the target volume.
+                if unsafe { GetVolumePathNameW(path.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) } == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                mount.truncate(mount.iter().position(|c| *c == 0).ok_or_else(|| io::Error::other("unterminated volume path"))?);
+                if volume.as_ref().is_some_and(|v| v != &mount) {
+                    return Err(io::Error::other("data root, objects and tmp must share one observed filesystem"));
+                }
+                volume = Some(mount);
+                let mut bytes = 0;
+                if unsafe { GetDiskFreeSpaceExW(path.as_ptr(), &mut bytes, std::ptr::null_mut(), std::ptr::null_mut()) } == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                available = available.min(bytes);
+            }
+            Ok(available)
+        }
+        #[cfg(not(any(unix, windows)))]
         Err(io::Error::other("free-space observation is unsupported on this platform"))
     }
 
@@ -159,10 +185,9 @@ impl Store {
         let mut perms = fs::metadata(&tmp).map_err(map_io)?.permissions();
         perms.set_readonly(true); // committed objects are immutable
         fs::set_permissions(&tmp, perms).map_err(map_io)?;
-        fs::rename(&tmp, &dest).map_err(map_io)?;
-        // Newly created shard directories must survive a host crash too.
-        let shard = dest.parent().unwrap();
-        for directory in [shard.to_path_buf(), shard.parent().unwrap().to_path_buf(), self.root.join("objects"), self.root.clone()] {
+        durable_rename(&tmp, &dest).map_err(map_io)?;
+        #[cfg(unix)]
+        for directory in [dest.parent().unwrap().parent().unwrap().to_path_buf(), self.root.join("objects"), self.root.clone()] {
             File::open(directory).and_then(|d| d.sync_all()).map_err(map_io)?;
         }
         Ok(stored)
@@ -248,6 +273,26 @@ impl Store {
         }
         Ok(())
     }
+}
+
+/// Windows directory handles cannot be flushed through File::open; the native
+/// move supplies write-through durability. Unix flushes the parent directory.
+pub fn durable_rename(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW};
+        let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+        let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+        if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    #[cfg(not(windows))]
+    fs::rename(from, to)?;
+    #[cfg(unix)]
+    File::open(to.parent().unwrap())?.sync_all()?;
+    Ok(())
 }
 
 fn map_io(e: io::Error) -> StoreError {

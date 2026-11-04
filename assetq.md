@@ -22,6 +22,10 @@ Record job, attempt and effect identities independently. Persist dispatch intent
 
 Cancellation distinguishes requested, provider-confirmed, locally stopped and uncertain. Report incurred or unknown charges. Retry policy never blindly repeats an uncertain paid submission. A service restart resumes observation and safe steps without requiring the original chat.
 
+A protected worker's supervisor exit proves only transport termination. Without verified original-operation native and descendant completion, retain turn observations as evidence, keep completion unknown and preserve capacity reservations.
+
+Keep the Runtime transport alive until the original host cancellation readback finishes, including after work errors. Opening or cancellation failures remain unknown; cancellation acknowledgment alone never confirms descendant completion or releases capacity.
+
 An operation that reports completion but whose output fails import validation ends the job `failed` with the validation reason, releases its reservations and is never resubmitted; any imported output stays retained outside a manifest. An outcome stays unknown only while no completion report exists.
 
 The first implementation supports a registered bounded sequence of steps, including external waiting and local validation. It does not require a general workflow editor. Executors can run on qualified hosts distinct from the storage/control host.
@@ -52,6 +56,56 @@ API, CLI and agent tools read the same method registry and recommendation record
 
 **Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
+New worker builds use `agentq-runtime` 0.2.0, published as `runtime-v0.2.0` at immutable revision `70f85434546bd1c303ccdb7b0dd71866421627e2` by AgentQ PR218. Cargo.lock retains the resolved revision.
+
+The runtime owns structured text/image forwarding and read-only account identity; AssetQ verifies attachment ownership, hashes and PNG limits before `Runtime::input`, and requires subscription login through `Runtime::account` before any turn. No raw account request or credential refresh supplies an alternative path.
+
+Existing operation receipts retain their original runtime pin and remain observable without replay. The protected app-server path inherits the existing account, model, permissions and optional optimization.
+
+The structured generation pipeline is method version 5; versions 2, 3, 4 and 5 retain their original runtime and validation recipes. Neither a runtime upgrade nor qualification rewrites existing registry versions or completed asset provenance.
+
+New native dispatch requires protected project/profile grant readback and verified host boundaries under R3. A workspace path and inherited permission mode do not supply that evidence.
+
+Consume protected launch through AgentQ and shared CoreQ infrastructure, using the operator-controlled host authority path and its existing grants. Do not add an AssetQ policy store or trust grant text from a task, request or environment. Resolve and record the effective boundary before native effects; unavailable enforcement refuses launch.
+
+Until the composed protected worker and its current image capability are qualified, refuse new generation launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
+
+Provide one bounded non-generating qualification command through the same protected transport as the image runner. The existing PM supplies a slot bound to its actual consumer incarnation and independently read expected identities. Pin the qualified host adapter artifact in the build; task, environment and receipt text cannot select another authority.
+
+An adapter refresh first qualifies an isolated build from reviewed immutable TaskQ source against the existing policy and host boundary. Record the final staged binary digest after signing. Only then review and compile that digest into AssetQ and repeat composed qualification. Preserve the prior adapter and receipts; no temporary trust override or grant edit is permitted.
+
+The selected installed TaskQ `4.6.66-261103-26` artifact is an explicit exception to that compilation order: pin its verified signed bytes for bounded non-generating qualification and the single image qualification below. Its SHA-256 is `bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42`.
+
+Native qualification remains required; installation, signature and policy parsing alone do not qualify launch.
+
+The prior qualified adapter source `e990d88943e95abd8d182d8157bfe84a94343a07` and digest `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4` remain historical evidence. Preserve its original binaries for recovery. The refreshed build accepts only the new digest; it cannot use the prior artifact as a fallback.
+
+Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. The non-generating qualification command cannot start a model turn. No qualification may release an uncertain slot.
+
+The runtime-trait qualification command exposes read-only account identity and catalogue progress; native probe methods unsupported by the selected runtime refuse explicitly. Historical boundary-probe receipts retain their exact original candidate.
+
+Catalogue qualification retains the Runtime-assigned request ID and waits for its matching response for at most ten seconds within the session deadline. Notifications and an empty progress read do not complete it. A missing response stays unknown; never resend the original request to obtain evidence.
+
+One isolated local durable-API qualification job may generate an original stylized blue wooden wedge, with one verified invented blue-swatch attachment, one PNG requested within 1024 by 1024 pixels and zero paid-API credits. An operator-only command binds the exact already accepted job ID before dispatch; API requests and environment strings cannot enable this path.
+
+General dispatch remains refused. Preserve the accepted crate and its initial 3D-input identity; never replay it.
+
+The qualification runner acquires its own existing-host slot for its actual incarnation, persists its independent AgentQ preparation before launch, and submits at most one Runtime input. It inherits subscription, model, effort and optional optimization without edits.
+
+One concurrent job has at most 600 seconds generating plus 30 seconds observing interruption, a 64 MiB original PNG and 32 MiB native journal under existing resource guards. Report unreported usage/charge as unknown; no direct paid API, replacement submission, new grants, ordinary configuration change or deployment is authorized.
+
+The runner retains Runtime through cancellation, then uses AgentQ original-operation reconciliation before terminal publication and slot release. A restart observes retained preparation/turn receipts without relaunch; missing terminal or descendant evidence preserves unknown and reservations. The executable job model remains the lifecycle owner.
+
+Qualification requires duplicate-request, control-service interruption, original-tool/path, immutable import and authenticated retrieval evidence; a missing tool refuses precisely.
+
+Native-size import is `image.worker.v1@6`, operation `image.import_native`: import one retained original from an explicitly operator-bound, completed generation without a new Runtime input. Preserve original PNG bytes and dimensions under the existing 64 MiB, 16-million-pixel and 4096-axis safety bounds. No <=1024 output guarantee or resampling applies.
+
+The new import job retains the source job/effect, request, method, attachments, tool/path, Runtime checkpoint, hashes and usage. Version 5's 1024-bound request remains unchanged and fails precisely after verified original-operation completion. The accepted crate remains the 3D input. General generation stays refused; importing a retained image never authorizes replay.
+
+A durable effect receipt binds exactly one worker launch; restart observes that operation and never relaunches an uncertain turn.
+
+Native terminal image-tool evidence, an allowed original artifact path and full PNG decoding are required before import. Preserve a bounded preview, dimensions, input identities, runtime/tool evidence and actual or explicitly unknown usage. Exact worker limits, capability refusal and recovery are specified in [image worker](docs/image-worker.md).
+
 A runtime is eligible only after AgentQ qualifies its tool and output path. Text, SVG, a procedural drawing or an unannounced direct API is not a successful image-worker generation.
 
 **Image to 3D prop (`model.meshy-prop.v1`).** Resolve a verified input image; submit a versioned Meshy image-to-3D request with explicit `meshy-t2`, Smart Topology, a 3000-triangle target and 2K PBR as the starting recipe. Preserve source GLB/textures, then validate and render with headless Blender. Provider support and current cost require fresh verification before dispatch.
@@ -74,13 +128,19 @@ Bound each transaction and check its physical growth before commit; exhaustion s
 
 Project-scoped APIs provide authenticated uploads and downloads, checksums, size/type limits, pagination and bounded retention. Permanent asset IDs are independent of expiring transport URLs. Do not automatically publish private inputs or expose storage directories as a public web root.
 
-Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback/restore procedure. Additive activation uses existing host mechanisms and preserves other workloads.
+Installation first prepares an isolated candidate and verifies the concrete service user, directories, database, local endpoint, quota and rollback procedure. Backup/restore qualification follows the initial-delivery deferral below. Additive activation uses existing host mechanisms and preserves other workloads.
 
 Publish the approved `assets.ufobe.com` name through the existing Caddy HTTPS entry on pds18, proxying to the loopback-only AssetQ service. Change only this named DNS/site configuration after verifying its current ownership and target; preserve apex/wildcard records, other sites and existing access guards. Verify TLS, browser/API authentication and rollback on the exact candidate.
 
 Another public hostname, firewall change, destructive migration or unrelated service restart requires separate concrete approval. The website does not authorize direct public storage listeners or directory listing.
 
-Back up objects, manifests, job state and registry revisions consistently outside pds18 and prove restoration. Provider URLs and RAID do not satisfy backup acceptance. Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
+For initial delivery, defer new backup work and both local and independent external backup/restore qualification. Preserve existing host backups and report deferred or unobserved backup/restore evidence as unknown; these gaps do not block initial functionality.
+
+AssetQ must not be stopped or restarted for backup. No cold-backup timer, backup-driven outage, rotation or additional backup platform is authorized for initial delivery.
+
+Any backup verification claim requires consistent object/metadata snapshots, including manifests, job state and registry revisions, plus isolated restore/hash and authenticated retrieval evidence for its named scope. A local receipt never proves independent external restoration. Provider URLs and RAID alone are not backup evidence.
+
+Garbage collection cannot delete referenced, pinned or retained assets; no destructive collection runs before a reviewed inventory and policy.
 
 ## Control and observability
 

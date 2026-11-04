@@ -1,0 +1,12 @@
+{"name":"protected supervisor exit is not whole-operation completion","covers":"R2/R4/R6/R7: supervisor exit after cancellation retains the original operation and reservations without replay or import","steps":[
+{"event":{"type":"accepted","method":"image.worker.v1@4","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"worker","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"cancel_requested"}},
+{"event":{"type":"cancel_uncertain","reason":"original-operation native/descendant completion unknown"}},
+{"event":{"type":"observation_unknown","op_id":"op1","reason":"supervisor exited; native/descendant completion unknown; no replay"}},
+{"event":{"type":"observation_unknown","op_id":"op1","reason":"supervisor exited; native/descendant completion unknown; no replay"}},
+{"event":{"type":"claimed","owner":"replacement","fence":2},"reject":"invalid"},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e2"},"reject":"stale"}
+],"expect":{"phase":"waiting","cancel":"uncertain","lease":null,"effect":"submitted","op_id":"op1","submissions":1,"manifest":false,"imported":[],"usage_credits":null,"reason":"supervisor exited; native/descendant completion unknown; no replay"}}

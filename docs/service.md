@@ -1,6 +1,6 @@
 # Service, lifecycle and storage
 
-This page specifies the first AssetQ service build: one Rust binary (`assetq`) with an HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic provider only. The real image-worker and Meshy methods attach in later tasks. Deployment and rollback: [deploy](deploy.md).
+One Rust binary (`assetq`) provides the HTTP API, embedded or separate executors, administration commands and an API client. It implements [assetq.md](../assetq.md) R2-R7 with a synthetic fixture provider and an optional [Codex image worker](image-worker.md). Meshy and managed deployment qualification remain separate. Deployment and rollback: [deploy](deploy.md).
 
 ## Lifecycle model
 
@@ -22,7 +22,7 @@ A method version declares a bounded step list (at most 16) from `synthetic.gener
 
 Executors claim fenced work with `FOR UPDATE SKIP LOCKED`. A submission persists dispatch intent and the effect row, calls the provider, records the receipt, and releases the lease. Waiting jobs hold no executor capacity; pollers reconcile, poll and cancel provider operations through the same idempotent events that a webhook would use. On restart, expired leases are reclaimed and waiting operations continue from their stored IDs. No step needs the originating chat.
 
-`synthetic.fake@1` is the only enabled method. Its provider keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers to refuse delayed stale submissions, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@1` (`agentq.image`, capability `image_generation`) and `model.meshy-prop.v1@1` are registered as disabled; a request for them is refused. Startup migration rewrites a built-in row from an earlier seed only when it is disabled and no job or recommendation references it.
+`synthetic.fake@1` keeps state in files under `ASSETQ_FAKE_PROVIDER_DIR`, uses atomic effect receipts and sealed-absence markers, and supports one-shot faults (`lose_reply`, `fail_fetch`, `cancel_unconfirmed`). Its outputs say `SYNTHETIC` and carry `synthetic: true`. `image.worker.v1@2` and `@3` retain their original specifications; experimental version 4 pins the corrected protected runtime. General generation dispatch refuses pending current tool qualification, while configured observers can retain/import existing operations with `synthetic: false`. Version 5 uses structured Runtime inputs. Operator-bound version 6 imports an existing completed native image without generation, using the same provider lifecycle and a new immutable source-linked request. The separately approved [single local qualification job](evidence/4/bounded-image-job.md) integrates runner-owned slot/preparation/reconciliation without changing this executable job model or enabling general dispatch. Versions 1 and 5 use provider `agentq.image` with capability `image_generation`; versions 2-4 keep their original runtime-specific specifications. Version 1 and `model.meshy-prop.v1@1` stay disabled; startup migration rewrites a built-in row from an earlier seed only when it is disabled and no job or recommendation references it. No recommendation is promoted automatically.
 
 ## API
 
@@ -70,7 +70,7 @@ Unknown stays explicit. Provider health, store integrity and backup read `unknow
 
 ## Not in this build
 
-Real providers, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy.
+Meshy, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy. The qualified native image route does not qualify another client, host or managed storage deployment.
 
 ## Recovery and restore checks
 

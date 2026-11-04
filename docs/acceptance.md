@@ -26,8 +26,11 @@ Report actual triangles versus target, component count, dimensions, textures, GL
 | Partial file import or full disk | No successful manifest or deletion of prior committed assets; safe resumed import |
 | Foreign project or invalid file path | Refuse unauthorized reads/writes and caller-chosen storage paths |
 | Optimizer absent/disabled | Plain worker runs; existing auth/model/permissions remain unchanged |
+| Protected runtime upgrade | Original method/asset versions retain their pins; composed consumer proves fresh authority, handshake, filesystem/network/child boundaries, control/outside denial, interruption and same-operation recovery separately from upstream adapter checks |
+| Current image capability | Check the actually resolved native client/tool and artifact path; old bitmap provenance or an image item in a protocol schema alone does not prove present tool availability |
 | Telemetry outage | Local job/result truth survives and incomplete metrics remain explicit |
-| Backup loss scenario | Restore job metadata, method and object bytes outside the live store; hashes and download pass |
+| Deferred initial backup work | Preserve existing host backups; no backup-driven stop/restart, cold-backup timer, rotation or new platform |
+| Deferred backup/restore qualification | New local and independent external qualification are nonblocking for initial delivery and remain unknown; claim verification only with consistent snapshots, isolated restore/hashes and authenticated retrieval evidence for that scope |
 
 ## Acceptance record
 

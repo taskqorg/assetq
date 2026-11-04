@@ -4,6 +4,7 @@
 pub mod api;
 pub mod db;
 pub mod exec;
+pub mod image_worker;
 pub mod model;
 pub mod provider;
 pub mod store;
@@ -87,6 +88,7 @@ pub struct Config {
     pub retention_days: u32,
     /// Enables the explicitly synthetic file-backed provider (tests and selftest).
     pub fake_provider_dir: Option<PathBuf>,
+    pub image_worker_root: Option<PathBuf>,
 }
 
 pub const DEFAULT_TYPES: &str =
@@ -130,6 +132,7 @@ impl Config {
                 .filter(|n| *n <= i32::MAX as u32)
                 .ok_or("ASSETQ_RETENTION_DAYS must fit a nonnegative PostgreSQL interval")?,
             fake_provider_dir: std::env::var("ASSETQ_FAKE_PROVIDER_DIR").ok().map(PathBuf::from),
+            image_worker_root: std::env::var("ASSETQ_IMAGE_WORKER_ROOT").ok().map(PathBuf::from),
         })
     }
 }

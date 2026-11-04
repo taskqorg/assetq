@@ -221,6 +221,10 @@ pub fn builtin_methods() -> Vec<(&'static str, i32, &'static str, Value)> {
                 "max_credits": 0
             }),
         ),
+        ("image.worker.v1", 2, "experimental", crate::image_worker::legacy_method()),
+        ("image.worker.v1", 3, "experimental", crate::image_worker::protected_method_v3()),
+        ("image.worker.v1", 4, "experimental", crate::image_worker::protected_method_v4()),
+        ("image.worker.v1", 5, "experimental", crate::image_worker::method()),
     ]
 }
 

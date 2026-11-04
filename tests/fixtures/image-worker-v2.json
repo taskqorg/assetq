@@ -1,0 +1,50 @@
+{
+  "operation": "image.generate",
+  "inputs": [
+    "text",
+    "verified PNG attachment IDs"
+  ],
+  "outputs": [
+    "image/png",
+    "application/json"
+  ],
+  "provider": "agentq.codex-image",
+  "model": "native-inherited",
+  "api_revision": "513193c8a96f3de1c71a86291a679230817ce0b2",
+  "pipeline_revision": "2",
+  "parameters": {
+    "max_width": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096
+    },
+    "max_height": {
+      "type": "integer",
+      "min": 64,
+      "max": 4096
+    }
+  },
+  "capabilities": [
+    "codex.image_generation",
+    "native.savedPath",
+    "protected project/profile grant"
+  ],
+  "limitations": [
+    "New dispatch refused pending protected host-authority integration; one PNG; no paid API fallback."
+  ],
+  "provenance": "assetq.md image.worker.v1; docs/image-worker.md",
+  "validation": [
+    "native terminal image tool",
+    "full PNG decode",
+    "dimensions",
+    "sha256 re-read"
+  ],
+  "steps": [
+    "provider.submit",
+    "provider.import",
+    "validate"
+  ],
+  "max_credits": 0,
+  "billing": "existing_subscription_only",
+  "synthetic": false
+}

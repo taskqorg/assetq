@@ -1,0 +1,43 @@
+{
+  "job_id": "0e1fdfd2-9f45-46a0-ae27-0b4ba6558968",
+  "original_asset_id": "2c887345-9f66-491f-8a0c-81d81cf0c4af",
+  "original_sha256": "fe2077d15b0c50617b84c6267277d46339c6a8cedbd6334e923cfa5475529baa",
+  "dimensions": {
+    "width": 1254,
+    "height": 1254
+  },
+  "source_attachment_id": "3899d7b7-6e03-4284-b74f-86d662964371",
+  "method": "image.worker.v1@2",
+  "runtime_revision": "513193c8a96f3de1c71a86291a679230817ce0b2",
+  "binary_sha256": "ff599ab746b47187868ecfc5d6cdf8261d32b2b2e4fa8c47629d2a4dfde12f35",
+  "owner_visual_acceptance": "pending",
+  "service_restart": true,
+  "duplicate_request": "same job",
+  "conflicting_request": "refused 409",
+  "cancel_before_dispatch": "cancelled",
+  "credits": null,
+  "credit_unknown_reason": "native subscription charge not reported",
+  "qualified_image_worker_source_sha256": "35feeba521a69700d3b1cc946ef51894a217458e517e92ad5fa74da9d9e2e45a",
+  "native_thread_id": "01a196d5-3b3d-7733-b2f5-0ba1020330dc",
+  "native_turn_id": "01a196d5-5ae1-7ac0-b3c0-52f04cc9e22e",
+  "native_tool_item_id": "exec-2743819d-ccff-4f88-858a-76a4cdf25ac2",
+  "native_usage": {
+    "calls": null,
+    "input": 17073,
+    "cache_read": 65024,
+    "cache_write": 0,
+    "output": 706,
+    "model": "gpt-6.1-sol",
+    "unknown": null
+  },
+  "optimization": {
+    "intent": "inherit",
+    "effective": "off",
+    "reason": "integration_disabled"
+  },
+  "native_tool": "Codex built-in imageGeneration",
+  "native_client_version": "codex-cli 0.162.1",
+  "native_artifact_directory": "CODEX_HOME/generated_images",
+  "native_evidence_sha256": "88362d8d1c4a5a90878554678bb6c41e121f0e9471804474cf44c7eb74b4d505",
+  "diagnostics": "raw stderr omitted; protocol journal retained privately"
+}

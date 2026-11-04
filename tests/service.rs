@@ -56,6 +56,7 @@ impl Fixture {
             lease_ms: 60_000,
             retention_days: 7,
             fake_provider_dir: Some(self.dir.join("fake")),
+            image_worker_root: None,
         }
     }
     fn ctx(&self, quota: u64) -> Ctx {
@@ -87,6 +88,99 @@ const NO_PROVIDERS: &[&str] = &[];
 const FAKE: &[&str] = &["synthetic.fake"];
 fn limits() -> db::Limits {
     db::Limits { quota_bytes: 1 << 30 }
+}
+
+// R3/R5: the capability-named provider and retained legacy versions both reach
+// the same pre-launch refusal, without rewriting old method/provider identities.
+#[test]
+fn image_worker_provider_names_retain_versions_and_refuse_dispatch() {
+    let f = fixture();
+    let mut config = f.config(1 << 30);
+    config.image_worker_root = Some(f.dir.clone());
+    let ctx = Ctx::new(config).unwrap();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "worker-names", 1, 1);
+    for version in [2, 3, 4, 5] {
+        let mut request = req(&format!("version-{version}"), json!({}));
+        request["project"] = json!(p.project);
+        request["method"] = json!(format!("image.worker.v1@{version}"));
+        request["operation"] = json!("image.generate");
+        request["budget"]["max_credits"] = json!(0);
+        let (job, _) = db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap();
+        let id = job["id"].as_str().unwrap();
+        let done = drive(&mut c, &ctx, &p.project, id, phase("failed"));
+        assert!(done["reason"].as_str().unwrap().contains("capability_unavailable: protected project/profile grant"));
+        assert_eq!(db::submit_job(&mut c, &p, &request, &limits(), &ctx.provider_names()).unwrap().0["id"], id);
+        db::audit_job(&mut c, id).unwrap();
+    }
+    assert_eq!(std::fs::read_dir(f.dir.join("data/tmp/image-worker")).unwrap().count(), 0);
+}
+
+// R4/R6/R7: an observation outage must remain visible and reserve capacity;
+// terminal interruption distinguishes an API cancel from a worker failure.
+#[test]
+fn image_worker_observation_failure_and_terminal_cancel_keep_capacity() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Interrupted {
+        fake: FakeProvider,
+        terminal: Arc<AtomicBool>,
+    }
+    impl Provider for Interrupted {
+        fn name(&self) -> &str {
+            self.fake.name()
+        }
+        fn submit(&self, e: &str, r: &Value) -> Submit {
+            self.fake.submit(e, r)
+        }
+        fn lookup(&self, e: &str) -> Result<Option<String>, String> {
+            self.fake.lookup(e)
+        }
+        fn poll(&self, _: &str) -> Result<Poll, String> {
+            if self.terminal.load(Ordering::Relaxed) {
+                Ok(Poll::Cancelled)
+            } else {
+                Err("native observation unavailable; no replay".into())
+            }
+        }
+        fn fetch(&self, o: &str, i: usize) -> Result<Output, String> {
+            self.fake.fetch(o, i)
+        }
+        fn cancel(&self, _: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+    for requested in [false, true] {
+        let f = fixture();
+        let mut c = f.client();
+        let (p, _) = project(&mut c, "worker-outage", 3, 1);
+        let terminal = Arc::new(AtomicBool::new(false));
+        let mut ctx = f.ctx(1 << 30);
+        ctx.providers = vec![Arc::new(Interrupted { fake: f.fake(), terminal: terminal.clone() })];
+        let request = req("one", json!({}));
+        let (j, _) = db::submit_job(&mut c, &p, &request, &limits(), FAKE).unwrap();
+        let id = j["id"].as_str().unwrap();
+        exec::tick(&mut c, &ctx, "worker").unwrap();
+        exec::tick(&mut c, &ctx, "observer").unwrap();
+        let unknown = db::get_job(&mut c, &p.project, id).unwrap();
+        assert_eq!(unknown["phase"], "waiting");
+        assert_eq!(unknown["reason"], "native observation unavailable; no replay");
+        assert_eq!(f.fake().submissions(), 1);
+        assert_eq!(db::submit_job(&mut c, &p, &request, &limits(), FAKE).unwrap().0["id"], id);
+        assert_eq!(db::submit_job(&mut c, &p, &req("two", json!({})), &limits(), FAKE).unwrap_err().code, "concurrency_limit");
+        if requested {
+            db::cancel_job(&mut c, &p.project, id).unwrap();
+            exec::tick(&mut c, &ctx, "canceller").unwrap();
+            assert_eq!(db::get_job(&mut c, &p.project, id).unwrap()["cancel"], "uncertain");
+        }
+        terminal.store(true, Ordering::Relaxed);
+        exec::tick(&mut c, &ctx, "observer").unwrap();
+        let done = db::get_job(&mut c, &p.project, id).unwrap();
+        assert_eq!(done["phase"], if requested { "cancelled" } else { "failed" });
+        assert!(done["usage"]["credits"].is_null());
+        assert_eq!(f.fake().submissions(), 1);
+        db::submit_job(&mut c, &p, &req("two", json!({})), &limits(), FAKE).unwrap();
+        db::audit_job(&mut c, id).unwrap();
+    }
 }
 
 /// Drive in-process executors until `done(job)` or a step budget runs out.
@@ -306,12 +400,14 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
     struct SlowProvider {
         fake: FakeProvider,
         expire: Option<String>,
+        delay: Duration,
     }
     struct SlowRead {
         inner: Box<dyn std::io::Read + Send>,
         expire: Option<String>,
         op: String,
         first: bool,
+        delay: Duration,
     }
     impl std::io::Read for SlowRead {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -326,7 +422,7 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
                         )
                         .unwrap();
                 }
-                std::thread::sleep(Duration::from_millis(400));
+                std::thread::sleep(self.delay);
             }
             self.inner.read(buf)
         }
@@ -348,11 +444,18 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
             self.fake.cancel(op)
         }
         fn fetch(&self, op: &str, index: usize) -> Result<Output, String> {
-            std::thread::sleep(Duration::from_millis(400));
+            std::thread::sleep(self.delay);
             let out = self.fake.fetch(op, index)?;
             Ok(Output {
+                evidence: out.evidence,
                 content_type: out.content_type,
-                reader: Box::new(SlowRead { inner: out.reader, expire: self.expire.clone(), op: op.into(), first: true }),
+                reader: Box::new(SlowRead {
+                    inner: out.reader,
+                    expire: self.expire.clone(),
+                    op: op.into(),
+                    first: true,
+                    delay: self.delay,
+                }),
             })
         }
     }
@@ -361,8 +464,16 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
         let mut c = f.client();
         let (p, _) = project(&mut c, "slow", 10, 1);
         let mut ctx = f.ctx(1 << 30);
-        ctx.cfg.lease_ms = 250;
-        ctx.providers = vec![Arc::new(SlowProvider { fake: f.fake(), expire: expire.then(|| f.url.clone()) })];
+        // Native metadata scans can exceed 250ms. Preserve both slow boundaries
+        // and forced-expiry assertions while calibrating to this real fixture.
+        let began = Instant::now();
+        db::commit_write(db::write_tx(&mut c, true).unwrap()).unwrap();
+        let guarded_ms = began.elapsed().as_millis() as u64;
+        ctx.cfg.lease_ms = guarded_ms.saturating_mul(8).max(250);
+        assert!(ctx.cfg.lease_ms <= 10_000, "guarded fixture exceeds the bounded calibration budget");
+        let delay = Duration::from_millis(ctx.cfg.lease_ms + 150);
+        eprintln!("R6 fixture: guarded_ms={guarded_ms} lease_ms={} each_slow_step_ms={}", ctx.cfg.lease_ms, delay.as_millis());
+        ctx.providers = vec![Arc::new(SlowProvider { fake: f.fake(), expire: expire.then(|| f.url.clone()), delay })];
         let (j, _) = db::submit_job(&mut c, &p, &req("slow", json!({})), &limits(), FAKE).unwrap();
         let id = j["id"].as_str().unwrap();
         drive(&mut c, &ctx, &p.project, id, phase("active"));
@@ -374,7 +485,7 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
             assert_eq!(objects, 0, "an expired lease cannot commit imported metadata");
             assert_eq!(db::job_result(&mut c, &p.project, id).unwrap()["status"], "incomplete");
         } else {
-            assert_eq!(j["phase"], "succeeded", "fetch and stream each exceed the 250ms lease");
+            assert_eq!(j["phase"], "succeeded", "fetch and stream each exceed the calibrated lease");
             assert_eq!(j["attempts"], 2);
             let result = db::job_result(&mut c, &p.project, id).unwrap();
             let item = &result["manifest"]["items"][0];
@@ -421,7 +532,7 @@ impl Provider for ReportingProvider {
         })
     }
     fn fetch(&self, _: &str, _: usize) -> Result<Output, String> {
-        Ok(Output { content_type: "image/png".into(), reader: Box::new(std::io::Cursor::new(self.body.clone())) })
+        Ok(Output { content_type: "image/png".into(), reader: Box::new(std::io::Cursor::new(self.body.clone())), evidence: Value::Null })
     }
     fn cancel(&self, op: &str) -> Result<bool, String> {
         self.fake.cancel(op)
@@ -649,19 +760,29 @@ fn migration_renames_runtime_specific_image_method_and_keeps_jobs() {
     let (job, _) = db::submit_job(&mut c, &a, &req("m1", json!({})), &limits(), FAKE).unwrap();
     // Rows seeded by an earlier build named the runtime instead of the capability.
     c.execute(
-        "UPDATE methods SET spec = jsonb_set(jsonb_set(spec, '{provider}', '\"agentq.codex-image\"'), '{capabilities}', '[\"codex.image_generation\"]') WHERE id = 'image.worker.v1'",
+        "UPDATE methods SET spec = jsonb_set(jsonb_set(spec, '{provider}', '\"agentq.codex-image\"'), '{capabilities}', '[\"codex.image_generation\"]') WHERE id = 'image.worker.v1' AND version = 1",
         &[],
     )
     .unwrap();
     db::migrate(&mut c).unwrap();
-    let spec =
-        &db::list_methods(&mut c, "mu").unwrap().as_array().unwrap().iter().find(|m| m["id"] == "image.worker.v1").unwrap()["spec"].clone();
+    let spec = &db::list_methods(&mut c, "mu")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == "image.worker.v1" && m["version"] == 1)
+        .unwrap()["spec"]
+        .clone();
     assert_eq!(spec["provider"], "agentq.image");
     assert_eq!(spec["capabilities"], json!(["image_generation"]));
+    // Versions 2-4 are historical registry entries that keep their original runtime-specific spec (R5).
     assert!(
-        !db::builtin_methods()
-            .iter()
-            .any(|m| m.3.to_string().to_lowercase().contains("codex") || m.3.to_string().to_lowercase().contains("claude"))
+        !db::builtin_methods().iter().filter(|m| m.0 != "image.worker.v1" || m.1 == 1 || m.1 == 5).any(|m| m
+            .3
+            .to_string()
+            .to_lowercase()
+            .contains("codex")
+            || m.3.to_string().to_lowercase().contains("claude"))
     );
     let id = job["id"].as_str().unwrap();
     assert_eq!(db::get_job(&mut c, "mu", id).unwrap()["method"], json!("synthetic.fake@1"));
@@ -675,7 +796,11 @@ fn registry_recommendations_and_comparisons() {
     let owner_token = db::create_token(&mut c, "kappa", "owner").unwrap();
     let owner = db::authenticate(&mut c, &owner_token).unwrap();
     let methods = db::list_methods(&mut c, "kappa").unwrap();
-    assert_eq!(methods.as_array().unwrap().len(), 3);
+    assert_eq!(methods.as_array().unwrap().len(), 7);
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, assetq::image_worker::legacy_method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, assetq::image_worker::protected_method_v3());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, assetq::image_worker::protected_method_v4());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@5").unwrap().2, assetq::image_worker::method());
     let mut spec = db::builtin_methods()[0].3.clone();
     spec["pipeline_revision"] = json!("2");
     let body = json!({"id": "synthetic.fake", "status": "experimental", "spec": spec});
@@ -748,7 +873,7 @@ fn registry_scope_and_expired_fences() {
     let body = json!({"id": "private-method", "spec": db::builtin_methods()[0].3});
     db::create_method_version(&mut c, &owner_a, &body).unwrap();
     assert!(db::resolve_method(&mut c, &b.project, "private-method@1").is_err());
-    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 3);
+    assert_eq!(db::list_methods(&mut c, &b.project).unwrap().as_array().unwrap().len(), 7);
     let rec = db::propose_recommendation(
         &mut c,
         &a,
@@ -1073,7 +1198,8 @@ fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
     cfg.metadata_quota_bytes = before + cfg.metadata_admission_headroom_bytes + cfg.metadata_recovery_headroom_bytes;
     db::configure(&mut c, &cfg).unwrap();
     let mut tx = db::write_tx(&mut c, false).unwrap();
-    let value = json!({"data": (0..1024).map(|i| db::sha256_hex(format!("invented fixture {i}").as_bytes())).collect::<String>()});
+    // Grow beyond the relcache init file; its removal must not cancel this fixture's net physical growth.
+    let value = json!({"data": (0..3072).map(|i| db::sha256_hex(format!("invented fixture {i}").as_bytes())).collect::<String>()});
     db::charge(&mut tx, value.to_string().len()).unwrap();
     tx.execute("INSERT INTO observations (kind, subject, value) VALUES ('fixture', 'toast', $1)", &[&value]).unwrap();
     let (ready, started) = std::sync::mpsc::channel();
@@ -1088,7 +1214,8 @@ fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
     db::commit_write(tx).unwrap();
     assert_eq!(recv.recv_timeout(Duration::from_secs(5)).unwrap(), "metadata_full");
     worker.join().unwrap();
-    assert!(db::metadata_bytes(&mut c).unwrap() > before);
+    let after = db::metadata_bytes(&mut c).unwrap();
+    assert!(after > before, "physical fixture before={before} after={after}");
     let toast: i64 =
         c.query_one("SELECT pg_total_relation_size(reltoastrelid) FROM pg_class WHERE oid = 'observations'::regclass", &[]).unwrap().get(0);
     assert!(toast > 8192, "fixture must create real TOAST and index allocations");
@@ -1235,7 +1362,7 @@ fn service_restart_recovers_job_through_cli() {
     let audit = admin(&["audit", &id]);
     assert!(audit.contains("matches stored state"));
     let methods = cli(&f, &s, &token, &["methods"]);
-    assert_eq!(methods.as_array().unwrap().len(), 3);
+    assert_eq!(methods.as_array().unwrap().len(), 7);
     let rec = cli(&f, &s, &token, &["recommend", "prop image"]);
     assert_eq!(rec["recommended"], Value::Null);
     // A corrupted download is refused and leaves no output file.

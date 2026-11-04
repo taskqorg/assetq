@@ -4,6 +4,8 @@ use crate::model::{self, Event};
 use serde_json::Value;
 
 pub const TRACES: &[(&str, &str)] = &[
+    ("protected-supervisor-exit.json", include_str!("../tests/traces/protected-supervisor-exit.json")),
+    ("observation-unknown.json", include_str!("../tests/traces/observation-unknown.json")),
     ("execution-deadline.json", include_str!("../tests/traces/execution-deadline.json")),
     ("cancel-during-wait.json", include_str!("../tests/traces/cancel-during-wait.json")),
     ("cancel-queued.json", include_str!("../tests/traces/cancel-queued.json")),
