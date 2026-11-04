@@ -22,6 +22,8 @@ Record job, attempt and effect identities independently. Persist dispatch intent
 
 Cancellation distinguishes requested, provider-confirmed, locally stopped and uncertain. Report incurred or unknown charges. Retry policy never blindly repeats an uncertain paid submission. A service restart resumes observation and safe steps without requiring the original chat.
 
+An operation that reports completion but whose output fails import validation ends the job `failed` with the validation reason, releases its reservations and is never resubmitted; any imported output stays retained outside a manifest. An outcome stays unknown only while no completion report exists.
+
 The first implementation supports a registered bounded sequence of steps, including external waiting and local validation. It does not require a general workflow editor. Executors can run on qualified hosts distinct from the storage/control host.
 
 ## Web management and API

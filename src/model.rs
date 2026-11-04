@@ -212,6 +212,7 @@ fn bad<T>(m: impl Into<String>) -> Result<T, Reject> {
 }
 
 pub const MAX_STEPS: usize = 16;
+pub const MAX_OUTPUTS: usize = 16;
 pub const STEP_KINDS: &[&str] = &["synthetic.generate", "provider.submit", "provider.import", "validate"];
 
 /// Apply one event. A missing state accepts only `Accepted`.
@@ -372,7 +373,7 @@ pub fn apply(state: Option<&Job>, event: &Event) -> Result<Job, Reject> {
             if s.effect != EffectState::Submitted || !op_matches(op_id) {
                 return bad("completion for an unknown operation");
             }
-            if *outputs == 0 || *outputs > 16 {
+            if !(1..=MAX_OUTPUTS).contains(outputs) {
                 return bad("completion must have 1..=16 outputs");
             }
             n.effect = EffectState::Done;

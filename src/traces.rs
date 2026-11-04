@@ -15,6 +15,7 @@ pub const TRACES: &[(&str, &str)] = &[
     ("happy-path.json", include_str!("../tests/traces/happy-path.json")),
     ("lost-reply-absent.json", include_str!("../tests/traces/lost-reply-absent.json")),
     ("lost-reply-found.json", include_str!("../tests/traces/lost-reply-found.json")),
+    ("import-validation-failed.json", include_str!("../tests/traces/import-validation-failed.json")),
     ("partial-import.json", include_str!("../tests/traces/partial-import.json")),
     ("stale-executor.json", include_str!("../tests/traces/stale-executor.json")),
     ("store-full.json", include_str!("../tests/traces/store-full.json")),

@@ -1,0 +1,14 @@
+{"name":"refused import ends the job failed","covers":"a completed operation whose output fails validation fails with the reason; duplicates are no-ops and nothing resubmits","steps":[
+{"event":{"type":"accepted","method":"synthetic.fake@2","steps":["provider.submit","provider.import","validate"]}},
+{"event":{"type":"claimed","owner":"x1","fence":1}},
+{"event":{"type":"dispatch_intended","fence":1,"effect_id":"e1"}},
+{"event":{"type":"submit_acked","fence":1,"effect_id":"e1","op_id":"op1"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"claimed","owner":"x1","fence":2}},
+{"event":{"type":"object_imported","fence":2,"key":"output-0"}},
+{"event":{"type":"step_completed","fence":2,"step":1}},
+{"event":{"type":"failed","fence":2,"reason":"validation failed: output-0: PNG dimensions 1254x1254 exceed worker/request limits"}},
+{"event":{"type":"provider_completed","op_id":"op1","outputs":1,"credits":1}},
+{"event":{"type":"dispatch_intended","fence":2,"effect_id":"e2"},"reject":"invalid"},
+{"event":{"type":"claimed","owner":"x1","fence":3},"reject":"invalid"}
+],"expect":{"phase":"failed","reason":"validation failed: output-0: PNG dimensions 1254x1254 exceed worker/request limits","submissions":1,"effect":"done","imported":["output-0"],"manifest":false,"lease":null,"usage_credits":1}}
