@@ -1,7 +1,7 @@
 'use strict';
 // Browser state is a projection of the scoped API; no durable asset/job store.
 const main = document.querySelector('#main');
-let session, project, epoch = 0, pollTimer;
+let session, project, epoch = 0, pollTimer, lastView;
 const drafts = new Map(), views = new Map();
 const terminal = p => ['succeeded', 'failed', 'cancelled'].includes(p);
 const value = v => v === null || v === undefined ? 'Unknown' : typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
@@ -33,7 +33,7 @@ function properties(values) { return el('dl', {class: 'properties'}, Object.entr
 function role() { return session?.projects.find(p => p.id === project)?.role; }
 function requireOwner(control) { return role() === 'owner' ? control : el('p', {class: 'muted'}, 'An owner grant is required for this action.'); }
 function loseSession(message) {
-  ++epoch; clearTimeout(pollTimer); session = null; drafts.clear(); views.clear();
+  ++epoch; clearTimeout(pollTimer); session = null; lastView = null; drafts.clear(); views.clear();
   document.querySelector('#project').replaceChildren(); document.querySelector('#identity').textContent = '';
   main.replaceChildren(heading('Access unavailable'), note(message), button('Reconnect through host sign-in', () => bootstrap()));
 }
@@ -73,7 +73,7 @@ function rememberDraft() {
   }
 }
 function navigate(path, replace = false) {
-  rememberDraft(); history.replaceState({...history.state, scroll: scrollY}, '', location.href);
+  rememberDraft(); history.replaceState({...history.state, scroll: scrollY, focus:document.activeElement?.getAttribute('href')}, '', location.href);
   const next = new URL(path,location.origin), current = new URL(location.href);
   const preserve = next.pathname === '/assets' && current.pathname === next.pathname && ['project','q','type','after'].every(k=>next.searchParams.get(k)===current.searchParams.get(k));
   history[replace ? 'replaceState' : 'pushState']({scroll: preserve ? scrollY : 0}, '', path); render(preserve);
@@ -109,7 +109,7 @@ async function assetDetail(id, token) {
 }
 
 async function assets(params, token, id) {
-  if (id) return [heading('Asset detail', link('Asset library', '/assets')), await assetDetail(id, token)];
+  if (id) return [heading('Asset detail', link('Asset library', views.get(`${project}:assets`) || '/assets')), await assetDetail(id, token)];
   const q = params.get('q') || '', type = params.get('type') || '', after = params.get('after') || '';
   const page = await api('objects?' + new URLSearchParams({q, type, after, limit: 30}));
   const filter = el('form', {class: 'filters', onsubmit: e => {e.preventDefault(); const data = new FormData(filter); navigate(url('/assets', {q: data.get('q'), type: data.get('type')}));}},
@@ -289,15 +289,19 @@ async function render(restore = false) {
   clearTimeout(pollTimer); const token = ++epoch;
   const params=new URLSearchParams(location.search), selectedProject=params.get('project');
   if(!session)return;
+  if(selectedProject && project && project !== selectedProject) { lastView=null;drafts.clear();views.clear(); }
   if(selectedProject && !session.projects.some(p=>p.id===selectedProject)){main.replaceChildren(heading('Permission denied'),note('This URL names an unauthorized project. No data was requested.'),button('Open an authorized project',()=>navigate('/assets')));return;}
   project=selectedProject || session.projects[0]?.id;
   if(!project){loseSession('No project authority is available.');return;}
   if(!selectedProject){history.replaceState(history.state,'',url(location.pathname));}
   document.querySelector('#project').value=project;document.querySelector('#identity').textContent=`${role()} / scoped session`;
+  document.querySelector('.brand').href=url('/assets');
   const parts=location.pathname.split('/').filter(Boolean),section=parts[0] || 'assets';
+  if(parts.length<=1)views.set(`${project}:${section}`,location.pathname+location.search);
   const nav=document.querySelector('#nav');nav.replaceChildren(...[['assets','Assets'],['jobs','Jobs'],['methods','Methods'],['benchmarks','Benchmarks'],['operations','Operations']].map(([key,label])=>el('a',{href:views.get(`${project}:${key}`)||url('/'+key),'aria-current':key===section?'page':null},label)));
-  views.set(`${project}:${section}`,location.pathname+location.search);
   main.replaceChildren(el('p',{role:'status',class:'busy'},'Loading scoped records…'));
+  const viewKey=location.pathname+location.search;
+  if(lastView?.key!==viewKey)lastView=null;
   try {
     let nodes;
     if(section==='assets' && parts.length<=2)nodes=await assets(params,token,parts[1]);
@@ -307,8 +311,9 @@ async function render(restore = false) {
     else if(section==='operations' && parts.length===1){const status=await api('status');nodes=[heading('Operations',button('Refresh',()=>render())),note('Physical store and capacity values describe the service. Missing, stale and deferred backup/restore observations remain unknown.'),panel(jsonDetails('Scoped jobs, methods and recommendations',status,true))];}
     else nodes=[heading('Unknown destination'),note('This route is unsupported. The requested view was not restored.'),link('Asset library','/assets')];
     if(token!==epoch)return;main.replaceChildren(...nodes.filter(Boolean));
-    if(restore)requestAnimationFrame(()=>scrollTo(0,history.state?.scroll || 0));else{scrollTo(0,0);main.focus({preventScroll:true});}
-  }catch(e){if(token===epoch)main.replaceChildren(heading('Unable to load this view'),note(e.message),button('Retry read',()=>render()),link('Asset library','/assets'));}
+    lastView={key:viewKey,nodes:[...main.childNodes],observed:new Date().toISOString()};
+    if(restore)requestAnimationFrame(()=>{const anchor=[...main.querySelectorAll('a')].find(a=>a.getAttribute('href')===history.state?.focus);(anchor || main).focus({preventScroll:true});scrollTo(0,history.state?.scroll || 0);});else{scrollTo(0,0);main.focus({preventScroll:true});}
+  }catch(e){if(token===epoch){if(lastView?.key===viewKey)main.replaceChildren(note(`Last-known view is stale (read ${lastView.observed}): ${e.message}`),...lastView.nodes,button('Retry read',()=>render()));else main.replaceChildren(heading('Unable to load this view'),note(e.message),button('Retry read',()=>render()),link('Asset library','/assets'));}}
 }
 async function bootstrap(){
   try{

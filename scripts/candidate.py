@@ -34,7 +34,7 @@ def main():
     binary_sha = hashlib.sha256((stage / "bin" / executable).read_bytes()).hexdigest()
     (stage / "SHA256SUMS").write_text(f"{binary_sha}  bin/{executable}\n")
     manifest = {"source_sha": revision, "target": target, "version": version, "schema": 1,
-                "binary_sha256": binary_sha, "libc": platform.libc_ver(), "synthetic_provider_only": True,
+                "binary_sha256": binary_sha, "libc": platform.libc_ver() if sys.platform == "linux" else ("", ""), "synthetic_provider_only": True,
                 "embedded_ui": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted((ROOT / "web").iterdir()) if p.is_file()}}
     (stage / "candidate.json").write_text(json.dumps(manifest, indent=2) + "\n")
     archive = dist / f"{name}.tar.gz"
