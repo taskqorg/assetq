@@ -58,7 +58,7 @@ const items = data => Array.isArray(data) ? data : data.items || [];
 function pageLink(path, data, params = {}) { return data.next ? el('p', {class: 'paging'}, link('Next page →', path, {...params, after: data.next})) : null; }
 function preview(object, compact = false) {
   const box = el('div', {class: compact ? 'thumb' : 'preview'});
-  const fallback = () => box.replaceChildren(el('div', {class: 'file-fallback'}, object.content_type, compact ? null : el('small', {}, 'Preview unavailable; download the original.')));
+  const fallback = () => box.replaceChildren(el('div', {class: 'file-fallback', title: object.content_type}, compact ? 'File' : object.content_type, compact ? null : el('small', {}, 'Preview unavailable; download the original.')));
   if (object.content_type !== 'image/png' && object.content_type !== 'model/gltf-binary') { fallback(); return box; }
   const img = el('img', {src: url(`/browser/v1/objects/${encodeURIComponent(object.id)}/preview`), alt: object.provenance?.name || `Retained PNG ${object.id}`, loading: 'lazy', onerror: fallback});
   box.append(img); return box;
@@ -120,7 +120,7 @@ async function assets(params, token, id) {
   const rows = items(page).map(o => el('article', {class: 'asset-row' + (o.id === selected ? ' selection' : '')}, preview(o, true),
     el('div', {}, link(objectName(o), '/assets', {q, type, after, selected: o.id}), el('small', {}, `${o.id} / ${o.size.toLocaleString()} bytes`)),
     el('div', {}, o.content_type, el('small', {}, `${o.kind} / ${o.acceptance}`))));
-  const library = el('section', {}, el('div', {class: 'table-list'}, el('div', {class: 'asset-row asset-head'}, '', 'Asset', 'Type / acceptance'), rows.length ? rows : note('No matching assets. Clear the filters or submit an authorized request.')), pageLink('/assets', page, {q, type}));
+  const library = el('section', {}, el('div', {class: 'table-list'}, el('div', {class: 'asset-row asset-head'}, el('span', {'aria-hidden': 'true'}), el('span', {}, 'Asset'), el('span', {}, 'Type / acceptance')), rows.length ? rows : note('No matching assets. Clear the filters or submit an authorized request.')), pageLink('/assets', page, {q, type}));
   let detail = selected ? await assetDetail(selected, token).catch(e => panel(note(e.message))) : panel(el('h2', {}, 'Select an asset'), el('p', {class: 'muted'}, 'Preview, provenance, source relationships and download stay beside your search.'));
   return [heading('Assets', link('New generation', '/jobs/new')), el('p', {class: 'muted'}, 'Find retained originals, renders and their source relationships.'), filter, el('div', {class: 'workspace'}, library, el('aside', {class: 'detail', 'aria-label': 'Selected asset'}, detail))];
 }
