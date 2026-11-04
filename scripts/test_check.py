@@ -4,6 +4,7 @@ import tempfile
 import queue
 import threading
 import sys
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +12,13 @@ import check
 
 
 class GateTrust(unittest.TestCase):
+    def test_timeout_retains_partial_command_evidence(self):
+        # R8: a stalled check must identify the last observed work, not discard it.
+        with self.assertRaises(subprocess.TimeoutExpired) as error:
+            check.run(sys.executable, "-u", "-c",
+                      "import time; print('invented stalled fixture', flush=True); time.sleep(10)", timeout=2)
+        self.assertIn("invented stalled fixture", error.exception.stdout or "")
+
     def test_background_child_cannot_hold_command_output_open(self):
         # R8: pg_ctl exits while its background server retains stdout.
         with tempfile.TemporaryDirectory() as directory:

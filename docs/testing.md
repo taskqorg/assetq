@@ -25,6 +25,8 @@ Windows runs unrelated Rust fixtures sequentially; concurrency cases retain thei
 
 The cancellation-order fixture's EOF marker precedes Python process exit. After asserting EOF and cancellation order, directory cleanup waits at most three seconds only for Windows sharing violation 32 to clear. This does not repeat the test or relax its success/work-error/cleanup-error assertions.
 
+On command timeout, the gate retains partial output and the failed command/deadline. The 480-second Rust command limit and 600-second canonical budget are unchanged; timeout is a failure, never a pass.
+
 ## Protected risks
 
 - R3/R5: project-scoped jobs, attachment/download access, method versions, comparisons and recommendation promotion; caller names never become storage paths.
