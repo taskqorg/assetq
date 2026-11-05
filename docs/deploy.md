@@ -104,6 +104,6 @@ Report deferred/unobserved backup and restoration as unknown with their scope an
 
 ## Pipe hostname cutover
 
-Publish only `pipe.ufobe.com` through the verified existing pds18 Caddy guard and loopback service. Remove the previous Pipe site on `assets.ufobe.com` without a redirect; Pipe must not serve that name. Preserve unrelated DNS records, sites and services. Retain exact prior named-site configuration, candidate identity and rollback before changes. Qualify TLS, sign-in, scoped API, canonical-origin/CSRF refusal and retained-asset retrieval on `pipe.ufobe.com`. Host-specific inputs and receipts belong to task #25, not this public repository.
+Publish only `pipe.ufobe.com` through the verified existing pds18 Caddy guard and loopback service. Remove the previous Pipe site on `assets.ufobe.com` without a redirect; Pipe must not serve that name. Preserve unrelated DNS records, sites and services. Retain exact prior named-site configuration, candidate identity and rollback before changes. Qualify TLS, sign-in, scoped API, canonical-origin/CSRF refusal and retained-asset retrieval on `pipe.ufobe.com`. Host-specific inputs and receipts belong to task #51, not this public repository.
 
 The package contains only `bin/pipe`. The deployment tool retains the exact existing unit executable path by making its existing verified copy there when required; it does not add a global `assetq` alias or edit the unit. The dedicated `assetq` account, database/role, unit, install/data roots and protected `ASSETQ_*` environment remain unchanged.

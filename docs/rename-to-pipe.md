@@ -10,14 +10,16 @@ The existing deployment tool copies the verified `bin/pipe` bytes to the exact e
 
 | Caller | Evidence and remaining observation |
 |---|---|
-| Existing pds18 service user unit | Prior PM inventory in [deployment operator](deployment-operator.md#inventory) establishes the unit shape and dedicated account. Task #25 must read back the exact live executable path before activation; it is not verified by this source change. |
-| Host operator scripts or additional executors | No live inventory is available in this worktree. Task #25 must enumerate them before claiming that every remaining `assetq` caller is covered. |
+| Existing pds18 service user unit | Prior PM inventory in [deployment operator](deployment-operator.md#inventory) establishes the unit shape and dedicated account. Task [#51](https://github.com/taskqorg/assetq/issues/51) must read back the exact live executable path before activation; it is not verified by this source change. |
+| Host operator scripts or additional executors | No live inventory is available in this worktree. Task #51 must enumerate them before claiming that every remaining `assetq` caller is covered. |
 | In-flight tasks #9 and #25 | Worktree paths remain unchanged. `assetq.md` remains a link to `pipe.md`; `scripts/deploy_assetq.py` keeps its path. Both tasks received a steer naming Pipe, the new origin and no-redirect requirement. |
 | Retained protected image operations | Keep the original pinned adapter, operation/slot identities, credentials boundary and receipt paths. R10 allows observation, cancellation, reconciliation, release and retained import only. New protected launch and qualification refuse. |
 
 ## Host cutover and evidence
 
-Task #25 owns private DNS/Caddy/guard readback and site-only rollback. Use the Pipe candidate's exact source, archive, executable and embedded UI digests. Preserve the dedicated `assetq` account/unit, database, environment and object root. Publish `pipe.ufobe.com` only; remove the prior Pipe site on `assets.ufobe.com` without a redirect. Prove TLS, authenticated browser/API entry, denied requests and retained payload hashes on `pipe.ufobe.com`.
+The owner chose merge then deploy on #42: the deployment tool requires green `merge_group` CI, so #42 closes on source and #51 owns the live site and caller list after it merges. Until #51 closes, `pipe.ufobe.com` is not deployed and the caller list above stays unverified.
+
+Task #51 owns private DNS/Caddy/guard readback and site-only rollback. Use the Pipe candidate's exact source, archive, executable and embedded UI digests. Preserve the dedicated `assetq` account/unit, database, environment and object root. Publish `pipe.ufobe.com` only; remove the prior Pipe site on `assets.ufobe.com` without a redirect. Prove TLS, authenticated browser/API entry, denied requests and retained payload hashes on `pipe.ufobe.com`.
 
 This worker's existing `pds18` SSH alias did not resolve, and the HTTPS connection to `pipe.ufobe.com` timed out. Neither is a host qualification or proof of an application failure. Activation, live callers, DNS/TLS/sign-in and real browser journeys remain unverified until private host readback. Do not infer that source or fixture checks deployed the candidate.
 
@@ -29,7 +31,7 @@ The repository is still `taskqorg/assetq`; this deliverable does not rename it o
 - Change tracked `taskq.json` from `taskqorg/assetq` to `taskqorg/pipe`, and reconcile the corresponding host project registration/configuration on every registered host. Verify each host resolves the same board before admitting new work.
 - Update `REPO` in `scripts/deploy_assetq.py`, CI/release consumers and artifact lookup references. The workflow artifact is already `pipe-candidate`.
 - Update board links and cross-project dependencies, PM bookmarks and future task/commit references. Preserve historical issue, commit and evidence links through the repository redirect; do not rewrite immutable receipts or published history.
-- Read back the moved board, open tasks #9/#25/#42, active attempt ownership, publication route and remote origin. A local Git rename never proves host adoption or board migration.
+- Read back the moved board, open tasks #9/#42/#51, active attempt ownership, publication route and remote origin. A local Git rename never proves host adoption or board migration.
 
 ## Verification boundary
 
