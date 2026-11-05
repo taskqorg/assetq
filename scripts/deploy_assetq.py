@@ -115,14 +115,17 @@ def load_target(path):
     required = {"ssh_alias", "service_account", "service_uid", "executable", "install_root", "unit", "port", "data_root",
                 "expected", "status_env_files",
                 "min_install_free_bytes", "min_data_free_bytes", "health_timeout_seconds"}
-    if not isinstance(target, dict) or set(target) != required:
-        raise Refused(f"target file must have exactly these fields: {sorted(required)}")
+    if not isinstance(target, dict) or set(target) - {"ssh_user"} != required:
+        raise Refused(f"target file must have these fields: {sorted(required)}; optional: ssh_user")
     expected = target["expected"]
     if not isinstance(expected, dict) or set(expected) != {"hostname", "machine_id_sha256", "ssh_host_key_sha256"} \
             or not all(isinstance(v, str) and v for v in expected.values()):
         raise Refused("target expected identity must name hostname, machine_id_sha256 and ssh_host_key_sha256")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", str(target["ssh_alias"])):
         raise Refused("target ssh_alias is not a plain SSH alias")
+    if "ssh_user" in target and (not isinstance(target["ssh_user"], str)
+                                 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.-]*", target["ssh_user"])):
+        raise Refused("target ssh_user is not a plain SSH username")
     if not re.fullmatch(r"[a-z0-9][a-z0-9@._-]*\.service", str(target["unit"])):
         raise Refused("target unit is not a service name")
     if not re.fullmatch(r"[a-z_][a-z0-9_-]*", str(target["service_account"])):
@@ -307,8 +310,10 @@ class Host:
 
     def run(self, script, stdin_path=None, timeout=120):
         remote = "sh -c " + shlex.quote(script)
-        argv = SSH + ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10",
-                      self.target["ssh_alias"], remote]
+        argv = SSH + ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"]
+        if "ssh_user" in self.target:
+            argv += ["-l", self.target["ssh_user"]]
+        argv += [self.target["ssh_alias"], remote]
         stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
         try:
             result = subprocess.run(argv, stdin=stdin, capture_output=True, timeout=timeout)

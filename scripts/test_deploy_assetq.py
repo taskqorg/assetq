@@ -440,6 +440,49 @@ class Plan(Fixture):
             deploy.Host(self.target).run("true")
         self.assertEqual(recorded[0][:7], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"])
         self.assertTrue(recorded[0][-1].startswith("sh -c "))
+        self.assertEqual(recorded[0][7:-1], ["invented-alias"])
+        for user in ["root", "invented.operator", "_Operator-1"]:
+            with self.subTest(user), patch.object(deploy.subprocess, "run", record), patch.object(deploy, "SSH", ["ssh"]):
+                target = dict(self.target, ssh_user=user)
+                path = self.base / "target.json"
+                path.write_text(json.dumps(target))
+                deploy.Host(deploy.load_target(path)).run("true")
+                self.assertEqual(recorded[-1], recorded[0][:7] + ["-l", user, "invented-alias", recorded[0][-1]])
+
+    def test_invalid_ssh_user_refuses_before_any_host_contact(self):
+        # #34 A1-A3: target text cannot supply SSH options or remote shell syntax.
+        before = self.snapshot()
+        for user in [None, True, 123, [], {}, "", " root", "root\n", "-root", "0root", "root@host",
+                     "root -o StrictHostKeyChecking=no", "root;id", "$(id)", "`id`", "root/other", "r\u00f8ot"]:
+            with self.subTest(user):
+                self.assertEqual(self.plan(target=dict(self.target, ssh_user=user)), deploy.EXIT_REFUSED)
+                self.assertIn("ssh_user", self.stderr)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(self.ssh_log(), "")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_explicit_ssh_user_survives_plan_apply_and_rollback_without_bypassing_root(self):
+        # #34 A2-A3: the requested user never substitutes for observed remote UID.
+        self.target["ssh_user"] = "root"
+        (self.state / "operator_uid").write_text("1000\n")
+        self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
+        self.assertIn("operator SSH must reach the host as root", self.stderr)
+        self.assertFalse(self.out.exists())
+        (self.state / "operator_uid").write_text("0\n")
+        before = self.preserved()
+        with patch.object(deploy.subprocess, "run", wraps=subprocess.run) as run:
+            plan = self.planned()
+            self.assertEqual(plan["target"], self.target)
+            self.assertEqual(self.apply(plan, "--dry-run"), 0, self.stderr)
+            self.assertEqual(self.apply(plan), 0, self.stderr)
+            self.assertEqual(self.rollback(plan), 0, self.stderr)
+        ssh_calls = [call.args[0] for call in run.call_args_list if call.args[0][:len(deploy.SSH)] == deploy.SSH]
+        self.assertTrue(ssh_calls)
+        for argv in ssh_calls:
+            self.assertEqual(argv[len(deploy.SSH):-1], ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                                                      "-o", "ConnectTimeout=10", "-l", "root", "invented-alias"])
+        self.assertEqual(self.link("current"), OLD)
+        self.assertEqual(self.preserved(), before)
 
     def test_unverifiable_or_incompatible_host_refuses(self):
         def not_root(s): (s / "operator_uid").write_text("1000\n")
