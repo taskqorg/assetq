@@ -24,6 +24,8 @@ The last command starts a disposable PostgreSQL cluster and filters Rust tests b
 
 Windows fixtures accept the same binaries with `.exe` suffixes and use a loopback-only temporary port instead of a Unix socket. Image worker development uses `cargo test --locked --lib image_worker` and `python3 scripts/check.py --test image_worker`; the filtered gate includes `python3 scripts/test_qualify_image.py` for the bounded operator driver.
 
+The deployment fixtures require POSIX `sh` and its tools on PATH. On Windows with Git for Windows installed at its default location, prepend `C:\Program Files\Git\usr\bin` to the current process PATH before running the gate. This uses the installed tools without changing the host PATH or skipping deployment checks.
+
 Windows runs unrelated Rust fixtures sequentially; concurrency cases retain their explicit competing callers. The slow-import fixture measures a real guarded metadata transaction, bounds its calibrated lease to ten seconds, and keeps both fetch and stream slower than that lease. Its forced-expiry, no-commit, attempts, submission and replay assertions remain unchanged. This calibrates the check; it does not qualify 250 ms production leases on Windows.
 
 The cancellation-order fixture's EOF marker precedes Python process exit. After asserting EOF and cancellation order, directory cleanup waits at most three seconds only for Windows sharing violation 32 to clear. The catalogue fixture closes its owned Runtime after cancellation and uses the same bounded cleanup. This does not repeat either test or relax its success/work-error/cleanup-error or matching-catalogue assertions.
