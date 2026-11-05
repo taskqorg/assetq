@@ -53,8 +53,6 @@ PM note 6646983048 reports an R4/R9 defect on `1cfeb654e9a6ffa85c61c3e8dbac4e366
 Before the fix, the new `scripts/test_web.cjs` component case failed with `model/gltf-binary: loading/unavailable is not a retained render`. After the fix, all five Node cases and JavaScript syntax pass. The actual shared preview handler now appends the retained-render caption only on model-image load, removes it with the preview on error and leaves the original download unchanged. The case covers missing/failed previews, successful/repeated load, PNG and unsupported types, and compact thumbnails without inferring relationships from MIME or inventing outputs. Existing assertions and provider/no-replay guards are unchanged. The canonical gate already runs this Node runner; no separate dependency or browser harness was added.
 
 These are component observations with invented metadata and simulated image events, not a new real-browser, retained-record, host-auth or visual acceptance receipt. PM/#25 must requalify the exact refreshed Linux binary/UI. Canonical and artifact outcomes are recorded on the task against the final source identity, never inherited from `1cfeb65`. A2-A8, text scaling, live TLS/sign-in and managed-record journeys remain open until their respective receipts exist; backup/restore stays deferred/unknown.
-<<<<<<< HEAD
-=======
 
 ## Reviewed-source publication handoff
 
@@ -65,4 +63,3 @@ Fresh unchanged Windows `python3 scripts/check.py` with the 480-second Cargo dea
 After merge, the publication reviewer/service handoff to #25 must bind the result commit, main/source commit and tree, merge-group run, GitHub artifact ID/digest, inner archive name/SHA-256, `candidate.json` source, executable SHA-256 and all four embedded UI SHA-256 values. Verify downloaded checksums, source documents/UI blobs and embedded executable bytes; keep temporary PR sources distinct from the delivered source even if binaries match. Record these revision-specific receipts on #32 and #25 rather than committing a self-referential publication identity here.
 
 Code delivery does not close #9 or #25. Canonical sign-in, managed image/3D and denied-access journeys, full browser/state/text-scaling coverage and final site acceptance remain with those tasks. Backup/restore remains deferred/unknown. This publication grants no host, DNS, Caddy, secret, credential, grant, model/account, provider, LIVE deployment or security-policy effect. Functional defects return to source owner #9; final acceptance stays intact (R3/R4/R8/R9).
->>>>>>> origin/main
