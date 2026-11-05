@@ -476,10 +476,9 @@ mod tests {
             account_home: absent.clone(),
             approver: String::new(),
         };
-        for error in [
-            super::launch(&absent, &absent, launch).err().unwrap(),
-            prepare_launch(&absent, &absent, "invented", &absent).err().unwrap(),
-        ] {
+        for error in
+            [super::launch(&absent, &absent, launch).err().unwrap(), prepare_launch(&absent, &absent, "invented", &absent).err().unwrap()]
+        {
             assert!(error.contains("legacy TaskQ adapter is recovery-only"), "{error}");
         }
         // Off Mac, qualify keeps its platform refusal; the qualification test below guards it.
