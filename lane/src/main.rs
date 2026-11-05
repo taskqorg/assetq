@@ -532,6 +532,8 @@ impl Lane {
         let code_or_none = |value: &Option<String>| value.clone().filter(|v| is_code(v));
         let caller = Caller { project: project.clone(), label: code_or_none(&label), runtime: code_or_none(&runtime) };
         let step = if operation == "web_search" { "tavily.search" } else { "tavily.extract" };
+        // Read the body before any refusal: closing on unread bytes resets the connection and loses the caller's reason.
+        let collected = Limited::new(request.into_body(), REQUEST_BYTES).collect().await;
         let answer = if project.is_none() {
             refusal(StatusCode::UNAUTHORIZED, "refused", "unauthenticated", "a valid project token is required")
         } else if caller.label != label || caller.runtime != runtime {
@@ -542,7 +544,7 @@ impl Lane {
                 "X-Pipe-Task and X-Pipe-Runtime hold at most 64 characters of A-Za-z0-9._:-",
             )
         } else {
-            match Limited::new(request.into_body(), REQUEST_BYTES).collect().await.map(|b| serde_json::from_slice::<Value>(&b.to_bytes())) {
+            match collected.map(|b| serde_json::from_slice::<Value>(&b.to_bytes())) {
                 Ok(Ok(Value::Object(mut body))) if body.contains_key(field) => {
                     // The caller never selects a key, and every call reports its credits.
                     body.remove("api_key");
@@ -743,7 +745,8 @@ fn enroll_command(config: &Config, destination: &str) -> Res<()> {
     let connection = config.coreq_connection.as_ref().ok_or("config coreq_connection is required")?;
     let request = enroll::Request {
         installation: None,
-        product: "pipe-read",
+        // DashQ grants by its product allowlist, where Pipe's shipper is `assetq`; each record still names `pipe-read`.
+        product: "assetq",
         host_label: &config.host,
         schemas: &[OBSERVATION_SCHEMA],
         scope: None,

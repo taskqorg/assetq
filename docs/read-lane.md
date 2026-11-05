@@ -69,7 +69,7 @@ Re-enable a disabled key after fixing it at the provider. This restart drains; c
 sed -i '/^<key id>$/d' /var/lib/pipe-read/disabled-keys && systemctl restart pipe-read.service
 ```
 
-Rotate keys: edit `tavily-keys`, restart, then take a new encrypted copy. Connect telemetry once, with owner approval in the browser, as user `pipe-read`: `pipe-read enroll /etc/pipe-read/config.json https://dash.ufobe.com/machine`. Only `POST /machine/*` passes DashQ's guard without a browser session.
+Rotate keys: edit `tavily-keys`, restart, then take a new encrypted copy. Connect telemetry once, with owner approval in the browser, as user `pipe-read`: `pipe-read enroll /etc/pipe-read/config.json https://dash.ufobe.com/machine`. Only `POST /machine/*` passes DashQ's guard without a browser session. The grant uses DashQ's shipper product `assetq` and needs DashQ at `596cd2a` or later; records still name `pipe-read`.
 
 Reconcile usage: `systemctl start pipe-read-reconcile.service`, then read its journal. The first run records the baseline per key; each later run prints `tavily_delta`, `recorded` and `difference` per key, `calls_without_units`, and `runtimes`, the recorded calls per caller runtime. Any other client sharing a key shows up as a positive difference, so the check needs keys that only the lane uses, or an accounted difference.
 

@@ -100,11 +100,13 @@ fn write_snapshot(dir: &Path, grants: &[(&str, &str)]) {
 
 impl Fixture {
     fn new(url: &str, keys: &[&str], extra: Value) -> Self {
-        let dir = std::env::temp_dir().join(format!("pipe-read-{}-{}", std::process::id(), NEXT.fetch_add(1, SeqCst)));
+        let serial = NEXT.fetch_add(1, SeqCst);
+        let dir = std::env::temp_dir().join(format!("pipe-read-{}-{serial}", std::process::id()));
         std::fs::create_dir_all(dir.join("cred")).unwrap();
         std::fs::write(dir.join("cred/tavily-keys"), keys.join("\n")).unwrap();
         write_snapshot(&dir, &[(TOKEN, "invented/project")]);
-        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        // Below the ephemeral range: a freed port :0 could go to a parallel test's listener before the lane binds it.
+        let port = 20000 + (std::process::id() % 9000) as u16 + serial as u16;
         let mut config = json!({"listen": format!("127.0.0.1:{port}"), "host": "invented-host", "snapshot": dir.join("snapshot.json"),
                                 "state_dir": dir.join("state"), "provider_url": url});
         for (name, value) in extra.as_object().unwrap() {
