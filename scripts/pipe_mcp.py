@@ -46,13 +46,23 @@ def config_path():
     return Path.home() / ".config/pipe/read.json"
 
 
+def access_headers(path):
+    """Guard headers from a shell env file, read at use so that its values are never copied."""
+    names = {"CF_ACCESS_CLIENT_ID": "CF-Access-Client-Id", "CF_ACCESS_CLIENT_SECRET": "CF-Access-Client-Secret"}
+    values = dict(line.removeprefix("export ").strip().split("=", 1) for line in Path(path).read_text().splitlines() if "=" in line)
+    return {header: values[name].strip("'\"") for name, header in names.items()}
+
+
 def call_pipe(config, runtime, tool, arguments):
     headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json", "X-Pipe-Runtime": runtime}
     task = os.environ.get("PIPE_TASK") or os.environ.get("TASKQ_TASK")
     if task:
         headers["X-Pipe-Task"] = task
-    for name, value in config.get("access_headers", {}).items():
-        headers[name] = value
+    if "access_file" in config:
+        try:
+            headers.update(access_headers(config["access_file"]))
+        except (OSError, KeyError, ValueError) as error:
+            return True, f"Pipe {tool} failed: access file {config['access_file']} is unusable: {type(error).__name__}"
     request = urllib.request.Request(f"{config['url']}/v1/read/{tool}", json.dumps(arguments).encode(), headers)
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as reply:
@@ -134,7 +144,8 @@ def install(arguments):
         raise SystemExit("--url must be https, or http on loopback")
     config = {"url": url, "token": Path(options["--token-file"]).read_text().strip()}
     if "--access-file" in options:
-        config["access_headers"] = json.loads(Path(options["--access-file"]).read_text())
+        config["access_file"] = str(Path(options["--access-file"]).resolve())
+        access_headers(config["access_file"])
     target = Path.home() / ".local/share/pipe/mcp.py"
     target.parent.mkdir(parents=True, exist_ok=True)
     if Path(__file__).resolve() != target.resolve():

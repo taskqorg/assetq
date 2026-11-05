@@ -31,6 +31,7 @@ Detail of [pipe.md § Read lane](../pipe.md#read-lane): routes, host layout, ope
 | `/etc/pipe-read/tavily-keys` | root, 0600 | One key per line; the unit reads it only through `LoadCredential` |
 | `/etc/pipe-read/config.json` | root:pipe-read, 0640 | See `deploy/read-lane/config.example.json` |
 | `/var/lib/pipe-read/` | pipe-read, 0750 | `telemetry.db`, `snapshot.good.json`, `disabled-keys`, `telemetry-lost`, `usage-baseline.json`, `coreq/` |
+| `/var/lib/pipe-read/alerts/` | pipe-read, 2770 | One file per unsent alert; `pipe-read-alert.path` sends each as user `hermes` and keeps it until the send succeeds |
 | `/var/lib/pipe-read-control/snapshot.json` | assetq:pipe-read, 0750 directory | Published by the control side, read by the lane |
 
 `pipe-read.socket` owns `127.0.0.1:8741`. The lane refuses a non-loopback listener. Public entry is only the `deploy/read-lane/Caddyfile.snippet` route inside the existing `pipe.ufobe.com` site, which requires owner approval like any other Caddy or guard change ([deployment](deployment-operator.md)).
@@ -78,7 +79,7 @@ Probe, on another host, from cron or a timer:
 read_lane_probe.py --url https://pipe.ufobe.com --state <file> --alert <existing alert command> --access-file <file>
 ```
 
-The access file is a JSON object of guard headers (`{"CF-Access-Client-Id": "...", "CF-Access-Client-Secret": "..."}`), mode 0600.
+The access file is a shell env file with `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET`, mode 0600. Clients read it at use and store only its path.
 
 ## Agent install
 

@@ -1,0 +1,9 @@
+[Unit]
+Description=Send spooled read lane alerts
+
+[Path]
+PathExistsGlob=/var/lib/pipe-read/alerts/*
+Unit=pipe-read-alert.service
+
+[Install]
+WantedBy=paths.target

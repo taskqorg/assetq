@@ -15,6 +15,13 @@ import urllib.error
 import urllib.request
 
 
+def access_headers(path):
+    """Guard headers from a shell env file, read at use so that its values are never copied."""
+    names = {"CF_ACCESS_CLIENT_ID": "CF-Access-Client-Id", "CF_ACCESS_CLIENT_SECRET": "CF-Access-Client-Secret"}
+    values = dict(line.removeprefix("export ").strip().split("=", 1) for line in Path(path).read_text().splitlines() if "=" in line)
+    return {header: values[name].strip("'\"") for name, header in names.items()}
+
+
 def observe(url, headers):
     """Returns None when healthy, else the reason. A probe failure is not proof the lane is down, so it says what it saw."""
     try:
@@ -34,7 +41,7 @@ def main():
     parser.add_argument("--alert", required=True)
     parser.add_argument("--access-file", type=Path)
     options = parser.parse_args()
-    headers = json.loads(options.access_file.read_text()) if options.access_file else {}
+    headers = access_headers(options.access_file) if options.access_file else {}
     reason = observe(options.url.rstrip("/"), headers)
     previous = options.state.read_text() if options.state.exists() else ""
     host = socket.gethostname()

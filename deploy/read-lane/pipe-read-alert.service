@@ -1,0 +1,10 @@
+# Runs as the existing alert path's own user, not root, because the lane user writes the spool.
+[Unit]
+Description=Send spooled read lane alerts through Hermes
+
+[Service]
+Type=oneshot
+User=hermes
+SupplementaryGroups=pipe-read
+ExecStart=/opt/pipe-read/bin/pipe-read-alert send
+NoNewPrivileges=true

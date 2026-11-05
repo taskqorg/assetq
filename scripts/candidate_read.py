@@ -23,7 +23,7 @@ def main():
     (stage / "bin").mkdir(parents=True)
     shutil.copy2(ROOT / "lane/target/release/pipe-read", stage / "bin/pipe-read")
     shutil.copytree(ROOT / "deploy/read-lane", stage / "deploy/read-lane")
-    for script in ["read_lane_backup.sh", "read_lane_restore.sh", "read_lane_probe.py", "pipe_mcp.py"]:
+    for script in ["read_lane_backup.sh", "read_lane_restore.sh", "read_lane_probe.py", "read_lane_alert.sh", "pipe_mcp.py"]:
         (stage / "scripts").mkdir(exist_ok=True)
         shutil.copy2(ROOT / "scripts" / script, stage / "scripts" / script)
     archive = dist / f"{name}.tar.gz"

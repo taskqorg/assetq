@@ -1,0 +1,35 @@
+#!/bin/sh
+# Lane alert delivery. The lane's sandbox cannot run Hermes, so it spools one file per alert and a path unit sends it.
+# usage: pipe-read-alert spool <message> (as pipe-read, the config's alert_command) | pipe-read-alert send (as hermes, from the unit)
+set -eu
+spool=${PIPE_READ_ALERT_SPOOL:-/var/lib/pipe-read/alerts}
+deliver() {
+    if [ -n "${PIPE_READ_ALERT_SENDER:-}" ]; then
+        "$PIPE_READ_ALERT_SENDER"
+    else
+        /home/hermes/.local/bin/hermes send -t 'telegram:Tight Monitoring' -q -f -
+    fi
+}
+case ${1:-} in
+spool)
+    umask 007
+    temporary=$spool/.$$
+    printf '%s\n' "$2" > "$temporary"
+    # The dot-prefixed name keeps the path unit from sending a half-written file.
+    mv "$temporary" "$spool/$(date +%s%N)-$$"
+    ;;
+send)
+    for file in "$spool"/*; do
+        [ -e "$file" ] || exit 0
+        if ! deliver < "$file"; then
+            sleep "${PIPE_READ_ALERT_RETRY_SECONDS:-60}" # The file stays, the path unit starts this again: one retry a minute.
+            exit 1
+        fi
+        rm -f "$file"
+    done
+    ;;
+*)
+    echo "usage: pipe-read-alert spool <message> | send" >&2
+    exit 2
+    ;;
+esac

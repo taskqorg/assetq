@@ -14,6 +14,7 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parent
 MCP = SCRIPTS / "pipe_mcp.py"
 PROBE = SCRIPTS / "read_lane_probe.py"
+ALERT = SCRIPTS.parent / "deploy/read-lane/pipe-read-alert"
 
 
 class Pipe(BaseHTTPRequestHandler):
@@ -80,6 +81,20 @@ class Mcp(Base):
     def call(self, env, name="web_search", arguments=None):
         message = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": arguments or {"query": "q"}}}
         return self.session(env, message)[0]["result"]
+
+    def test_access_values_stay_in_their_file(self):
+        # Risk: the guard secret copied into the client's config, or a stale copy after rotation.
+        env = self.install()
+        access = self.home / "access.env"
+        access.write_text("CF_ACCESS_CLIENT_ID=invented-id\nCF_ACCESS_CLIENT_SECRET=invented-secret\n")
+        subprocess.run([sys.executable, str(MCP), "install", "--url", self.url, "--token-file", str(self.home / "token"), "--access-file", str(access)], check=True, env=env, capture_output=True)
+        self.assertNotIn("invented-secret", (self.home / ".config/pipe/read.json").read_text())
+        self.assertFalse(self.call(env)["isError"])
+        self.assertEqual({k.lower(): v for k, v in Pipe.calls[0][1].items()}["cf-access-client-secret"], "invented-secret")
+        access.unlink()
+        result = self.call(env)
+        self.assertTrue(result["isError"])
+        self.assertIn("unusable", result["content"][0]["text"])
 
     def test_install_registers_each_runtime_and_leaves_others_alone(self):
         self.install()
@@ -165,6 +180,31 @@ class Probe(Base):
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.assertEqual(code, 1)
         self.assertIn("unreachable from this probe", alerts[0])
+
+
+class AlertSpool(Base):
+    # Risk: a lane alert lost because the sender failed, or sent from a half-written file.
+    def alert(self, *arguments, sender="true"):
+        (self.home / "spool").mkdir(exist_ok=True)
+        stub = self.home / "sender"
+        stub.write_text(f'#!/bin/sh\ncat >> {self.home}/sent\nexec {sender}\n')
+        stub.chmod(0o755)
+        env = dict(os.environ, PIPE_READ_ALERT_SPOOL=str(self.home / "spool"), PIPE_READ_ALERT_SENDER=str(stub), PIPE_READ_ALERT_RETRY_SECONDS="0")
+        return subprocess.run(["sh", str(ALERT), *arguments], env=env, capture_output=True, text=True).returncode
+
+    def test_a_failed_send_keeps_the_alert_and_a_good_one_clears_it(self):
+        self.assertEqual(self.alert("spool", "key disabled"), 0)
+        self.assertEqual(len(list((self.home / "spool").iterdir())), 1)
+        (self.home / "spool/.half-written").write_text("half")
+        self.assertEqual(self.alert("send", sender="false"), 1)
+        self.assertEqual(len(list((self.home / "spool").glob("[!.]*"))), 1, "the failed alert stays")
+        self.assertEqual(self.alert("send"), 0)
+        self.assertEqual(list((self.home / "spool").glob("[!.]*")), [])
+        self.assertEqual((self.home / "sent").read_text(), "key disabled\nkey disabled\n")
+
+    def test_an_empty_spool_sends_nothing(self):
+        self.assertEqual(self.alert("send"), 0)
+        self.assertFalse((self.home / "sent").exists())
 
 
 if __name__ == "__main__":
