@@ -12,7 +12,7 @@
 | Merge result | The merge queue runs that workflow as a `merge_group` event at the exact commit that becomes `main` | The tool requires a green `merge_group` run, not a branch or pull-request run |
 | Candidate | The run's `assetq-candidate` artifact holds `assetq-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz` and `SHA256SUMS` | The tool binds the artifact digest GitHub reports |
 | Repository automation | No self-hosted runners, deployment environments, Actions secrets or webhooks | The tool adds none. It only reads through the operator's existing `gh` login |
-| Host access | Existing root operator SSH alias and `known_hosts` entry | The tool uses `BatchMode=yes` and `StrictHostKeyChecking=yes`, so it never prompts, learns a new key or creates a key. It refuses a non-root login |
+| Host access | Existing operator SSH alias, optional explicit login user and `known_hosts` entry | The tool uses `BatchMode=yes` and `StrictHostKeyChecking=yes`, so it never prompts, learns a new key or creates a key. It refuses a non-root login |
 | Service manager | A systemd **user** unit under the dedicated service account, not a system unit. Root reaches it with `runuser -u <account> -- env XDG_RUNTIME_DIR=/run/user/<uid> systemctl --user ...` | The target binds account, UID and unit. All lifecycle and transient commands use that shape; `systemctl restart <unit>` at system level would not reach this unit |
 | Service command | The unit runs `<install_root>/current/<executable> serve --listen 127.0.0.1:<port>`, possibly behind a resource wrapper, with one protected environment file | The plan binds the whole command and refuses any other shape instead of adapting to it |
 | Releases | `current` is an absolute symlink to `<install_root>/releases/<executable-sha256>` | New releases use the same name and pointer form |
@@ -42,6 +42,7 @@ It has no code path for DNS, Caddy, sign-in or access guards, firewalls, grants,
 ```json
 {
   "ssh_alias": "invented-alias",
+  "ssh_user": "invented-operator",
   "service_account": "invented-account",
   "service_uid": 12345,
   "executable": "bin/assetq",
@@ -60,6 +61,12 @@ It has no code path for DNS, Caddy, sign-in or access guards, firewalls, grants,
   "health_timeout_seconds": 60
 }
 ```
+
+`ssh_alias` remains a plain alias, never `user@host`. Optional `ssh_user` selects an existing operator login with separate SSH arguments `-l <user>`; omit it to preserve the alias's existing user selection.
+
+`ssh_user` must be a nonempty string matching `[A-Za-z_][A-Za-z0-9_.-]*`. Null, whitespace, option syntax and shell expressions refuse before any SSH call.
+
+This selects a username only: it changes no credentials, SSH configuration, trust pins or permissions. The actual remote UID must still be zero, and all expected host-identity and deploy/rollback checks remain required under R3.
 
 Obtain the `expected` identity independently of this tool. `executable` is the path inside a release that the unit runs. A release always keeps `bin/assetq`; when the unit expects another path, the tool adds a verified copy there and does not edit the unit.
 

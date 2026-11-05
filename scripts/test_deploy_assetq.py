@@ -87,11 +87,15 @@ exec sh -c "$remote"
 }
 
 
+# The bytes the service really sends: `serde_json::to_vec_pretty` in `src/api.rs`, with no final newline.
+HEALTH = '{\n  "service": "up",\n  "version": "0.1.0",\n  "database": "ok"\n}'
+
+
 def executable(health="ok", selftest=0, start=0, integrity="integrity", migrate=0, marker="candidate", ui=True):
     """An invented service executable; `integrity` names the state file its restore-check reads."""
     embedded = "".join(f"# {data.decode()}" for data in UI.values()) if ui else ""
     health_case = ('cat "$FIXTURE/state/old_health"' if health == "state"
-                   else 'echo \'{"service":"up","version":"0.1.0","database":"ok"}\'' if health == "ok"
+                   else f"printf '%s' '{HEALTH}'" if health == "ok"
                    else "exit 7")
     return (f'#!/bin/sh\n# {marker}\n{embedded}case "$1" in\n'
             f'selftest) exit {selftest} ;;\nstart) exit {start} ;;\nhealth) {health_case} ;;\n'
@@ -237,7 +241,7 @@ class Fixture(unittest.TestCase):
                             ("exec", f"{self.posix}/host/opt/current/bin/assetq serve --listen 127.0.0.1:8740\n"),
                             ("integrity", json.dumps(counts)),
                             ("integrity_low", json.dumps(dict(counts, blobs=1))),
-                            ("old_health", '{"service":"up","version":"0.1.0","database":"ok"}\n'),
+                            ("old_health", HEALTH),
                             ("ops", json.dumps({"jobs": {"by_phase": {"succeeded": 2}, "uncertain_submissions": 0, "leased": 0}}))]:
             (self.state / name).write_text(value)
         self.sh_run(f'cd {self.posix}/host/opt && ln -s {self.posix}/host/opt/releases/{OLD} current && ln -s {self.posix}/host/opt/releases/{OLD}/bin/assetq {self.posix}/host/proc/100/exe')
@@ -440,6 +444,49 @@ class Plan(Fixture):
             deploy.Host(self.target).run("true")
         self.assertEqual(recorded[0][:7], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"])
         self.assertTrue(recorded[0][-1].startswith("sh -c "))
+        self.assertEqual(recorded[0][7:-1], ["invented-alias"])
+        for user in ["root", "invented.operator", "_Operator-1"]:
+            with self.subTest(user), patch.object(deploy.subprocess, "run", record), patch.object(deploy, "SSH", ["ssh"]):
+                target = dict(self.target, ssh_user=user)
+                path = self.base / "target.json"
+                path.write_text(json.dumps(target))
+                deploy.Host(deploy.load_target(path)).run("true")
+                self.assertEqual(recorded[-1], recorded[0][:7] + ["-l", user, "invented-alias", recorded[0][-1]])
+
+    def test_invalid_ssh_user_refuses_before_any_host_contact(self):
+        # #34 A1-A3: target text cannot supply SSH options or remote shell syntax.
+        before = self.snapshot()
+        for user in [None, True, 123, [], {}, "", " root", "root\n", "-root", "0root", "root@host",
+                     "root -o StrictHostKeyChecking=no", "root;id", "$(id)", "`id`", "root/other", "r\u00f8ot"]:
+            with self.subTest(user):
+                self.assertEqual(self.plan(target=dict(self.target, ssh_user=user)), deploy.EXIT_REFUSED)
+                self.assertIn("ssh_user", self.stderr)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(self.ssh_log(), "")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_explicit_ssh_user_survives_plan_apply_and_rollback_without_bypassing_root(self):
+        # #34 A2-A3: the requested user never substitutes for observed remote UID.
+        self.target["ssh_user"] = "root"
+        (self.state / "operator_uid").write_text("1000\n")
+        self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
+        self.assertIn("operator SSH must reach the host as root", self.stderr)
+        self.assertFalse(self.out.exists())
+        (self.state / "operator_uid").write_text("0\n")
+        before = self.preserved()
+        with patch.object(deploy.subprocess, "run", wraps=subprocess.run) as run:
+            plan = self.planned()
+            self.assertEqual(plan["target"], self.target)
+            self.assertEqual(self.apply(plan, "--dry-run"), 0, self.stderr)
+            self.assertEqual(self.apply(plan), 0, self.stderr)
+            self.assertEqual(self.rollback(plan), 0, self.stderr)
+        ssh_calls = [call.args[0] for call in run.call_args_list if call.args[0][:len(deploy.SSH)] == deploy.SSH]
+        self.assertTrue(ssh_calls)
+        for argv in ssh_calls:
+            self.assertEqual(argv[len(deploy.SSH):-1], ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+                                                      "-o", "ConnectTimeout=10", "-l", "root", "invented-alias"])
+        self.assertEqual(self.link("current"), OLD)
+        self.assertEqual(self.preserved(), before)
 
     def test_unverifiable_or_incompatible_host_refuses(self):
         def not_root(s): (s / "operator_uid").write_text("1000\n")
@@ -471,6 +518,24 @@ class Plan(Fixture):
         self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
         self.assertIn("glibc", self.stderr)
 
+    def test_real_multi_line_health_body_plans(self):
+        self.assertEqual((self.state / "old_health").read_text().count("\n"), 4)
+        self.assertEqual(self.plan(), 0, self.stderr)
+
+    def test_host_value_spanning_lines_refuses_instead_of_truncating(self):
+        # getconf's second field reaches the host report, so each extra line stands for any multi-line value.
+        for extra in ("x 2.43", "x current_binary_sha256=forged", "x unknown=1"):
+            with self.subTest(extra):
+                (self.state / "libc").write_text(f"glibc 2.43\n{extra}\n")
+                self.assertEqual(self.plan(), deploy.EXIT_REFUSED, self.stdout)
+                self.assertIn("not one key=value per line", self.stderr)
+                self.assertFalse(self.out.exists())
+
+    def test_multi_line_service_observation_does_not_verify(self):
+        host = deploy.Host(self.target)
+        with patch.object(deploy.Host, "run", lambda *_a, **_k: (0, "ActiveState=active\nextra\nMainPID=100\nexe=x\nhealth=" + HEALTH + "\n", "")):
+            self.assertEqual(deploy.observe_service(host, "x", None, None), (None, "host output is not one key=value per line"))
+
     def test_lifecycle_uses_only_the_named_user_manager(self):
         # The host runs a user unit. A system-level call or another runtime directory must not work.
         self.target["service_uid"] = 1001
@@ -481,7 +546,7 @@ class Plan(Fixture):
         (self.state / "account_uid").write_text(f"{UID}\n")
         self.target["service_uid"] = UID
         self.assertEqual(deploy.Host(self.target).user_command("systemctl --user show"),
-                         f"runuser -u assetq -- env XDG_RUNTIME_DIR=/run/user/{UID} systemctl --user show")
+                         f"runuser -u assetq -- env XDG_RUNTIME_DIR=/run/user/{UID} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{UID}/bus systemctl --user show")
         self.assertEqual(deploy.subprocess.run([self.sh, "-c", "systemctl show"], capture_output=True).returncode, 1)
 
     def test_active_or_unknown_work_needs_a_reviewed_plan_record(self):
