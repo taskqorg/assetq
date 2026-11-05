@@ -1416,7 +1416,9 @@ fn management_pipe_identity_and_recovery_only() {
     let dir = std::env::temp_dir().join(format!("pipe-refused-{}", uuid::Uuid::new_v4()));
     let out = Command::new(bin()).args(["image-qualify", dir.to_str().unwrap()]).output().unwrap();
     assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("legacy TaskQ adapter is recovery-only"));
+    // Off Mac the platform refusal comes first; both refuse before any effect.
+    let expected = if cfg!(target_os = "macos") { "legacy TaskQ adapter is recovery-only" } else { "existing approved Mac Workspace" };
+    assert!(String::from_utf8_lossy(&out.stderr).contains(expected));
     assert!(!dir.exists(), "refusal must precede spool creation and TaskQ calls");
 }
 
