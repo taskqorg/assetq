@@ -420,13 +420,69 @@ pub fn get_object(c: &mut impl GenericClient, project: &str, id: &str) -> Result
 }
 
 pub fn list_objects(c: &mut impl GenericClient, project: &str, after: Option<&str>, limit: i64) -> Result<Value> {
+    search_objects(c, project, after, limit, "", "")
+}
+
+pub fn search_objects(
+    c: &mut impl GenericClient,
+    project: &str,
+    after: Option<&str>,
+    limit: i64,
+    query: &str,
+    kind: &str,
+) -> Result<Value> {
+    if query.chars().count() > 256
+        || kind.len() > 100
+        || (!kind.is_empty()
+            && !["image", "model", "text", "other"].contains(&kind)
+            && (!kind.contains('/') || kind.chars().any(|c| !c.is_ascii_graphic())))
+    {
+        return Err(Error::new(422, "bad_search", "bounded query and media type required"));
+    }
+    let query = query.to_lowercase();
     let rows = c.query(
-        &format!("SELECT {OBJECT_COLS} FROM objects WHERE project = $1 AND ($2::text IS NULL OR id > $2) ORDER BY id LIMIT $3"),
-        &[&project, &after, &limit],
+        &format!(
+            "SELECT {OBJECT_COLS} FROM objects WHERE project = $1 AND ($2::text IS NULL OR id > $2)
+          AND ($4 = '' OR strpos(lower(id || ' ' || coalesce(provenance->>'name','')), $4) > 0
+            OR EXISTS (SELECT 1 FROM jobs j WHERE j.id=objects.job_id AND j.project=$1
+              AND strpos(lower(coalesce(j.request->>'text','') || ' ' || j.method_id), $4) > 0))
+          AND ($5 = '' OR content_type = $5
+            OR ($5 IN ('image','model','text') AND split_part(content_type,'/',1) = $5)
+            OR ($5 = 'other' AND split_part(content_type,'/',1) NOT IN ('image','model','text')))
+          ORDER BY id LIMIT $3"
+        ),
+        &[&project, &after, &limit.clamp(1, 500), &query, &kind],
     )?;
     let items: Vec<Value> = rows.iter().map(object_json).collect();
     let next = (items.len() as i64 == limit).then(|| items.last().map(|v| v["id"].clone())).flatten();
     Ok(json!({"items": items, "next": next}))
+}
+
+pub fn related_objects(c: &mut Client, project: &str, id: &str, after: Option<&str>, limit: i64) -> Result<Value> {
+    let object = get_object(c, project, id)?;
+    let mut parents = Vec::new();
+    let mut outputs = Vec::new();
+    if let Some(job) = object["job_id"].as_str() {
+        let job = get_job(c, project, job)?;
+        for parent in job["request"]["attachments"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            parents.push(get_object(c, project, parent)?);
+        }
+        let result = job_result(c, project, job["id"].as_str().unwrap())?;
+        for output in result["manifest"]["items"].as_array().into_iter().flatten() {
+            outputs.push(get_object(c, project, output["object_id"].as_str().unwrap_or(""))?);
+        }
+    }
+    let rows = c.query(
+        &format!(
+            "SELECT {OBJECT_COLS} FROM objects WHERE project=$1 AND ($3::text IS NULL OR id > $3)
+          AND EXISTS (SELECT 1 FROM jobs j WHERE j.id=objects.job_id AND j.project=$1
+            AND j.request->'attachments' @> jsonb_build_array($2::text)) ORDER BY id LIMIT $4"
+        ),
+        &[&project, &id, &after, &limit.clamp(1, 500)],
+    )?;
+    let children: Vec<_> = rows.iter().map(object_json).collect();
+    let next = (children.len() as i64 == limit).then(|| children.last().map(|v| v["id"].clone())).flatten();
+    Ok(json!({"parents":parents,"outputs":outputs,"children":children,"next_children":next}))
 }
 
 pub fn set_acceptance(c: &mut Client, p: &Principal, id: &str, value: &str) -> Result<Value> {
@@ -460,6 +516,26 @@ fn method_json(r: &postgres::Row) -> Value {
     let name = format!("{}@{}", r.get::<_, String>(0), r.get::<_, i32>(1));
     let spec: Value = r.get(3);
     json!({"id": r.get::<_, String>(0), "version": r.get::<_, i32>(1), "status": r.get::<_, String>(2), "spec": spec, "created_at": r.get::<_, String>(4), "qualification": crate::registry::qualified_spec(&name, &spec)})
+}
+
+pub fn get_method(c: &mut impl GenericClient, project: &str, id: &str, version: &str) -> Result<Value> {
+    let v: i32 = version
+        .parse::<i32>()
+        .ok()
+        .filter(|v| *v > 0 && v.to_string() == version)
+        .ok_or_else(|| Error::new(422, "bad_method", "canonical positive method version required"))?;
+    let row = c.query_opt(
+        "SELECT id,version,status,spec,created_at::text FROM methods WHERE project=$1 AND id=$2 AND version=$3",
+        &[&project, &id, &v],
+    )?;
+    row.map(|r| method_json(&r)).ok_or_else(|| Error::new(404, "not_found", "no such method version in this project"))
+}
+
+pub fn job_by_key(c: &mut Client, project: &str, key: &str) -> Result<Value> {
+    let row = c
+        .query_opt("SELECT id FROM jobs WHERE project=$1 AND idempotency_key=$2", &[&project, &key])?
+        .ok_or_else(|| Error::new(404, "not_found", "no accepted job for this key in this project"))?;
+    get_job(c, project, &row.get::<_, String>(0))
 }
 
 pub fn filter_methods(c: &mut Client, project: &str, filters: &Value, after: &str, limit: i64) -> Result<Value> {

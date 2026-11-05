@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AssetQ — asset workspace</title>
+  <link rel="stylesheet" href="/ui/style.css">
+  <script src="/ui/requests.js" defer></script>
+  <script src="/ui/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to workspace</a>
+  <header><a class="brand" href="/assets">AssetQ</a><label>Project <select id="project" aria-label="Authorized project"></select></label><span id="identity"></span><button id="logout" type="button">End session</button></header>
+  <nav aria-label="Workspace" id="nav"></nav>
+  <main id="main" tabindex="-1"><p role="status">Loading authorized workspace…</p></main>
+  <noscript>The AssetQ workspace requires JavaScript. The scoped versioned API and CLI remain available.</noscript>
+</body>
+</html>
