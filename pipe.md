@@ -49,6 +49,26 @@ Apply the [specq design workflow](https://github.com/taskqorg/specq/blob/main/de
 
 The asset library uses a table with retained thumbnails and adjacent selected detail, with detail below the list on narrow screens. Browser routes, shared API extensions, session authority and the accepted visual reference are specified in [management design](docs/design/management-site.md) and [service](docs/service.md).
 
+## Read lane
+
+Agents read the web through Pipe. `web_search` and `web_extract` are one-step pipelines, served synchronously by a separate lane so that web reads survive loss of the generation and control side. Detail, units and exact commands: [read lane](docs/read-lane.md).
+
+- **Own binary and user.** `pipe-read` is a small binary built on tokio and hyper, running as a system unit under its own `pipe-read` user. It shares no process, user or database with the generation service. Provider keys reach it only through `LoadCredential`.
+- **No Postgres on the request path.** Requests authenticate against a last-known-good snapshot of project grants. The control side publishes that snapshot from PostgreSQL. A missing, corrupt or stale snapshot never stops the lane: it keeps serving the last valid one and reports its age. A revocation therefore takes effect only once the control side publishes again.
+- **Restart drain.** A stop finishes accepted requests. The socket unit keeps the listening port open across a restart, so a caller sees a delay, not a refusal.
+- **Bounded work.** Each provider has one warm client and one bounded queue. A full queue refuses at once with the reason `queue-full`; nothing waits unbounded.
+- **Keys.** Tavily keys rotate only on connection failure. Quota replies and 429 pass through to the caller unchanged, with no rotation. A 401, 402 or 403 disables that key, keeps it disabled across restarts and raises an alert; the current call returns the reason and later calls use the next enabled key. No usable key refuses with the reason `no-usable-key`.
+- **Authority.** A per-project token is stored only as a SHA-256 hash and grants web reads alone, never generation. On pds18 callers use loopback; other hosts come through the Cloudflare-guarded `pipe.ufobe.com` entry with `forward_auth` and still need the token. The task is an opaque label that Pipe records and never interprets or checks against a board.
+- **Records.** Each call records pipeline, revision, step, project, task, provider, duration, units and result through CoreQ. Recording never blocks a call. A record that cannot be queued or stored increments a persistent loss counter. Tavily usage reconciles against recorded units per key.
+
+**Operating rule.** The lane is live when a real call returns real results from pds18 and from another host. A probe on another host checks it and alerts through the host's existing alert path. Postgres, generation or dashboard outages do not count as lane outages and must not take it down. Disabled keys return to service only by an operator action.
+
+**Agent interface.** The MCP tools `web_search` and `web_extract` are thin Pipe clients with instructions for the agent. They hold a Pipe token, never a provider key, and have no stored-key fallback: a Pipe failure returns its reason to the agent. One command installs them per host for every runtime present. The separate `shared-search` server stays unchanged until a decision replaces it.
+
+**Restore runbook.** Keys and configuration live encrypted off-host with SOPS and age, using no paid service.
+
+Restoring on a clean host needs only that copy, the age identity held by the operator and the `pipe-read` release: decrypt, install the units, start the socket, then run one real call. [Read lane](docs/read-lane.md#restore) holds the exact steps; a restore counts only when its steps ran on a clean host or container from that copy alone.
+
 ## Versioned methods and recommendations
 
 Each method names its operation, supported inputs and outputs, provider/model/API and pipeline revisions, parameter schema, capability requirements, limitations, provenance and validation recipe. Adding or editing a method creates a version; running jobs retain their resolved version.
@@ -193,5 +213,6 @@ No Langfuse exporter is implemented. Job state and primary assets remain in Pipe
 - [Service](docs/service.md): lifecycle model, API, limits and immutable storage.
 - [Deployment](docs/deploy.md): candidate verification, host requirements, additive install and rollback.
 - [Management design](docs/design/management-site.md): browser scenarios, candidate references and acceptance gaps.
+- [Read lane](docs/read-lane.md): web read routes, host layout, operations, backup and restore.
 
 <!-- contract-budget: bytes=61440 lines=300 -->

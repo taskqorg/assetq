@@ -156,6 +156,21 @@ fn meshy_validation_retains_originals_without_success_manifest() {
     assert_eq!(f.fake().submissions(), 1);
 }
 
+/// Read lane A3, A5: the snapshot holds active hashes only, and revocation reaches the next publication.
+#[test]
+fn read_grant_snapshot_holds_hashes_and_honors_revocation() {
+    let f = fixture();
+    let mut c = f.client();
+    let token = db::create_read_grant(&mut c, "invented/project").unwrap();
+    assert!(db::create_read_grant(&mut c, "no-owner").is_err(), "a project is owner/repository");
+    let snapshot = db::read_snapshot(&mut c).unwrap();
+    assert_eq!(snapshot["grants"], json!([{"token_sha256": db::sha256_hex(token.as_bytes()), "project": "invented/project"}]));
+    assert!(!snapshot.to_string().contains(&token), "a snapshot never holds a token");
+    assert!(db::authenticate(&mut c, &token).is_err(), "a web-read token grants nothing on the generation API");
+    assert_eq!(db::revoke_read_grants(&mut c, "invented/project").unwrap(), 1);
+    assert_eq!(db::read_snapshot(&mut c).unwrap()["grants"], json!([]));
+}
+
 fn limits() -> db::Limits {
     db::Limits { quota_bytes: 1 << 30 }
 }

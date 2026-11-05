@@ -20,3 +20,10 @@ CREATE TABLE IF NOT EXISTS benchmark_scores (
   observed_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (comparison, sample)
 );
+-- Read lane grants: web reads only, never generation. Published to the lane as a snapshot (pipe.md § Read lane).
+CREATE TABLE IF NOT EXISTS read_grants (
+  hash text PRIMARY KEY CHECK (hash ~ '^[0-9a-f]{64}$'),
+  project text NOT NULL CHECK (project ~ '^[A-Za-z0-9._:-]+(/[A-Za-z0-9._:-]+)+$' AND length(project) <= 128),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  revoked_at timestamptz
+);

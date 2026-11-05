@@ -1,0 +1,9 @@
+# Inside the existing pipe.ufobe.com site block, before its other routes. Reuse the site's existing Cloudflare guard;
+# the bearer token still authenticates the project in the lane.
+@read_lane path /v1/read/* /healthz
+handle @read_lane {
+	forward_auth {$PIPE_READ_ACCESS_GUARD} {
+		uri /
+	}
+	reverse_proxy 127.0.0.1:8741
+}
