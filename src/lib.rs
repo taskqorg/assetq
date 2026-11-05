@@ -11,6 +11,7 @@ pub mod model;
 pub mod provider;
 pub mod registry;
 pub mod store;
+pub mod telemetry;
 pub mod traces;
 
 use std::path::PathBuf;

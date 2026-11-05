@@ -154,6 +154,128 @@ fn meshy_validation_retains_originals_without_success_manifest() {
     restarted.providers.push(Arc::new(MeshFixture(f.fake())));
     exec::tick(&mut c, &restarted, "restarted").unwrap();
     assert_eq!(f.fake().submissions(), 1);
+    // R11: the definitive refusal reads as one failed provider call and one failed step, by class only.
+    let rows = observations(&f);
+    let validate = named(&rows, "provider.validate");
+    assert_eq!((&validate[0]["outcome"], &validate[0]["error"]), (&json!("failed"), &json!("validation-failed")));
+    assert_eq!(validate[0]["runtime"], "meshy");
+    let step = named(&rows, "pipe.step").into_iter().find(|r| r["step"] == "validate").unwrap();
+    assert_eq!((&step["outcome"], &step["error"]), (&json!("failed"), &json!("validation-failed")));
+    assert!(!Value::Array(rows).to_string().contains("invented invalid GLB fixture"), "a raw reason never reaches a record");
+}
+
+fn observations(f: &Fixture) -> Vec<Value> {
+    let path = pipe::telemetry::path(&f.config(0).data_root);
+    let export = coreq::telemetry::Reader::open(&path).unwrap().export(0, 0, 1000).unwrap();
+    export["events"].as_array().unwrap().iter().map(|row| row["observation"].clone()).collect()
+}
+
+fn named(rows: &[Value], operation: &str) -> Vec<Value> {
+    rows.iter().filter(|r| r["operation"] == operation).cloned().collect()
+}
+
+fn traced(rows: &[Value], job: &str) -> Vec<Value> {
+    let trace = job.replace('-', "");
+    rows.iter().filter(|r| r["trace"] == trace.as_str()).cloned().collect()
+}
+
+// R4/R11 (pipe.md § Telemetry): generation steps, provider calls and service passes are CoreQ records
+// with metadata only; provider credits use units with unit_kind and a missing value reads null with a reason.
+#[test]
+fn telemetry_steps_provider_calls_and_service_passes_are_observations() {
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "telemetry-a", 10, 8);
+
+    // The real executor loop: service passes plus one reported charge.
+    let ctx = Arc::new(f.ctx(1 << 30));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (loop_ctx, loop_stop) = (ctx.clone(), stop.clone());
+    let executor = std::thread::spawn(move || exec::run_loop(loop_ctx, "telemetry-loop".into(), loop_stop));
+    let (j, _) = db::submit_job(&mut c, &p, &req("reported", json!({})), &limits(), FAKE).unwrap();
+    let reported = j["id"].as_str().unwrap().to_string();
+    let until = Instant::now() + Duration::from_secs(30);
+    while db::get_job(&mut c, "telemetry-a", &reported).unwrap()["phase"] != "succeeded" {
+        assert!(Instant::now() < until, "fixture job did not finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    stop.store(true, Ordering::Relaxed);
+    executor.join().unwrap();
+
+    // A lost reply and no reported usage.
+    f.fault("lose_reply");
+    let (j, _) = db::submit_job(&mut c, &p, &req("unreported", json!({"report_usage": false})), &limits(), FAKE).unwrap();
+    let unreported = j["id"].as_str().unwrap().to_string();
+    drive(&mut c, &ctx, "telemetry-a", &unreported, phase("succeeded"));
+
+    // A provider cancellation, confirmed and then unconfirmed.
+    let (j, _) = db::submit_job(&mut c, &p, &req("confirmed", json!({"polls": 100000})), &limits(), FAKE).unwrap();
+    let confirmed = j["id"].as_str().unwrap().to_string();
+    drive(&mut c, &ctx, "telemetry-a", &confirmed, phase("waiting"));
+    db::cancel_job(&mut c, "telemetry-a", &confirmed).unwrap();
+    drive(&mut c, &ctx, "telemetry-a", &confirmed, phase("cancelled"));
+    f.fault("cancel_unconfirmed");
+    let (j, _) = db::submit_job(&mut c, &p, &req("unconfirmed", json!({"polls": 100000})), &limits(), FAKE).unwrap();
+    let unconfirmed = j["id"].as_str().unwrap().to_string();
+    drive(&mut c, &ctx, "telemetry-a", &unconfirmed, phase("waiting"));
+    db::cancel_job(&mut c, "telemetry-a", &unconfirmed).unwrap();
+    drive(&mut c, &ctx, "telemetry-a", &unconfirmed, |j| j["cancel"] == "uncertain");
+
+    // A step paused by a full store resumes later: it reads retried, never ok or failed.
+    let (j, _) = db::submit_job(&mut c, &p, &req("paused", json!({})), &limits(), FAKE).unwrap();
+    let paused = j["id"].as_str().unwrap().to_string();
+    exec::tick(&mut c, &f.ctx(0), "full-store").unwrap();
+
+    let rows = observations(&f);
+    let job_rows = traced(&rows, &reported);
+    let steps: Vec<_> = named(&job_rows, "pipe.step").iter().map(|r| r["step"].as_str().unwrap().to_string()).collect();
+    assert_eq!(steps, ["provider.submit", "provider.import", "validate", "manifest"]);
+    for row in &job_rows {
+        assert_eq!(row["schema"], 1);
+        assert_eq!(row["product"], "pipe");
+        assert_eq!(row["project"], "pipe/telemetry-a");
+        assert_eq!(row["pipeline"], "synthetic.fake");
+        assert_eq!(row["pipeline_revision"], "1");
+        assert_eq!(row["runtime"], "synthetic.fake");
+        assert_eq!((&row["outcome"], &row["error"]), (&json!("ok"), &json!("none")));
+        assert_eq!(row["unknown"]["task"], "no-caller-context");
+        assert!(row["duration_us"].is_u64() && row["started_ms"].is_u64());
+    }
+    assert_eq!(job_rows.iter().filter(|r| r["kind"] == "stage").count(), 4);
+    for operation in ["provider.submit", "provider.poll", "provider.fetch"] {
+        assert!(named(&job_rows, operation).iter().all(|r| r["kind"] == "operation"), "{operation}");
+        assert!(!named(&job_rows, operation).is_empty(), "{operation}");
+    }
+    let done = named(&job_rows, "provider.poll").pop().unwrap();
+    assert_eq!((&done["units"], &done["unit_kind"]), (&json!(1), &json!("credits")));
+
+    let job_rows = traced(&rows, &unreported);
+    let submit = &named(&job_rows, "provider.submit")[0];
+    assert_eq!((&submit["outcome"], &submit["error"]), (&json!("unknown"), &json!("submit-uncertain")));
+    let step = &named(&job_rows, "pipe.step")[0];
+    assert_eq!((&step["outcome"], &step["error"]), (&json!("unknown"), &json!("submit-uncertain")));
+    assert_eq!(named(&job_rows, "provider.lookup")[0]["outcome"], "ok");
+    let done = named(&job_rows, "provider.poll").pop().unwrap();
+    assert_eq!((&done["units"], &done["unit_kind"]), (&Value::Null, &json!("credits")));
+    assert_eq!(done["unknown"]["units"], "provider-unreported");
+
+    assert_eq!(named(&traced(&rows, &confirmed), "provider.cancel")[0]["outcome"], "ok");
+    let cancel = &named(&traced(&rows, &unconfirmed), "provider.cancel")[0];
+    assert_eq!((&cancel["outcome"], &cancel["error"]), (&json!("unknown"), &json!("cancel-unconfirmed")));
+    let step = &named(&traced(&rows, &paused), "pipe.step")[0];
+    assert_eq!((&step["outcome"], &step["error"]), (&json!("retried"), &json!("store_full")));
+
+    let passes = named(&rows, "pipe.exec.pass");
+    assert!(passes.iter().all(|r| r["kind"] == "service.pass" && r["unit_kind"] == "items" && r["calls"].is_u64()));
+    assert!(passes.iter().any(|r| r["units"] == 1), "a pass that handled an item");
+    assert_eq!(ctx.telemetry.state()["state"], "observed");
+    assert_eq!(ctx.telemetry.state()["shipper"]["state"], "off", "the store is local and never reads as shipped");
+
+    let all = Value::Array(rows).to_string();
+    let data_root = f.config(0).data_root.to_string_lossy().to_string();
+    for private in ["wooden crate", data_root.as_str(), "SYNTHETIC ASSETQ"] {
+        assert!(!all.contains(private), "metadata only: {private}");
+    }
 }
 
 fn limits() -> db::Limits {

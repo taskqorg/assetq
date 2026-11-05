@@ -94,6 +94,8 @@ Unknown stays explicit. Provider health, store integrity and backup read `unknow
 
 `GET /v1/status` adds observed filesystem free space/floor and separate metadata admission/recovery availability. Measurement failures read `unknown` with a reason. Existing routes, result fields and schema remain compatible; these status fields are additive.
 
+`GET /v1/status` also reports `telemetry` ([contract](../pipe.md#telemetry)). It reads `observed` with `lost` 0, or `unknown` with a reason when the local store is unavailable or a record was lost since start. `shipper.state` `off` means no shipper has run, never that nothing is unsent.
+
 ## Not in this build
 
 General Meshy dispatch, webhook ingestion endpoint, upload retention enforcement, backup and restore automation, and an integrity scan job. Each remains unknown or absent in status rather than reported as healthy. The bounded Meshy adapter requires separate native/provider qualification. The qualified native image route does not qualify another client, host or managed storage deployment.

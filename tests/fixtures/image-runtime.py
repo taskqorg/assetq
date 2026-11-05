@@ -45,6 +45,10 @@ for line in sys.stdin:
     elif method == "turn/start":
         # Terminal-before-ack is deliberate: consumer must preserve runtime progress.
         if outcome == "complete":
+            emit({"method": "thread/tokenUsage/updated", "params": {
+                "threadId": "invented-thread", "turnId": "invented-turn", "tokenUsage": {
+                    "total": {"inputTokens": 30, "cachedInputTokens": 20, "outputTokens": 4},
+                    "last": {"inputTokens": 30, "cachedInputTokens": 20, "outputTokens": 4}}}})
             terminal("completed")
         result = {"turn": {"id": "invented-turn"}}
     elif method == "turn/interrupt":

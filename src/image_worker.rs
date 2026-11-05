@@ -21,6 +21,8 @@ use std::{
 pub mod protected;
 pub mod retained;
 
+/// The runtime identity bound into method version 5, its receipts and provenance. A runtime upgrade never changes it;
+/// Cargo.lock names the runtime this build resolves (pipe.md § Initial generation methods).
 pub const PIN: &str = "70f85434546bd1c303ccdb7b0dd71866421627e2";
 pub const PROVIDER: &str = "agentq.image";
 const LEGACY_PROVIDER: &str = "agentq.codex-image";
@@ -535,6 +537,7 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     let opt = server.optimization();
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
+    let telemetry = crate::telemetry::Telemetry::open(&cfg.data_root);
     let launch = runtime_launch(cfg.image_worker_root.as_deref().unwrap(), &home, deadline);
     // Empty launch input: subscription and inherited provider are checked before Runtime::input.
     let (observed, cleanup) = protected::with_run(
@@ -552,6 +555,7 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
                     runtime.poll(run)?;
                     runtime_progress(runtime, run, &mut log)?;
                     if let Ok(report) = runtime.report(run) {
+                        telemetry.agent_run(run, &project);
                         let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
                         let turn = checkpoint["app"]["turn"].as_str();
                         let mut result = agentq_runtime::cli::report_json(&report);
@@ -1220,6 +1224,38 @@ mod tests {
                 }
                 let report = runtime.report(&run).unwrap();
                 assert_eq!(report.outcome, if outcome == "wait" { "cancelled" } else { "ok" });
+                // R11: Pipe hands the run to the runtime's own capture; repeated observation never counts twice.
+                let telemetry = crate::telemetry::Telemetry::open(&dir);
+                telemetry.agent_run(&mut run, "csgo");
+                telemetry.agent_run(&mut run, "csgo");
+                let rows =
+                    coreq::telemetry::Reader::open(&crate::telemetry::path(&dir)).unwrap().export(0, 0, 100).unwrap()["events"].clone();
+                let kinds = |kind: &str| {
+                    rows.as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| r["observation"]["kind"] == kind)
+                        .map(|r| r["observation"].clone())
+                        .collect::<Vec<_>>()
+                };
+                let (turns, calls) = (kinds("agent.turn"), kinds("agent.call"));
+                assert_eq!(turns.len(), 1);
+                assert_eq!(turns[0]["project"], "pipe/csgo");
+                assert_eq!(turns[0]["product"], "pipe");
+                assert_eq!(turns[0]["unknown"]["task"], "no-task");
+                if outcome == "complete" {
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0]["input_tokens"], 10, "the runtime reports uncached input");
+                    assert_eq!(calls[0]["cache_read_tokens"], 20);
+                    assert_eq!(calls[0]["output_tokens"], 4);
+                    assert_eq!(turns[0]["output_tokens"], 4);
+                } else {
+                    assert!(calls.is_empty(), "no model request observed writes no agent.call");
+                    assert_eq!(turns[0]["output_tokens"], Value::Null, "a client reporting no tokens reads null, never zero");
+                    assert!(turns[0]["unknown"]["output_tokens"].is_string());
+                }
+                let text = rows.to_string();
+                assert!(!text.contains("invented request") && !text.contains(dir.to_str().unwrap()), "metadata only");
                 let checkpoint = runtime.checkpoint(&run).unwrap();
                 let mut recovered = runtime.recover(&checkpoint, &launch).unwrap();
                 assert!(runtime.account(&mut recovered).is_err());

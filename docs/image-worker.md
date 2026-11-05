@@ -1,6 +1,6 @@
 # Codex image worker
 
-This path implements Pipe R2-R8 and task [#4](https://github.com/taskqorg/assetq/issues/4), preserving the [owner request](intake/2026-11-01-owner-request.md). New builds use published `agentq-runtime` 0.2.0 tag `runtime-v0.2.0`, resolved to `70f85434546bd1c303ccdb7b0dd71866421627e2` from PR218, not CoreQ's frozen agent module. Version 3 retains `aab1a190ab76f1e932578520d7a8787ef1d4b660`. The original crate and version 2 receipts retain `513193c8a96f3de1c71a86291a679230817ce0b2`. Technical qualification never supplies owner visual acceptance.
+This path implements Pipe R2-R8 and task [#4](https://github.com/taskqorg/assetq/issues/4), preserving the [owner request](intake/2026-11-01-owner-request.md). New builds use `agentq-runtime` 0.6.0 at `c80675a557417532393e143ca2783c0f4c83b8d9` from PR243, not CoreQ's frozen agent module. Version 5 retains `70f85434546bd1c303ccdb7b0dd71866421627e2` from PR218. Version 3 retains `aab1a190ab76f1e932578520d7a8787ef1d4b660`. The original crate and version 2 receipts retain `513193c8a96f3de1c71a86291a679230817ce0b2`. Technical qualification never supplies owner visual acceptance.
 
 ## Authority and inputs
 
