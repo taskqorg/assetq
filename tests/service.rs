@@ -1694,6 +1694,55 @@ fn resource_bounds_concurrent_metadata_counts_toast_and_indexes() {
     assert_eq!(c.query_one("SELECT count(*) FROM observations", &[]).unwrap().get::<_, i64>(0), 1);
 }
 
+// R7 (#30): a guarded write opens on one physical measurement under the metadata
+// lock. A later preflight, commit or transaction must remeasure, never reuse it,
+// and a failed measurement must refuse every writer rather than admit work.
+#[test]
+fn resource_bounds_guarded_writes_measure_once_per_lock_boundary() {
+    let f = fixture();
+    let mut c = f.client();
+    let (p, _) = project(&mut c, "scans", 10, 4);
+    // Count real server calls: this session's search_path shadows the catalog function.
+    c.batch_execute(
+        "CREATE SCHEMA scan_probe; CREATE SEQUENCE scan_probe.calls;
+         CREATE FUNCTION scan_probe.pg_database_size(name) RETURNS bigint LANGUAGE plpgsql AS
+           $$ BEGIN PERFORM nextval('scan_probe.calls'); RETURN pg_catalog.pg_database_size($1); END $$;
+         SET search_path = scan_probe, pg_catalog, public;",
+    )
+    .unwrap();
+    let scans = |c: &mut Client, work: &mut dyn FnMut(&mut Client)| -> i64 {
+        let total = |c: &mut Client| -> i64 {
+            c.query_one("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM scan_probe.calls", &[]).unwrap().get(0)
+        };
+        let before = total(c);
+        work(c);
+        total(c) - before
+    };
+    for recovery in [false, true] {
+        assert_eq!(scans(&mut c, &mut |c| drop(db::write_tx(c, recovery).unwrap())), 1, "prewrite, recovery={recovery}");
+        // The rolled-back transaction above leaves nothing for this one to reuse.
+        assert_eq!(scans(&mut c, &mut |c| db::commit_write(db::write_tx(c, recovery).unwrap()).unwrap()), 2, "prewrite and precommit");
+    }
+    assert_eq!(scans(&mut c, &mut |c| db::metadata_check(c, false).unwrap()), 1, "dispatch preflight");
+    assert_eq!(scans(&mut c, &mut |c| db::with_admission(c, 1 << 30, |_| Ok(())).unwrap()), 1, "writer preflight");
+    let ctx = f.ctx(1 << 30);
+    // An idle tick opens two guarded transactions: claim, which also decides admission, and poll.
+    assert_eq!(scans(&mut c, &mut |c| assert!(!exec::tick(c, &ctx, "scans").unwrap())), 2, "idle executor tick");
+
+    db::submit_job(&mut c, &p, &req("unknown", json!({})), &limits(), FAKE).unwrap();
+    c.batch_execute(
+        "CREATE OR REPLACE FUNCTION scan_probe.pg_database_size(name) RETURNS bigint LANGUAGE plpgsql AS
+           $$ BEGIN RAISE EXCEPTION 'invented measurement failure'; END $$;",
+    )
+    .unwrap();
+    for recovery in [false, true] {
+        assert_eq!(db::write_tx(&mut c, recovery).err().unwrap().code, "database");
+    }
+    assert_eq!(db::metadata_status(&mut c)["state"], "unknown");
+    assert_eq!(exec::tick(&mut c, &ctx, "scans").unwrap_err().code, "database");
+    assert_eq!(c.query_one("SELECT count(*) FROM attempts", &[]).unwrap().get::<_, i64>(0), 0, "unknown capacity claimed work");
+}
+
 // R6/R7: local generation has no provider effect identity; persisted progress
 // must still finish using recovery headroom after admission closes.
 #[test]
