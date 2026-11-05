@@ -332,10 +332,10 @@ fn catalogue_progress(runtime: &dyn Runtime, run: &mut Run, log: &mut File, id: 
 /// PM drives this one real consumer over private stdio; no development-board task
 /// is created for its native operation and no slot is released by this command.
 pub fn qualify(dir: &Path) -> Res<()> {
-    dispatch_authority()?;
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: composed protected qualification requires the existing approved Mac Workspace host".into());
     }
+    dispatch_authority()?;
     let root = std::env::current_dir().and_then(|p| p.canonicalize()).map_err(|e| e.to_string())?;
     let parent = dir
         .parent()
@@ -479,9 +479,12 @@ mod tests {
         for error in [
             super::launch(&absent, &absent, launch).err().unwrap(),
             prepare_launch(&absent, &absent, "invented", &absent).err().unwrap(),
-            qualify(&absent).unwrap_err(),
         ] {
             assert!(error.contains("legacy TaskQ adapter is recovery-only"), "{error}");
+        }
+        // Off Mac, qualify keeps its platform refusal; the qualification test below guards it.
+        if cfg!(target_os = "macos") {
+            assert!(qualify(&absent).unwrap_err().contains("legacy TaskQ adapter is recovery-only"));
         }
         assert!(!absent.exists());
     }
