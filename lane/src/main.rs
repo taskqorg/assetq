@@ -27,6 +27,8 @@ use tokio::sync::Semaphore;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const REVISION: &str = "1";
 const REQUEST_BYTES: usize = 1 << 20;
+const REFUSED_BYTES: usize = 64 << 10;
+const REFUSED_PATIENCE: Duration = Duration::from_secs(2);
 const PROVIDER_BYTES: usize = 16 << 20;
 const RECORD_QUEUE: usize = 4096;
 const SYSTEMD_FIRST_FD: i32 = 3;
@@ -533,7 +535,11 @@ impl Lane {
         let caller = Caller { project: project.clone(), label: code_or_none(&label), runtime: code_or_none(&runtime) };
         let step = if operation == "web_search" { "tavily.search" } else { "tavily.extract" };
         // Read the body before any refusal: closing on unread bytes resets the connection and loses the caller's reason.
-        let collected = Limited::new(request.into_body(), REQUEST_BYTES).collect().await;
+        // Unauthenticated callers get a small, short read, so a slow or large body cannot hold the lane.
+        // ponytail: no cap on open connections or header read time; entry is loopback or the guarded Caddy route, add both if local abuse appears.
+        let (limit, patience) =
+            if project.is_some() { (REQUEST_BYTES, self.config.request_timeout) } else { (REFUSED_BYTES, REFUSED_PATIENCE) };
+        let collected = tokio::time::timeout(patience, Limited::new(request.into_body(), limit).collect()).await;
         let answer = if project.is_none() {
             refusal(StatusCode::UNAUTHORIZED, "refused", "unauthenticated", "a valid project token is required")
         } else if caller.label != label || caller.runtime != runtime {
@@ -544,8 +550,8 @@ impl Lane {
                 "X-Pipe-Task and X-Pipe-Runtime hold at most 64 characters of A-Za-z0-9._:-",
             )
         } else {
-            match collected.map(|b| serde_json::from_slice::<Value>(&b.to_bytes())) {
-                Ok(Ok(Value::Object(mut body))) if body.contains_key(field) => {
+            match collected.map(|read| read.map(|b| serde_json::from_slice::<Value>(&b.to_bytes()))) {
+                Ok(Ok(Ok(Value::Object(mut body)))) if body.contains_key(field) => {
                     // The caller never selects a key, and every call reports its credits.
                     body.remove("api_key");
                     body.insert("include_usage".into(), json!(true));

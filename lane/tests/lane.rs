@@ -190,6 +190,22 @@ fn call_raw(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body:
     (status, head.to_owned(), serde_json::from_str(payload).unwrap_or(Value::Null))
 }
 
+#[test]
+fn unauthenticated_slow_body_is_refused_with_its_reason_at_once() {
+    // Risk: a caller without a token holds a lane task by never finishing its body.
+    let upstream = ok_provider();
+    let lane = Fixture::new(&upstream.url, &["invented-key-a"], json!({}));
+    let mut stream = TcpStream::connect(("127.0.0.1", lane.port)).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    write!(stream, "POST /v1/read/web_search HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Length: 100\r\n\r\nshort").unwrap();
+    let begun = Instant::now();
+    let mut text = String::new();
+    stream.read_to_string(&mut text).unwrap();
+    assert!(text.starts_with("HTTP/1.1 401"), "{text}");
+    assert!(text.contains("unauthenticated"), "{text}");
+    assert!(begun.elapsed() < Duration::from_secs(5));
+}
+
 fn ok_provider() -> Provider {
     provider(|_| (200, 0))
 }
