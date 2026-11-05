@@ -337,7 +337,7 @@ class Host:
     def user_command(self, command):
         """The service's own user manager, never the system manager or another account."""
         target = self.target
-        return f"runuser -u {shlex.quote(target['service_account'])} -- env XDG_RUNTIME_DIR=/run/user/{target['service_uid']} {command}"
+        return f"runuser -u {shlex.quote(target['service_account'])} -- env XDG_RUNTIME_DIR=/run/user/{target['service_uid']} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{target['service_uid']}/bus {command}"
 
     def service(self, binary, arguments, seconds, env_file=None):
         """Run a release executable under the service's user manager; the operator never reads the environment file."""
