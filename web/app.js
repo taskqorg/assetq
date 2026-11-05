@@ -368,7 +368,7 @@ document.addEventListener('keydown', event => {
   // Measure after native focus movement; programmatic history restoration keeps its scroll.
   requestAnimationFrame(() => {
     const focused = document.activeElement;
-    if (!main.contains(focused)) return;
+    if (!main.contains(focused) && !document.querySelector('#nav').contains(focused)) return;
     const top = getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().bottom : 0;
     const rect = focused.getBoundingClientRect();
     if (rect.top < top + 6) scrollBy(0, rect.top - top - 6);
