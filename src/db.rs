@@ -44,35 +44,59 @@ pub fn metadata_bytes(c: &mut impl GenericClient) -> Result<u64> {
     u64::try_from(size).map_err(|_| Error::new(503, "metadata_unknown", "negative database size"))
 }
 
+fn metadata_ceiling((quota, _, reserve): (u64, u64, u64), recovery: bool) -> u64 {
+    if recovery { quota } else { quota.saturating_sub(reserve) }
+}
+
+fn metadata_has_room(used: u64, limits: (u64, u64, u64), recovery: bool) -> bool {
+    used.checked_add(limits.1).is_some_and(|n| n <= metadata_ceiling(limits, recovery))
+}
+
+/// Measure now and refuse without transaction headroom below the selected ceiling.
 pub fn metadata_check(c: &mut impl GenericClient, recovery: bool) -> Result<()> {
-    let (quota, headroom, reserve) = metadata_limits(c)?;
-    let ceiling = if recovery { quota } else { quota.saturating_sub(reserve) };
-    if metadata_bytes(c)?.checked_add(headroom).is_none_or(|n| n > ceiling) {
-        return Err(Error::new(
-            507,
-            "metadata_full",
-            if recovery {
-                "metadata recovery headroom exhausted"
-            } else {
-                "metadata admission headroom exhausted; recovery reserve retained"
-            },
-        ));
+    let limits = metadata_limits(c)?;
+    let used = metadata_bytes(c)?;
+    if !metadata_has_room(used, limits, recovery) {
+        return Err(metadata_full(recovery));
     }
     Ok(())
 }
 
+fn metadata_full(recovery: bool) -> Error {
+    Error::new(
+        507,
+        "metadata_full",
+        if recovery { "metadata recovery headroom exhausted" } else { "metadata admission headroom exhausted; recovery reserve retained" },
+    )
+}
+
 /// Acquire before row/table locks; never hold across a stream or provider call.
 pub fn write_tx(c: &mut Client, recovery: bool) -> Result<Transaction<'_>> {
+    Ok(open_write(c, recovery)?.0)
+}
+
+/// A recovery write that also reports whether admission headroom remains. Both
+/// answers come from its one prewrite measurement, before any mutation.
+pub fn recovery_tx_with_admission(c: &mut Client) -> Result<(Transaction<'_>, bool)> {
+    let (tx, start, limits) = open_write(c, true)?;
+    Ok((tx, metadata_has_room(start, limits, false)))
+}
+
+/// One physical measurement serves the whole prewrite decision: the metadata lock
+/// excludes other guarded writers and nothing has mutated yet. Its result never
+/// outlives this call; preflights and `commit_write` measure for themselves.
+fn open_write(c: &mut Client, recovery: bool) -> Result<(Transaction<'_>, u64, (u64, u64, u64))> {
     let mut tx = c.transaction()?;
     tx.batch_execute("SET LOCAL lock_timeout = '5s'")?;
     tx.query_one("SELECT pg_advisory_xact_lock($1)", &[&METADATA_LOCK])?;
-    metadata_check(&mut tx, recovery)?;
-    let (quota, _, reserve) = metadata_limits(&mut tx)?;
+    let limits = metadata_limits(&mut tx)?;
     let start = metadata_bytes(&mut tx)?;
-    let ceiling = if recovery { quota } else { quota.saturating_sub(reserve) };
+    if !metadata_has_room(start, limits, recovery) {
+        return Err(metadata_full(recovery));
+    }
     tx.query_one("SELECT set_config('assetq.write_start', $1, true), set_config('assetq.write_ceiling', $2, true), set_config('assetq.write_charge', '0', true)",
-        &[&start.to_string(), &ceiling.to_string()])?;
-    Ok(tx)
+        &[&start.to_string(), &metadata_ceiling(limits, recovery).to_string()])?;
+    Ok((tx, start, limits))
 }
 
 /// Cap cumulative payload and row-allocation allowance before issuing mutations.

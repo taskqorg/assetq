@@ -112,12 +112,7 @@ pub fn tick(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<bool> {
 }
 
 fn claim(c: &mut Client, ctx: &Ctx, owner: &str) -> Result<Option<(String, Job)>> {
-    let mut tx = db::write_tx(c, true)?;
-    let admission = match db::metadata_check(&mut tx, false) {
-        Ok(()) => true,
-        Err(e) if e.code == "metadata_full" => false,
-        Err(e) => return Err(e),
-    };
+    let (mut tx, admission) = db::recovery_tx_with_admission(c)?;
     let row = tx.query_opt(
         "SELECT id, lease_owner IS NOT NULL FROM jobs WHERE phase IN ('queued', 'active') AND wake_at <= now()
            AND (lease_owner IS NULL OR lease_until < now())

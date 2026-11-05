@@ -83,6 +83,7 @@ def rust_checks(name=None):
     print(run("node", "--test", "--test-reporter=tap", "scripts/test_web.cjs"), end="")
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
     print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
+    print(run(sys.executable, "scripts/test_deploy_assetq.py", timeout=300), end="")
     print(run("cargo", "fmt", "--check"), end="")
     with postgres_cluster() as pg:
         env = dict(os.environ, ASSETQ_TEST_PG=pg, ASSETQ_TEST_PG_BIN=str(pg_bin()))
