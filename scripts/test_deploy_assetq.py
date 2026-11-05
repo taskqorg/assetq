@@ -29,37 +29,46 @@ import deploy_assetq as deploy
 SOURCE = "a1" * 20
 OTHER = "b2" * 20
 SECRET = "invented-secret-never-read"
-OLD = "0.1.0-oldoldoldold"
-NEW = f"0.1.0-{SOURCE[:12]}"
+OLD = "5a" * 32
+UID = 995
 DOC = b"# invented packaged contract\n"
 UI = {"app.js": b"// invented ui script\n", "index.html": b"<!-- invented ui page -->\n"}
+
+# Reachable only as the real host's lifecycle is: the service account, its runtime directory, --user.
+USER_MANAGER = """[ "$SERVICE_ACCOUNT" = assetq ] && [ "$XDG_RUNTIME_DIR" = /run/user/995 ] && [ "$1" = --user ] || {
+  echo "Failed to connect to bus: fixture requires the service user manager" >&2; exit 1; }
+"""
 
 TOOLS = {
     "hostname": 'echo invented-host\n',
     "ssh-keygen": 'echo "256 SHA256:invented-key comment (ED25519)"\n',
     "getconf": 'cat "$FIXTURE/state/libc"\n',
-    "sudo": 'shift\nexec "$@"\n',
+    "id": 'case "$*" in\n"-u") cat "$FIXTURE/state/operator_uid" ;;\n"-u assetq") cat "$FIXTURE/state/account_uid" ;;\n*) exit 9 ;;\nesac\n',
+    "runuser": '[ "$1" = -u ] && [ "$3" = -- ] || exit 9\nexport SERVICE_ACCOUNT=$2\nshift 3\nexec "$@"\n',
+    "chown": 'echo "chown $*" >> "$FIXTURE/log/tools"\n',
     "df": 'echo Avail\ncat "$FIXTURE/state/free"\n',
-    "curl": 'exec "$FIXTURE/host/opt/current/bin/assetq" health\n',
+    "curl": 'exec "$FIXTURE/host/opt/current/$(cat "$FIXTURE/state/executable")" health\n',
     "stat": 'case "$2" in\n*%s*) cat "$FIXTURE/state/env_stat" ;;\n*) echo "assetq assetq 750 5 9" ;;\nesac\n',
-    "systemd-run": ('echo "systemd-run $*" >> "$FIXTURE/log/tools"\n'
+    "systemd-run": (USER_MANAGER + 'echo "systemd-run $*" >> "$FIXTURE/log/tools"\n'
                     'while [ "${1#--}" != "$1" ]; do shift; done\nexec "$@"\n'),
-    "systemctl": r'''echo "systemctl $*" >> "$FIXTURE/log/tools"
+    "systemctl": USER_MANAGER + r'''echo "systemctl $*" >> "$FIXTURE/log/tools"
+shift
 root="$FIXTURE/host/opt"
+executable=$(cat "$FIXTURE/state/executable")
 case "$1" in
 cat) cat "$FIXTURE/state/unit" ;;
 show)
   pid=$(cat "$FIXTURE/state/pid")
   printf 'ExecStart={ path=x ; argv[]=%s ; ignore_errors=no ; pid=%s ; }\n' "$(cat "$FIXTURE/state/exec")" "$pid"
-  printf 'User=assetq\nGroup=assetq\nEnvironmentFiles=%s (ignore_errors=no)\n' "$FIXTURE/host/env/assetq.env"
+  printf 'EnvironmentFiles=%s (ignore_errors=no)\n' "$FIXTURE/host/env/assetq.env"
   printf 'ActiveState=%s\nMainPID=%s\nLimitAS=2147483648\nLimitSTACK=2097152\nAllowedCPUs=0-1\nMemoryMax=infinity\nTasksMax=512\n' "$(cat "$FIXTURE/state/active")" "$pid"
   ;;
 restart)
   pid=$(( $(cat "$FIXTURE/state/pid") + 1 ))
   release=$(readlink "$root/current"); release=${release##*/}
-  if "$root/current/bin/assetq" start; then
+  if "$root/current/$executable" start; then
     mkdir -p "$FIXTURE/host/proc/$pid"
-    ln -s "$root/releases/$release/bin/assetq" "$FIXTURE/host/proc/$pid/exe"
+    ln -s "$root/releases/$release/$executable" "$FIXTURE/host/proc/$pid/exe"
     echo "$pid" > "$FIXTURE/state/pid"; echo active > "$FIXTURE/state/active"
   else
     echo 0 > "$FIXTURE/state/pid"; echo failed > "$FIXTURE/state/active"
@@ -148,6 +157,10 @@ class Evidence:
             artifact.writestr(zipfile.ZipInfo("SHA256SUMS"), self.outer_sums or f"{sha(data)}  {name}\n")
         return stream.getvalue()
 
+    @property
+    def release(self):
+        return sha(self.binary)
+
     def __call__(self, path):
         repo = f"repos/{deploy.REPO}/"
         self.calls = getattr(self, "calls", []) + [path]
@@ -218,9 +231,8 @@ class Fixture(unittest.TestCase):
         (old / "bin").mkdir(parents=True)
         (old / "bin/assetq").write_bytes(executable(health="state", marker="old", ui=False))
         (old / "bin/assetq").chmod(0o755)
-        (old / "candidate.json").write_text(json.dumps({"schema": 1}))
-        counts = {"verified": True, "jobs": 3, "succeeded": 2, "blobs": 4, "methods": 5, "attempts": 6, "physical_object_bytes": 70}
-        for name, value in [("libc", "glibc 2.43\n"), ("free", "  99999999\n"), ("env_stat", "root root 600 12 1700 5 8\n"),
+        counts = {"verified": True, "schema": 1, "jobs": 3, "succeeded": 2, "blobs": 4, "methods": 5, "attempts": 6, "physical_object_bytes": 70}
+        for name, value in [("operator_uid", "0\n"), ("account_uid", f"{UID}\n"), ("executable", "bin/assetq\n"), ("libc", "glibc 2.43\n"), ("free", "  99999999\n"), ("env_stat", "root root 600 12 1700 5 8\n"),
                             ("unit", "[Service]\ninvented unit\n"), ("pid", "100\n"), ("active", "active\n"),
                             ("exec", f"{self.posix}/host/opt/current/bin/assetq serve --listen 127.0.0.1:8740\n"),
                             ("integrity", json.dumps(counts)),
@@ -228,9 +240,9 @@ class Fixture(unittest.TestCase):
                             ("old_health", '{"service":"up","version":"0.1.0","database":"ok"}\n'),
                             ("ops", json.dumps({"jobs": {"by_phase": {"succeeded": 2}, "uncertain_submissions": 0, "leased": 0}}))]:
             (self.state / name).write_text(value)
-        self.sh_run(f'cd {self.posix}/host/opt && ln -s releases/{OLD} current && ln -s {self.posix}/host/opt/releases/{OLD}/bin/assetq {self.posix}/host/proc/100/exe')
+        self.sh_run(f'cd {self.posix}/host/opt && ln -s {self.posix}/host/opt/releases/{OLD} current && ln -s {self.posix}/host/opt/releases/{OLD}/bin/assetq {self.posix}/host/proc/100/exe')
         machine = hashlib.sha256(b"invented-machine\n").hexdigest()
-        self.target = {"ssh_alias": "invented-alias", "sudo": True, "install_root": f"{self.posix}/host/opt", "unit": "assetq.service",
+        self.target = {"ssh_alias": "invented-alias", "service_account": "assetq", "service_uid": UID, "executable": "bin/assetq", "install_root": f"{self.posix}/host/opt", "unit": "assetq.service",
                        "port": 8740, "data_root": f"{self.posix}/host/data",
                        "expected": {"hostname": "invented-host", "machine_id_sha256": machine, "ssh_host_key_sha256": "SHA256:invented-key"},
                        "status_env_files": [f"{self.posix}/host/env/assetq.env"],
@@ -332,14 +344,14 @@ class Plan(Fixture):
         self.assertEqual((self.out / name).read_bytes(), archive)
         self.assertEqual(self.snapshot(), before)
         self.assert_read_only(self.ssh_log())
-        self.assertFalse(re.search(r"systemctl (?!cat|show)", self.tools_log()), self.tools_log())
+        self.assertFalse(re.search(r"systemctl --user (?!cat|show)", self.tools_log()), self.tools_log())
         for text in [self.ssh_log(), self.stdout, (self.out / "plan.json").read_text()]:
             self.assertNotIn(SECRET, text)
 
     def assert_read_only(self, scripts):
         scripts = "\n".join(line for line in scripts.splitlines() if not line.startswith("for tool in "))
         self.assertFalse(re.search(r"\b(mv|ln|rm|mkdir|touch|chmod|chown|tee|restart|stop|start|reload|enable|disable|migrate)\b", scripts), scripts)
-        self.assertLessEqual(set(re.findall(r">\s*(\S+)", scripts)), {"&2", "/dev/null"})
+        self.assertLessEqual(set(re.findall(r">\s*([^\s;]+)", scripts)), {"&2", "/dev/null"})
 
     def test_dry_run_verifies_again_without_effect(self):
         plan = self.planned()
@@ -427,9 +439,11 @@ class Plan(Fixture):
         with patch.object(deploy.subprocess, "run", record), patch.object(deploy, "SSH", ["ssh"]):
             deploy.Host(self.target).run("true")
         self.assertEqual(recorded[0][:7], ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"])
-        self.assertTrue(recorded[0][-1].startswith("sudo -n sh -c "))
+        self.assertTrue(recorded[0][-1].startswith("sh -c "))
 
     def test_unverifiable_or_incompatible_host_refuses(self):
+        def not_root(s): (s / "operator_uid").write_text("1000\n")
+        def wrong_account(s): (s / "account_uid").write_text("1001\n")
         def low_install(s): (s / "free").write_text("10\n")
         def open_env(s): (s / "env_stat").write_text("root root 644 12 1700 5 8\n")
         def foreign_env(s): (s / "env_stat").write_text("other other 600 12 1700 5 8\n")
@@ -441,7 +455,7 @@ class Plan(Fixture):
         def active_jobs(s): (s / "ops").write_text(json.dumps({"jobs": {"by_phase": {"waiting": 1}, "uncertain_submissions": 0, "leased": 0}}))
         def uncertain_jobs(s): (s / "ops").write_text(json.dumps({"jobs": {"by_phase": {}, "uncertain_submissions": 1, "leased": 0}}))
         def no_status(s): (s / "ops").write_text("not json")
-        for case in [low_install, open_env, foreign_env, other_unit, old_libc, stopped, bad_health, bad_integrity,
+        for case in [not_root, wrong_account, low_install, open_env, foreign_env, other_unit, old_libc, stopped, bad_health, bad_integrity,
                      active_jobs, uncertain_jobs, no_status]:
             with self.subTest(case.__name__):
                 saved = {p.name: p.read_bytes() for p in self.state.iterdir()}
@@ -457,6 +471,19 @@ class Plan(Fixture):
         self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
         self.assertIn("glibc", self.stderr)
 
+    def test_lifecycle_uses_only_the_named_user_manager(self):
+        # The host runs a user unit. A system-level call or another runtime directory must not work.
+        self.target["service_uid"] = 1001
+        (self.state / "account_uid").write_text("1001\n")
+        self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
+        self.assertIn("service user manager", self.stderr)
+        self.assertFalse(self.out.exists())
+        (self.state / "account_uid").write_text(f"{UID}\n")
+        self.target["service_uid"] = UID
+        self.assertEqual(deploy.Host(self.target).user_command("systemctl --user show"),
+                         f"runuser -u assetq -- env XDG_RUNTIME_DIR=/run/user/{UID} systemctl --user show")
+        self.assertEqual(deploy.subprocess.run([self.sh, "-c", "systemctl show"], capture_output=True).returncode, 1)
+
     def test_active_or_unknown_work_needs_a_reviewed_plan_record(self):
         self.target["status_env_files"] = []
         self.assertEqual(self.plan(), deploy.EXIT_REFUSED)
@@ -464,6 +491,22 @@ class Plan(Fixture):
         self.assertEqual(self.plan("--accept-active-work"), 0, self.stderr)
         plan = json.loads((self.out / "plan.json").read_text())
         self.assertEqual((plan["host"]["active_work"]["state"], plan["accepted_active_work"]), ("unknown", True))
+
+
+class Layout(Fixture):
+    def test_existing_flat_release_layout_and_resource_wrapper_are_preserved(self):
+        # The host may run <release>/assetq behind a wrapper; the unit stays untouched and bound.
+        (self.state / "executable").write_text("assetq\n")
+        old = self.host / "opt/releases" / OLD
+        shutil.copy(old / "bin/assetq", old / "assetq")
+        (self.state / "exec").write_text(f"/usr/bin/prlimit --as=1 {self.posix}/host/opt/current/assetq serve --listen 127.0.0.1:8740\n")
+        self.target["executable"] = "assetq"
+        plan = self.planned()
+        self.assertEqual(self.apply(plan), 0, self.stderr)
+        self.assertEqual(self.link("current"), self.evidence.release)
+        self.assertEqual((self.host / "opt/releases" / self.evidence.release / "assetq").read_bytes(), self.evidence.binary)
+        self.assertEqual(self.rollback(plan), 0, self.stderr)
+        self.assertEqual(self.link("current"), OLD)
 
 
 class Stale(Fixture):
@@ -481,7 +524,7 @@ class Stale(Fixture):
         self.assertEqual(self.call("apply", "--plan", str(path), "--confirm-plan", "0" * 64), deploy.EXIT_REFUSED)
         self.assertIn("reviewed plan digest", self.stderr)
 
-        path.write_text(original.replace(NEW, "0.1.0-altered"))
+        path.write_text(original.replace(self.evidence.release, "0" * 64))
         self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED)
         self.assertIn("differs from its digest", self.stderr)
         path.write_text(original)
@@ -533,16 +576,16 @@ class Apply(Fixture):
         before = self.preserved()
         self.assertEqual(self.apply(plan), 0, self.stderr)
         self.assertEqual(self.prompts, [a["phrase"] for a in plan["actions"]])
-        self.assertEqual((self.link("current"), self.link("previous")), (NEW, OLD))
-        self.assertTrue((self.host / "opt/releases" / NEW / "healthy").exists())
+        self.assertEqual((self.link("current"), self.link("previous")), (self.evidence.release, OLD))
+        self.assertTrue((self.host / "opt/releases" / self.evidence.release / "healthy").exists())
         self.assertFalse((self.host / "opt/deploy.lock").exists())
-        self.assertFalse((self.host / "opt/releases" / f"{NEW}.tmp").exists())
+        self.assertFalse((self.host / "opt/releases" / f"{self.evidence.release}.tmp").exists())
         self.assertEqual(self.preserved(), before)
-        self.assertEqual((self.host / "opt/releases" / NEW / "bin/assetq").read_bytes(), self.evidence.binary)
+        self.assertEqual((self.host / "opt/releases" / self.evidence.release / "bin/assetq").read_bytes(), self.evidence.binary)
         log = self.tools_log()
-        self.assertEqual(log.count("systemctl restart"), 1)
+        self.assertEqual(log.count("systemctl --user restart"), 1)
         self.assertEqual(log.count("migrate candidate"), 1)
-        self.assertLess(log.index("migrate candidate"), log.index("systemctl restart"))
+        self.assertLess(log.index("migrate candidate"), log.index("systemctl --user restart"))
         self.assertIn("--property=EnvironmentFile=", log)
         self.assertNotIn("daemon-reload", log)
         steps = [(j["step"], j["status"]) for j in self.journal()]
@@ -560,11 +603,11 @@ class Apply(Fixture):
         self.assertEqual(self.snapshot(), before_rollback)
         self.assertEqual(self.prompts, [])
         self.assertEqual(self.rollback(plan), 0, self.stderr)
-        self.assertEqual(self.prompts, [f"rollback assetq.service on invented-host to {OLD}"])
+        self.assertEqual(self.prompts, [f"rollback assetq.service on invented-host to {OLD[:12]}"])
         self.assertEqual((self.link("current"), self.link("previous")), (OLD, None))
-        self.assertEqual(self.tools_log().count("systemctl restart"), 1)
+        self.assertEqual(self.tools_log().count("systemctl --user restart"), 1)
         self.assertEqual(self.preserved(), before)
-        self.assertTrue((self.host / "opt/releases" / NEW / "bin/assetq").exists())
+        self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/assetq").exists())
         self.assertEqual(self.rollback(plan), deploy.EXIT_REFUSED)
         self.assertIn("rollback does not apply", self.stderr)
 
@@ -582,9 +625,9 @@ class Apply(Fixture):
                 self.assertIsNone(self.link("previous"))
                 self.assertEqual(self.preserved(), before)
                 self.assertFalse((self.host / "opt/deploy.lock").exists())
-                self.assertFalse((self.host / "opt/releases" / NEW / "healthy").exists())
-                self.assertTrue((self.host / "opt/releases" / NEW / "bin/assetq").exists())
-                self.assertEqual(self.tools_log().count("systemctl restart"), 2)
+                self.assertFalse((self.host / "opt/releases" / self.evidence.release / "healthy").exists())
+                self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/assetq").exists())
+                self.assertEqual(self.tools_log().count("systemctl --user restart"), 2)
                 pid = (self.state / "pid").read_text().strip()
                 self.assertEqual(os.readlink(self.host / f"proc/{pid}/exe").replace("\\", "/").split("/")[-3], OLD)
                 steps = [(j["step"], j["status"]) for j in self.journal()]
@@ -610,16 +653,16 @@ class Apply(Fixture):
 
     def test_lost_ssh_during_activation_is_uncertain_and_blocks_a_second_apply(self):
         plan = self.planned()
-        (self.state / "ssh_fail").write_text("systemctl restart")
+        (self.state / "ssh_fail").write_text("systemctl --user restart")
         self.assertEqual(self.apply(plan), deploy.EXIT_UNCERTAIN)
         self.assertIn("activation outcome unknown", self.stderr)
-        self.assertEqual(self.link("current"), NEW)
+        self.assertEqual(self.link("current"), self.evidence.release)
         self.assertTrue((self.host / "opt/deploy.lock").is_dir())
         self.assertEqual(self.journal()[-1]["status"], "uncertain")
         self.assertNotIn("deployed and verified", self.stdout)
         (self.state / "ssh_fail").unlink()
         self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED)
-        self.assertEqual(self.tools_log().count("systemctl restart"), 0)
+        self.assertEqual(self.tools_log().count("systemctl --user restart"), 0)
 
     def test_lost_ssh_before_activation_is_uncertain_and_leaves_current_in_place(self):
         for lost in ("mkdir deploy.lock", "archive.tar.gz"):
@@ -630,7 +673,7 @@ class Apply(Fixture):
                 (self.state / "ssh_fail").write_text(lost)
                 self.assertEqual(self.apply(plan), deploy.EXIT_UNCERTAIN)
                 self.assertEqual(self.link("current"), OLD)
-                self.assertNotIn("systemctl restart", self.tools_log())
+                self.assertNotIn("systemctl --user restart", self.tools_log())
                 self.assertEqual((self.state / "pid").read_text().strip(), "100")
 
     def test_unverified_rollback_is_uncertain_not_rolled_back(self):
@@ -659,15 +702,15 @@ class Apply(Fixture):
                 self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED, self.stdout)
                 self.assertIn(reported, self.stderr)
                 self.assertEqual(self.link("current"), OLD)
-                self.assertNotIn("systemctl restart", self.tools_log())
+                self.assertNotIn("systemctl --user restart", self.tools_log())
                 self.assertFalse((self.host / "opt/deploy.lock").exists())
-                self.assertFalse((self.host / "opt/releases" / f"{NEW}.tmp").exists())
+                self.assertFalse((self.host / "opt/releases" / f"{self.evidence.release}.tmp").exists())
                 self.assertEqual(self.preserved(), before)
                 self.assertEqual((self.state / "pid").read_text().strip(), "100")
 
     def test_existing_release_bytes_are_reused_or_preserved(self):
         plan = self.planned()
-        release = self.host / "opt/releases" / NEW
+        release = self.host / "opt/releases" / self.evidence.release
         (release / "bin").mkdir(parents=True)
         (release / "bin/assetq").write_bytes(b"different bytes\n")
         (release / "candidate.json").write_text("{}")
@@ -694,10 +737,10 @@ class Apply(Fixture):
                 self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED)
                 self.assertIn("confirmation did not match", self.stderr)
                 self.assertEqual(self.link("current"), current)
-                self.assertEqual("systemctl restart" in self.tools_log(), restarted)
+                self.assertEqual("systemctl --user restart" in self.tools_log(), restarted)
                 self.assertEqual("migrate candidate" in self.tools_log(), answered == 2)
                 self.assertFalse((self.host / "opt/deploy.lock").exists())
-                self.assertEqual((self.host / "opt/releases" / NEW).exists(), answered >= 1)
+                self.assertEqual((self.host / "opt/releases" / self.evidence.release).exists(), answered >= 1)
 
     def test_live_actions_refuse_automation_and_non_interactive_callers(self):
         plan = self.planned()

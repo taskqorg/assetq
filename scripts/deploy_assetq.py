@@ -37,11 +37,11 @@ SSH = ["ssh"]
 GH = ["gh"]
 ETC = "/etc"
 PROC = "/proc"
-HOST_TOOLS = ("systemctl", "systemd-run", "sha256sum", "tar", "curl", "readlink", "ln", "mv", "df", "stat",
-              "cut", "sed", "tr", "hostname", "getconf", "ssh-keygen")
+HOST_TOOLS = ("id", "runuser", "env", "systemctl", "systemd-run", "sha256sum", "tar", "curl", "readlink", "ln", "mv", "cp",
+              "chown", "df", "stat", "cut", "sed", "tr", "hostname", "getconf", "ssh-keygen")
 MONOTONIC = ("jobs", "succeeded", "blobs", "methods", "attempts", "physical_object_bytes")
 TERMINAL_PHASES = {"succeeded", "failed", "cancelled"}
-UNIT_PROPS = ("ExecStart", "User", "Group", "EnvironmentFiles", "ActiveState", "MainPID", "LimitAS", "LimitSTACK",
+UNIT_PROPS = ("ExecStart", "EnvironmentFiles", "ActiveState", "MainPID", "LimitAS", "LimitSTACK",
               "AllowedCPUs", "MemoryMax", "TasksMax")
 LIMIT_PROPS = ("LimitAS", "LimitSTACK", "AllowedCPUs", "MemoryMax", "TasksMax")
 EXIT_REFUSED, EXIT_ROLLED_BACK, EXIT_UNCERTAIN = 1, 2, 3
@@ -112,7 +112,8 @@ def load_target(path):
         target = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise Refused(f"target file unreadable: {error}")
-    required = {"ssh_alias", "sudo", "install_root", "unit", "port", "data_root", "expected", "status_env_files",
+    required = {"ssh_alias", "service_account", "service_uid", "executable", "install_root", "unit", "port", "data_root",
+                "expected", "status_env_files",
                 "min_install_free_bytes", "min_data_free_bytes", "health_timeout_seconds"}
     if not isinstance(target, dict) or set(target) != required:
         raise Refused(f"target file must have exactly these fields: {sorted(required)}")
@@ -124,12 +125,14 @@ def load_target(path):
         raise Refused("target ssh_alias is not a plain SSH alias")
     if not re.fullmatch(r"[a-z0-9][a-z0-9@._-]*\.service", str(target["unit"])):
         raise Refused("target unit is not a service name")
-    if not isinstance(target["sudo"], bool):
-        raise Refused("target sudo must be true or false")
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]*", str(target["service_account"])):
+        raise Refused("target service_account is not an account name")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+(/[A-Za-z0-9._-]+)*", str(target["executable"])):
+        raise Refused("target executable must be a plain path relative to a release")
     paths = [target["install_root"], target["data_root"]] + list(target["status_env_files"])
     if not all(isinstance(p, str) and re.fullmatch(r"(/[A-Za-z0-9._-]+)+", p) and "/../" not in f"{p}/" for p in paths):
         raise Refused("target paths must be plain absolute paths")
-    for key, low, high in [("port", 1024, 65535), ("min_install_free_bytes", 1, 2**62),
+    for key, low, high in [("service_uid", 1, 2**31 - 1), ("port", 1024, 65535), ("min_install_free_bytes", 1, 2**62),
                            ("min_data_free_bytes", 1, 2**62), ("health_timeout_seconds", 4, 300)]:
         if not isinstance(target[key], int) or isinstance(target[key], bool) or not low <= target[key] <= high:
             raise Refused(f"target {key} must be an integer from {low} to {high}")
@@ -264,7 +267,8 @@ def verify_artifact(artifact_bytes, ci, source, blobs, allow_no_ui):
         if relative not in ("bin/assetq", "candidate.json", "SHA256SUMS") and blobs.get(relative) != git_blob_sha(data):
             raise Refused(f"packaged {relative} differs from the source tree")
     ui = verify_ui(manifest.get("embedded_ui"), blobs, binary, allow_no_ui)
-    return {"release_id": f"{match.group(1)}-{source[:12]}", "archive_name": archive_name, "archive_sha256": archive_sha,
+    # The existing host names immutable releases by executable digest.
+    return {"release_id": binary_sha, "archive_name": archive_name, "archive_sha256": archive_sha,
             "binary_sha256": binary_sha, "candidate_json_sha256": sha256_hex(members["candidate.json"]),
             "version": match.group(1), "schema": manifest["schema"], "target": TARGET, "libc": libc[1], "ui": ui}, archive_bytes
 
@@ -295,7 +299,7 @@ def verify_ui(embedded, blobs, binary, allow_no_ui):
 
 
 class Host:
-    """One SSH target. Host keys come from the operator's existing known_hosts; no key is ever created."""
+    """One SSH target reached as root. Host keys come from the operator's existing known_hosts; no key is ever created."""
 
     def __init__(self, target):
         self.target = target
@@ -303,8 +307,6 @@ class Host:
 
     def run(self, script, stdin_path=None, timeout=120):
         remote = "sh -c " + shlex.quote(script)
-        if self.target["sudo"]:
-            remote = "sudo -n " + remote
         argv = SSH + ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10",
                       self.target["ssh_alias"], remote]
         stdin = open(stdin_path, "rb") if stdin_path else subprocess.DEVNULL
@@ -325,13 +327,18 @@ class Host:
             raise Refused(f"host check failed ({code}): {err}")
         return out
 
-    def service(self, binary, arguments, seconds, env_file=None, user=None, group=None):
-        """Run a release executable as the service identity; the operator never reads the environment file."""
-        options = ["--wait", "--pipe", "--collect", "--quiet", f"--uid={user}", f"--gid={group}", f"--property=RuntimeMaxSec={seconds}"]
+    def user_command(self, command):
+        """The service's own user manager, never the system manager or another account."""
+        target = self.target
+        return f"runuser -u {shlex.quote(target['service_account'])} -- env XDG_RUNTIME_DIR=/run/user/{target['service_uid']} {command}"
+
+    def service(self, binary, arguments, seconds, env_file=None):
+        """Run a release executable under the service's user manager; the operator never reads the environment file."""
+        options = ["--user", "--wait", "--pipe", "--collect", "--quiet", f"--property=RuntimeMaxSec={seconds}"]
         if env_file:
             options.append(f"--property=EnvironmentFile={env_file}")
         command = " ".join(["systemd-run"] + [shlex.quote(o) for o in options] + [shlex.quote(binary)] + [shlex.quote(a) for a in arguments])
-        return self.run(f"set -eu\nexec {command}\n", timeout=seconds + 30)
+        return self.run(f"set -eu\nexec {self.user_command(command)}\n", timeout=seconds + 30)
 
 
 def fields(text):
@@ -354,12 +361,16 @@ def release_of(link, root):
 def inspect_host(host):
     """Read-only identity and lifecycle observation. A missing value refuses instead of guessing (R4)."""
     target = host.target
+    systemctl = host.user_command("systemctl --user")
     unit = shlex.quote(target["unit"])
     root = shlex.quote(host.root)
+    account = shlex.quote(target["service_account"])
     props = " ".join(f"-p {p}" for p in UNIT_PROPS)
     tools = " ".join(HOST_TOOLS)
     base = host.read(f"""set -eu
 for tool in {tools}; do command -v "$tool" >/dev/null || {{ echo "host tool missing: $tool" >&2; exit 40; }}; done
+[ "$(id -u)" = 0 ] || {{ echo "operator SSH must reach the host as root" >&2; exit 47; }}
+[ "$(id -u {account})" = {target['service_uid']} ] || {{ echo "service account uid differs from the target" >&2; exit 48; }}
 cd {root}
 v=$(hostname); printf 'hostname=%s\\n' "$v"
 v=$(sha256sum {ETC}/machine-id | cut -d' ' -f1); printf 'machine_id_sha256=%s\\n' "$v"
@@ -367,12 +378,12 @@ v=$(ssh-keygen -E sha256 -lf {ETC}/ssh/ssh_host_ed25519_key.pub | cut -d' ' -f2)
 v=$(getconf GNU_LIBC_VERSION | cut -d' ' -f2); printf 'libc=%s\\n' "$v"
 v=$(readlink current); printf 'current=%s\\n' "$v"
 v=$(readlink previous || true); printf 'previous=%s\\n' "$v"
-v=$(sha256sum current/bin/assetq | cut -d' ' -f1); printf 'current_binary_sha256=%s\\n' "$v"
-u=$(systemctl cat {unit}); v=$(printf '%s\\n' "$u" | sha256sum | cut -d' ' -f1); printf 'unit_sha256=%s\\n' "$v"
+v=$(sha256sum current/{shlex.quote(target["executable"])} | cut -d' ' -f1); printf 'current_binary_sha256=%s\\n' "$v"
+u=$({systemctl} cat {unit}); v=$(printf '%s\\n' "$u" | sha256sum | cut -d' ' -f1); printf 'unit_sha256=%s\\n' "$v"
 v=$(df -B1 --output=avail . | sed -n 2p | tr -d ' '); printf 'install_free=%s\\n' "$v"
 v=$(df -B1 --output=avail {shlex.quote(target["data_root"])} | sed -n 2p | tr -d ' '); printf 'data_free=%s\\n' "$v"
 v=$(stat -c '%U %G %a %d %i' {shlex.quote(target["data_root"])}); printf 'data_root_stat=%s\\n' "$v"
-systemctl show {unit} {props}
+{systemctl} show {unit} {props}
 """)
     seen = fields(base)
     env_files = [line.split("=", 1)[1].split(" (")[0] for line in base.splitlines() if line.startswith("EnvironmentFiles=")]
@@ -382,25 +393,21 @@ systemctl show {unit} {props}
         raise Refused("host current/previous are not releases under the install root")
     match = re.search(r"argv\[\]=([^;]*);", seen.get("ExecStart", ""))
     exec_start = match.group(1).strip() if match else ""
-    wanted = re.escape(f"{host.root}/current/bin/assetq") + rf" serve --listen 127\.0\.0\.1:{target['port']}( --http-threads \d+)?"
+    # A resource wrapper may precede the executable; the whole command stays bound below.
+    wanted = r"(\S+( \S+)* )?" + re.escape(f"{host.root}/current/{target['executable']}") + rf" serve --listen 127\.0\.0\.1:{target['port']}( --http-threads \d+)?"
     if not re.fullmatch(wanted, exec_start):
-        raise Refused(f"unit does not run current/bin/assetq on loopback port {target['port']}: {exec_start or 'unknown'}")
-    if len(env_files) != 1 or not seen.get("User") or not seen.get("Group"):
-        raise Refused("unit must name its service user, group and exactly one environment file")
+        raise Refused(f"unit does not run current/{target['executable']} on loopback port {target['port']}: {exec_start or 'unknown'}")
+    if len(env_files) != 1:
+        raise Refused("unit must name exactly one environment file")
     stats = {}
     for path in dict.fromkeys(env_files + list(target["status_env_files"])):
         stats[path] = host.read(f"set -eu\nstat -c '%U %G %a %s %Y %d %i' {shlex.quote(path)}\n").strip()
         owner, _, mode = (stats[path].split() + ["", "", ""])[:3]
-        if not re.fullmatch(r"[0-7]?[0-7][0-4]0", mode) or owner not in {"root", seen["User"]}:
+        if not re.fullmatch(r"[0-7]?[0-7][0-4]0", mode) or owner not in {"root", target["service_account"]}:
             raise Refused(f"protected file {path} has mode {mode} and owner {owner}")
-    manifest = host.run(f"cat {root}/current/candidate.json")
-    try:
-        schema = json.loads(manifest[1]).get("schema") if manifest[0] == 0 else None
-    except ValueError:
-        schema = None
     binding = {"current": current, "previous": previous, "current_binary_sha256": seen.get("current_binary_sha256"),
-               "schema": schema, "unit_sha256": seen.get("unit_sha256"), "exec_start": exec_start,
-               "user": seen["User"], "group": seen["Group"], "limits": {p: seen.get(p, "") for p in LIMIT_PROPS},
+               "unit_sha256": seen.get("unit_sha256"), "exec_start": exec_start,
+               "limits": {p: seen.get(p, "") for p in LIMIT_PROPS},
                "env_file": env_files[0], "protected_stats": stats, "data_root_stat": seen.get("data_root_stat")}
     identity = {k: seen.get(k) for k in ("hostname", "machine_id_sha256", "ssh_host_key_sha256")}
     if identity != target["expected"]:
@@ -425,26 +432,27 @@ def version_tuple(text):
 def check_candidate_fits(host_state, candidate):
     if not re.fullmatch(r"\d+(\.\d+)+", host_state["libc"]) or version_tuple(host_state["libc"]) < version_tuple(candidate["libc"]):
         raise Refused(f"host glibc {host_state['libc'] or 'unknown'} is below candidate glibc {candidate['libc']}")
-    current_schema = host_state["binding"]["schema"]
-    if current_schema is None:
-        raise Refused("current release schema is unknown; rollback compatibility cannot be established")
-    if current_schema != candidate["schema"]:
-        raise Refused(f"candidate schema {candidate['schema']} differs from current schema {current_schema}; this tool only applies same-schema candidates")
     if candidate["release_id"] == host_state["binding"]["current"]:
         raise Refused(f"release {candidate['release_id']} is already current")
 
 
+def check_schema(observed, candidate):
+    """The current executable just read this schema, so rollback to it stays compatible."""
+    if observed["schema"] != candidate["schema"]:
+        raise Refused(f"candidate schema {candidate['schema']} differs from current schema {observed['schema']}; this tool only applies same-schema candidates")
+
+
 def integrity(host, binding, binary):
-    code, out, err = host.service(binary, ["restore-check"], SERVICE_SECONDS, binding["env_file"], binding["user"], binding["group"])
+    code, out, err = host.service(binary, ["restore-check"], SERVICE_SECONDS, binding["env_file"])
     if code:
         raise Refused(f"current-store integrity check failed: {err}")
     try:
         report = json.loads(out)
     except ValueError:
         raise Refused("current-store integrity report unreadable")
-    if report.get("verified") is not True or not all(isinstance(report.get(k), int) for k in MONOTONIC):
+    if report.get("verified") is not True or not all(isinstance(report.get(k), int) for k in MONOTONIC + ("schema",)):
         raise Refused("current-store integrity is not verified")
-    return {k: report[k] for k in MONOTONIC}
+    return {k: report[k] for k in MONOTONIC + ("schema",)}
 
 
 def active_work(host, binding, binary):
@@ -455,7 +463,7 @@ def active_work(host, binding, binary):
     projects = []
     state = "idle"
     for path in files:
-        code, out, err = host.service(binary, ["ops"], 60, path, binding["user"], binding["group"])
+        code, out, err = host.service(binary, ["ops"], 60, path)
         try:
             jobs = json.loads(out)["jobs"] if code == 0 else None
             active = sum(int(v) for k, v in jobs["by_phase"].items() if k not in TERMINAL_PHASES)
@@ -472,8 +480,9 @@ def observe_service(host, expected_sha, version, before_pid):
     """Return (pid, None) for a healthy process running the exact executable, else (None, reason)."""
     target = host.target
     unit = shlex.quote(target["unit"])
+    systemctl = host.user_command("systemctl --user")
     code, out, err = host.run(f"""set -eu
-s=$(systemctl show {unit} -p ActiveState -p MainPID); printf '%s\\n' "$s"
+s=$({systemctl} show {unit} -p ActiveState -p MainPID); printf '%s\\n' "$s"
 pid=$(printf '%s\\n' "$s" | sed -n 's/^MainPID=//p')
 v=$(sha256sum {PROC}/"$pid"/exe | cut -d' ' -f1); printf 'exe=%s\\n' "$v"
 v=$(curl -fsS --max-time 5 http://127.0.0.1:{target['port']}/v1/health); printf 'health=%s\\n' "$v"
@@ -553,15 +562,20 @@ def check_fresh(plan):
         raise Refused(f"plan is stale: valid {plan['created_at']} to {plan['expires_at']}; create and review a new plan")
 
 
+def short(release):
+    """A phrase names a release briefly; the plan digest binds the full identity."""
+    return release[:12]
+
+
 def action_phrases(candidate, hostname, unit, prior):
-    release = candidate["release_id"]
+    release = short(candidate["release_id"])
     return [
         {"id": "prepare", "effect": "Upload and verify an immutable release beside the current one; no service change.",
          "phrase": f"prepare {release} on {hostname}"},
         {"id": "migrate", "effect": "Run the candidate's additive same-schema migrate with the service identity; the old process keeps running.",
          "phrase": f"migrate {release} on {hostname}"},
         {"id": "activate", "effect": f"Switch current, restart {unit} (service outage until healthy) and roll back to {prior} automatically on failed verification.",
-         "phrase": f"activate {release} on {hostname} restarting {unit} with rollback to {prior}"},
+         "phrase": f"activate {release} on {hostname} restarting {unit} with rollback to {short(prior)}"},
     ]
 
 
@@ -578,10 +592,12 @@ def make_plan(args):
     state = inspect_host(host)
     check_candidate_fits(state, candidate)
     binding = state["binding"]
-    binary = f"{host.root}/current/bin/assetq"
+    binary = f"{host.root}/current/{target['executable']}"
     pid, reason = observe_service(host, binding["current_binary_sha256"], None, None)
     if not pid:
         raise Refused(f"existing service is not verifiably healthy, so rollback has no verified target: {reason}")
+    observed = integrity(host, binding, binary)
+    check_schema(observed, candidate)
     work = active_work(host, binding, binary)
     if work["state"] != "idle" and not args.accept_active_work:
         raise Refused(f"active work is {work['state']} ({work}); pass --accept-active-work only after reviewing it")
@@ -591,7 +607,7 @@ def make_plan(args):
         "expires_at": stamp(created + datetime.timedelta(seconds=PLAN_TTL_SECONDS)),
         "target": target, "source": source, "ci": ci, "candidate": candidate,
         "host": {"identity": state["identity"], "libc": state["libc"], "binding": binding, "free": state["free"],
-                 "integrity": integrity(host, binding, binary), "active_work": work},
+                 "integrity": observed, "active_work": work},
         "rollback": {"release_id": binding["current"], "binary_sha256": binding["current_binary_sha256"], "previous_release_id": binding["previous"]},
         "accepted_active_work": bool(args.accept_active_work),
         "actions": action_phrases(candidate, state["identity"]["hostname"], target["unit"], binding["current"]),
@@ -661,7 +677,9 @@ def verify_plan_now(plan, plan_path):
     drift = compare_binding(plan["host"]["binding"], state["binding"])
     if drift:
         raise Refused(f"host changed since the plan: {drift}")
-    work = active_work(host, state["binding"], f"{host.root}/current/bin/assetq")
+    current_binary = f"{host.root}/current/{host.target['executable']}"
+    check_schema(integrity(host, state["binding"], current_binary), plan["candidate"])
+    work = active_work(host, state["binding"], current_binary)
     if work["state"] != "idle" and not plan["accepted_active_work"]:
         raise Refused(f"active work is now {work['state']}; the plan did not accept it")
     return host, state, archive, work
@@ -689,11 +707,12 @@ def prepare_release(host, plan, archive, binding, journal):
     candidate = plan["candidate"]
     release = shlex.quote(candidate["release_id"])
     root = shlex.quote(host.root)
+    executable = shlex.quote(host.target["executable"])
     code, out, err = host.run(f"""set -eu
 umask 022
 cd {root}/releases
 if [ -e {release} ]; then
-  b=$(sha256sum {release}/bin/assetq | cut -d' ' -f1); c=$(sha256sum {release}/candidate.json | cut -d' ' -f1)
+  b=$(sha256sum {release}/{executable} | cut -d' ' -f1); c=$(sha256sum {release}/candidate.json | cut -d' ' -f1)
   if [ "$b" = {candidate['binary_sha256']} ] && [ "$c" = {candidate['candidate_json_sha256']} ]; then echo reuse; exit 0; fi
   echo "release exists with different bytes; preserved" >&2; exit 41
 fi
@@ -717,11 +736,12 @@ rm archive.tar.gz
 sha256sum -c SHA256SUMS >/dev/null
 b=$(sha256sum bin/assetq | cut -d' ' -f1); [ "$b" = {candidate['binary_sha256']} ] || {{ echo "extracted executable digest differs" >&2; exit 43; }}
 c=$(sha256sum candidate.json | cut -d' ' -f1); [ "$c" = {candidate['candidate_json_sha256']} ] || {{ echo "extracted metadata digest differs" >&2; exit 44; }}
+[ -e {executable} ] || cp bin/assetq {executable}
 chmod -R a+rX,go-w .
+chown -R --reference={root}/releases/{shlex.quote(binding['current'])} .
 """, timeout=300)
     if code == 0:
-        code, _, err = host.service(f"{host.root}/releases/{candidate['release_id']}.tmp/bin/assetq", ["selftest"], SELFTEST_SECONDS,
-                                    None, binding["user"], binding["group"])
+        code, _, err = host.service(f"{host.root}/releases/{candidate['release_id']}.tmp/{host.target['executable']}", ["selftest"], SELFTEST_SECONDS)
     if code == 0:
         code, _, err = host.run(f"set -eu\ncd {root}/releases\nmv -T {release}.tmp {release}\n")
     if code:
@@ -733,21 +753,22 @@ chmod -R a+rX,go-w .
 def switch_release(host, to_release, expected_current, new_previous):
     """Atomic rename of one-version pointers (CoreQ R12 step 6, R13); releases stay in place."""
     root = shlex.quote(host.root)
+    executable = shlex.quote(host.target["executable"])
     if new_previous:
-        previous = f"ln -sfn releases/{shlex.quote(new_previous)} previous.tmp-$$\nmv -T previous.tmp-$$ previous\n"
+        previous = f"ln -sfn {root}/releases/{shlex.quote(new_previous)} previous.tmp-$$\nmv -T previous.tmp-$$ previous\n"
     else:
         previous = "rm -f previous\n"
     return host.run(f"""set -eu
 cd {root}
-[ -x releases/{shlex.quote(to_release)}/bin/assetq ] || {{ echo "release {to_release} is absent" >&2; exit 45; }}
+[ -x releases/{shlex.quote(to_release)}/{executable} ] || {{ echo "release {to_release} is absent" >&2; exit 45; }}
 c=$(readlink current); [ "${{c##*/}}" = {shlex.quote(expected_current)} ] || {{ echo "current is $c, expected {expected_current}" >&2; exit 46; }}
-{previous}ln -sfn releases/{shlex.quote(to_release)} current.tmp-$$
+{previous}ln -sfn {root}/releases/{shlex.quote(to_release)} current.tmp-$$
 mv -T current.tmp-$$ current
 """)
 
 
 def restart(host):
-    return host.run(f"systemctl restart {shlex.quote(host.target['unit'])}", timeout=240)
+    return host.run(host.user_command(f"systemctl --user restart {shlex.quote(host.target['unit'])}"), timeout=240)
 
 
 def verify_activation(host, plan, baseline, before_pid):
@@ -761,13 +782,13 @@ def verify_activation(host, plan, baseline, before_pid):
         state = inspect_host(host)
     except Refused as error:
         return str(error)
-    drift = compare_binding(binding, state["binding"], ignore=("current", "previous", "current_binary_sha256", "schema"))
+    drift = compare_binding(binding, state["binding"], ignore=("current", "previous", "current_binary_sha256"))
     if drift:
         return f"service configuration changed: {drift}"
     if state["binding"]["current"] != candidate["release_id"] or state["binding"]["current_binary_sha256"] != candidate["binary_sha256"]:
         return "current does not name the candidate"
     try:
-        after = integrity(host, binding, f"{host.root}/current/bin/assetq")
+        after = integrity(host, binding, f"{host.root}/current/{host.target['executable']}")
     except Refused as error:
         return str(error)
     decreased = [k for k in MONOTONIC if after[k] < baseline[k]]
@@ -792,7 +813,7 @@ def restore_previous(host, plan, journal, reason, before_pid):
         journal.record("rollback", "uncertain", reason=failure)
         raise Uncertain(f"rollback did not verify after: {reason}. {failure}")
     try:
-        after = integrity(host, plan["host"]["binding"], f"{host.root}/current/bin/assetq")
+        after = integrity(host, plan["host"]["binding"], f"{host.root}/current/{host.target['executable']}")
     except (Refused, Transport) as error:
         journal.record("rollback", "uncertain", reason=str(error))
         raise Uncertain(f"rollback integrity unknown after: {reason}. {error}")
@@ -823,10 +844,10 @@ def apply_plan(args):
     try:
         prepare_release(host, plan, archive, binding, journal)
         ask(actions["migrate"]["phrase"], actions["migrate"]["effect"])
-        baseline = integrity(host, binding, f"{host.root}/current/bin/assetq")
+        baseline = integrity(host, binding, f"{host.root}/current/{host.target['executable']}")
         journal.record("migrate", "intent", baseline=baseline)
-        code, _, err = host.service(f"{host.root}/releases/{plan['candidate']['release_id']}/bin/assetq", ["migrate"], SERVICE_SECONDS,
-                                    binding["env_file"], binding["user"], binding["group"])
+        code, _, err = host.service(f"{host.root}/releases/{plan['candidate']['release_id']}/{host.target['executable']}", ["migrate"], SERVICE_SECONDS,
+                                    binding["env_file"])
         if code:
             raise Refused(f"migrate failed; current release and service unchanged: {err}")
         journal.record("migrate", "done")
@@ -887,14 +908,14 @@ def rollback_plan(args):
     binding = state["binding"]
     if binding["current"] != plan["candidate"]["release_id"] or binding["current_binary_sha256"] != plan["candidate"]["binary_sha256"]:
         raise Refused(f"current is {binding['current']}, not this plan's candidate; rollback does not apply")
-    drift = compare_binding(plan["host"]["binding"], binding, ignore=("current", "previous", "current_binary_sha256", "schema"))
+    drift = compare_binding(plan["host"]["binding"], binding, ignore=("current", "previous", "current_binary_sha256"))
     if drift:
         raise Refused(f"service configuration changed since the plan: {drift}")
-    code, out, err = host.run(f"set -eu\nsha256sum {shlex.quote(host.root)}/releases/{shlex.quote(rollback['release_id'])}/bin/assetq | cut -d' ' -f1\n")
+    code, out, err = host.run(f"set -eu\nsha256sum {shlex.quote(host.root)}/releases/{shlex.quote(rollback['release_id'])}/{shlex.quote(host.target['executable'])} | cut -d' ' -f1\n")
     if code or out.strip() != rollback["binary_sha256"]:
         raise Refused(f"preserved release {rollback['release_id']} is missing or differs: {err}")
-    work = active_work(host, binding, f"{host.root}/current/bin/assetq")
-    phrase = f"rollback {host.target['unit']} on {state['identity']['hostname']} to {rollback['release_id']}"
+    work = active_work(host, binding, f"{host.root}/current/{host.target['executable']}")
+    phrase = f"rollback {host.target['unit']} on {state['identity']['hostname']} to {short(rollback['release_id'])}"
     if args.dry_run:
         print(json.dumps({"result": "verified; dry run made no host effect", "phrase": phrase, "active_work": work}, indent=2))
         return 0
