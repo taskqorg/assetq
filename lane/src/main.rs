@@ -176,16 +176,21 @@ impl Telemetry {
             // ponytail: unbounded-API store with CoreQ's 28 MiB cap; Store::open_bounded when an installation budget lock exists here.
             let mut store: Option<Arc<Store>> = None;
             let mut shipping = false;
+            let prepare = |store: &mut Option<Arc<Store>>, shipping: &mut bool| {
+                if store.is_none() {
+                    *store = Store::open(&path).map(Arc::new).map_err(|e| eprintln!("pipe-read: telemetry store: {e}")).ok();
+                }
+                if let (Some(open), Some(connection), false) = (&*store, &connection, *shipping) {
+                    *shipping = true;
+                    start_shipper(open.clone(), connection.clone(), shipper_state.clone());
+                }
+            };
+            // At start, not at the first call: records kept from the last run must ship from an idle lane too.
+            prepare(&mut store, &mut shipping);
             while let Ok(first) = receiver.recv() {
                 let mut batch = vec![first];
                 batch.extend(receiver.try_iter().take(256));
-                if store.is_none() {
-                    store = Store::open(&path).map(Arc::new).map_err(|e| eprintln!("pipe-read: telemetry store: {e}")).ok();
-                }
-                if let (Some(open), Some(connection), false) = (&store, &connection, shipping) {
-                    shipping = true;
-                    start_shipper(open.clone(), connection.clone(), shipper_state.clone());
-                }
+                prepare(&mut store, &mut shipping);
                 let events: Vec<Event> = batch
                     .iter()
                     .filter_map(|v| Event::observation(v.clone()).map_err(|e| eprintln!("pipe-read: record: {e}")).ok())

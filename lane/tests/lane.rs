@@ -387,6 +387,23 @@ fn snapshot_loss_keeps_last_known_good() {
     );
 }
 
+/// Defect: the shipper started at the first call, so an idle lane never sent records kept from its last run.
+#[test]
+fn shipper_runs_from_start_without_any_call() {
+    let upstream = ok_provider();
+    let connection = std::env::temp_dir().join(format!("pipe-read-shipper-{}", std::process::id()));
+    std::fs::create_dir_all(&connection).unwrap();
+    let lane = Fixture::new(&upstream.url, &["invented-key-a"], json!({"coreq_connection": connection}));
+    let end = Instant::now() + Duration::from_secs(5);
+    let mut shipper = lane.health()["telemetry"]["shipper"].clone();
+    while shipper != "off" && Instant::now() < end {
+        std::thread::sleep(Duration::from_millis(50));
+        shipper = lane.health()["telemetry"]["shipper"].clone();
+    }
+    std::fs::remove_dir_all(&connection).unwrap();
+    assert_eq!(shipper, "off");
+}
+
 #[test]
 fn unusable_store_counts_loss_and_calls_keep_working() {
     let upstream = ok_provider();
