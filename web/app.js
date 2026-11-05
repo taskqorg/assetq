@@ -325,4 +325,8 @@ async function bootstrap(){
 }
 document.querySelector('#project').addEventListener('change',e=>{drafts.clear();main.replaceChildren();navigate(url('/assets',{project:e.target.value}));});
 document.querySelector('#logout').addEventListener('click',async()=>{try{const r=await fetch('/browser/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':session?.csrf||''}});if(!r.ok)throw new Error('Could not confirm session termination.');loseSession('AssetQ session ended. Host sign-in is managed separately.');}catch(e){loseSession(e.message);}});
+const header = document.querySelector('header');
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty('--header-height', `${header.getBoundingClientRect().height}px`);
+}).observe(header);
 bootstrap();

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const request = require('../web/requests.js');
 
 // R4/R9: exercise actual detail/preview events; this DOM fixture proves no geometry.
-test('retained-render captions require a loaded model preview and disappear on failure', async () => {
+test('header reflow stays visible and retained-render captions require a loaded model preview', async () => {
   const vm = require('node:vm');
   const {readFileSync} = require('node:fs');
   class Node {
@@ -25,17 +25,28 @@ test('retained-render captions require a loaded model preview and disappear on f
     }
     setAttribute(key, value) { this.attrs[key] = value; }
     addEventListener(name, handler) { this.events[name] = handler; }
+    getBoundingClientRect() { return {height: this.height}; }
     get textContent() { return this.text + this.children.map(n => n.textContent).join(''); }
   }
   const controls = new Map();
+  const styles = new Map();
+  let resize, observed;
   const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
     location: {origin: 'https://assets.ufobe.com', search: ''},
-    document: {createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
+    document: {documentElement: {style: {setProperty: (key, value) => styles.set(key, value)}},
+      createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
       querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
       addEventListener() {}}, addEventListener() {},
     // Keep automatic sign-in pending; the fixture supplies an already scoped session.
-    fetch: () => new Promise(() => {})});
+    fetch: () => new Promise(() => {}),
+    ResizeObserver: class { constructor(callback) { resize = callback; } observe(node) { observed = node; } }});
   vm.runInContext(readFileSync(require.resolve('../web/app.js'), 'utf8'), context);
+  // R9: wrapping/text scaling must move the fixed rail on growth and shrinkage.
+  assert.equal(observed, controls.get('header'));
+  for (const height of [76, 217.35, 113.35, 76]) {
+    observed.height = height; resize();
+    assert.equal(styles.get('--header-height'), `${height}px`);
+  }
   vm.runInContext("project = 'project-a'; session = {projects:[{id:project,role:'member'}]}; api = async path => path.includes('/related?') ? {parents:[],outputs:[],children:[]} : fixture;", context);
   const all = node => [node, ...node.children.flatMap(all)];
   const caption = 'Retained render of this job; not a live 3D view.';
