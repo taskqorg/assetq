@@ -11,6 +11,7 @@ import datetime
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import shlex
@@ -67,6 +68,26 @@ def now():
 
 def stamp(moment):
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def human_time(moment, reference):
+    """A4/specq Time: operator diagnostics span hosts; machine stamps stay unchanged."""
+    seconds = (moment - reference).total_seconds()
+    if seconds > 0:
+        if seconds >= 86400:
+            relative = f"{math.ceil(seconds / 86400)}d"
+        elif seconds >= 18000:
+            relative = f"{math.ceil(seconds / 3600)}h"
+        else:
+            minutes = math.ceil(seconds / 60)
+            relative = f"{minutes // 60}:{minutes % 60:02}"
+    elif seconds == 0:
+        relative = "now"
+    else:
+        minutes = int(-seconds // 60)
+        relative = ("<1m" if minutes < 1 else f"{minutes}m" if minutes < 60 else
+                    f"{minutes // 60}h" if minutes < 1440 else f"{minutes // 1440}d") + " ago"
+    return f"{relative} ({moment.astimezone(datetime.timezone.utc):%Y-%m-%d %H:%M UTC})"
 
 
 def sha256_hex(data):
@@ -574,7 +595,7 @@ def check_fresh(plan):
     created = datetime.datetime.strptime(plan["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
     expires = datetime.datetime.strptime(plan["expires_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
     if moment >= expires or moment < created - datetime.timedelta(minutes=5):
-        raise Refused(f"plan is stale: valid {plan['created_at']} to {plan['expires_at']}; create and review a new plan")
+        raise Refused(f"plan is stale: created {human_time(created, moment)}; expires {human_time(expires, moment)}; create and review a new plan")
 
 
 def short(release):

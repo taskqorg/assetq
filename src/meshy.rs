@@ -839,17 +839,17 @@ fn texture_dimensions(bytes: &[u8]) -> Res<(u32, u32)> {
 
 // Read the existing executor boundary; never install or change host limits here.
 fn native_memory_bound() -> Res<u64> {
-    let mut bound = u64::MAX;
     #[cfg(unix)]
-    {
+    let bound = {
         let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
         if unsafe { libc::getrlimit(libc::RLIMIT_AS, limit.as_mut_ptr()) } != 0 {
             return Err("native memory boundary readback unavailable".into());
         }
-        bound = unsafe { limit.assume_init() }.rlim_cur as u64;
-    }
+        unsafe { limit.assume_init() }.rlim_cur as u64
+    };
     #[cfg(windows)]
-    {
+    let bound = {
+        let mut bound = u64::MAX;
         use windows_sys::Win32::System::JobObjects::*;
         let mut limits = std::mem::MaybeUninit::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>::zeroed();
         if unsafe {
@@ -874,7 +874,10 @@ fn native_memory_bound() -> Res<u64> {
         if limits.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_JOB_MEMORY != 0 {
             bound = bound.min(limits.JobMemoryLimit as u64);
         }
-    }
+        bound
+    };
+    #[cfg(not(any(unix, windows)))]
+    let bound = u64::MAX;
     if !(512 << 20..=2 << 30).contains(&bound) {
         return Err("qualified inherited native memory boundary must be 512 MiB..2 GiB; no limit is changed".into());
     }

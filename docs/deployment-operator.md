@@ -17,7 +17,7 @@
 | Service command | The unit runs `<install_root>/current/<executable> serve --listen 127.0.0.1:<port>`, possibly behind a resource wrapper, with one protected environment file | The plan binds the whole command and refuses any other shape instead of adapting to it |
 | Releases | `current` is an absolute symlink to `<install_root>/releases/<executable-sha256>` | New releases use the same name and pointer form |
 
-The CI and repository rows are read from GitHub. The service manager and release rows come from a PM host readback on the task; the service command row comes from [deployment](deploy.md) and the [managed-delivery evidence](evidence/6/README.md). This task did not inspect a host, and the exact `ExecStart` and release contents were not read, so the first `plan` on the host is what verifies them.
+The CI and repository rows are read from GitHub. The service manager and release rows come from a PM host readback on the task; the service command row comes from [deployment](deploy.md) and the [managed-delivery evidence](https://github.com/taskqorg/assetq/blob/7388734a40502323fb34932471ed4b8f7a0d089b/docs/evidence/6/README.md). This task did not inspect a host, and the exact `ExecStart` and release contents were not read, so the first `plan` on the host is what verifies them.
 
 ### CoreQ lifecycle conventions
 

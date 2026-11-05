@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import tarfile
@@ -87,6 +88,12 @@ exec sh -c "$remote"
 }
 
 
+if sys.platform == "darwin":
+    # The simulated Linux host needs atomic mv -T, unavailable in BSD mv.
+    rename = 'import os,sys; assert sys.argv[1] == "-T"; os.rename(sys.argv[2],sys.argv[3])'
+    TOOLS["mv"] = f'exec {shlex.quote(sys.executable)} -c {shlex.quote(rename)} "$@"\n'
+
+
 # The bytes the service really sends: `serde_json::to_vec_pretty` in `src/api.rs`, with no final newline.
 HEALTH = '{\n  "service": "up",\n  "version": "0.1.0",\n  "database": "ok"\n}'
 
@@ -109,6 +116,19 @@ def blob(data):
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+class Time(unittest.TestCase):
+    # A4/specq Time: public operator diagnostics use relative time and exact UTC.
+    def test_operator_time_boundaries(self):
+        reference = datetime.datetime(2026, 11, 5, 14, 30, tzinfo=datetime.timezone.utc)
+        cases = [(-86400, '1d ago'), (-3600, '1h ago'), (-60, '1m ago'), (-59, '<1m ago'),
+                 (0, 'now'), (1, '0:01'), (60, '0:01'), (61, '0:02'), (17999, '5:00'),
+                 (18000, '5h'), (18001, '6h'), (86399, '24h'), (86400, '1d'), (86401, '2d')]
+        for delta, expected in cases:
+            moment = reference + datetime.timedelta(seconds=delta)
+            exact = moment.strftime('%Y-%m-%d %H:%M UTC')
+            self.assertEqual(deploy.human_time(moment, reference), f'{expected} ({exact})')
 
 
 class Evidence:
@@ -585,6 +605,8 @@ class Stale(Fixture):
         with patch.object(deploy, "now", lambda: future):
             self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED)
         self.assertIn("stale", self.stderr)
+        self.assertIn("ago (", self.stderr)
+        self.assertIn(" UTC)", self.stderr)
 
         self.assertEqual(self.call("apply", "--plan", str(path), "--confirm-plan", "0" * 64), deploy.EXIT_REFUSED)
         self.assertIn("reviewed plan digest", self.stderr)
