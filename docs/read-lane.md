@@ -101,7 +101,7 @@ read_lane_backup.sh <age recipient> /root/pipe-read-copy.json   # on the lane ho
 scp pds18:/root/pipe-read-copy.json ~/.local/share/pipe/pipe-read-copy.json   # on the off-host target
 ```
 
-Take a new copy after any key, config or grant change. The copy holds keys, config, the retained snapshot (hashes only), the disabled-key list and the usage baseline. It holds no telemetry; records not yet shipped stay on the old host.
+Take a new copy after any key, config or grant change. The copy holds keys, config, the retained snapshot (hashes only), the disabled-key list and the usage baseline. It holds no telemetry and no telemetry connection: records not yet shipped stay on the old host, and a restored host reads `shipper: off` until it is enrolled again with owner approval.
 
 ## Restore
 
