@@ -49,6 +49,16 @@ pub struct Store {
     floor: u64,
 }
 
+#[derive(Debug)]
+pub struct WriterLock(File);
+
+impl Drop for WriterLock {
+    fn drop(&mut self) {
+        // Closing alone leaves Unix locks held by descriptors inherited during a concurrent fork.
+        let _ = self.0.unlock();
+    }
+}
+
 pub fn valid_sha(sha: &str) -> bool {
     sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
@@ -137,10 +147,10 @@ impl Store {
     }
 
     /// Independent of the DB session: its loss must not release a live stream's reservation.
-    pub fn writer_lock(&self) -> Result<File, StoreError> {
+    pub fn writer_lock(&self) -> Result<WriterLock, StoreError> {
         let file = fs::OpenOptions::new().create(true).truncate(false).write(true).open(self.root.join("writer.lock")).map_err(map_io)?;
         file.try_lock().map_err(|e| StoreError::Full(format!("store writer reservation unavailable: {e}")))?;
-        Ok(file)
+        Ok(WriterLock(file))
     }
 
     fn path(&self, sha: &str) -> PathBuf {
@@ -306,6 +316,52 @@ fn map_io(e: io::Error) -> StoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // R7: a forked child must neither prolong a finished reservation nor bypass a live writer.
+    #[cfg(unix)]
+    #[test]
+    fn resource_bounds_writer_release_survives_fork() {
+        use std::os::{fd::AsRawFd, unix::net::UnixStream};
+
+        let dir = std::env::temp_dir().join(format!("assetq-fork-{}", uuid::Uuid::new_v4()));
+        let store = Store::open(&dir).unwrap();
+        let writer = store.writer_lock().unwrap();
+        let (release, inherited) = UnixStream::pair().unwrap();
+        // After fork the child only calls async-signal-safe functions and never runs Rust drops.
+        let child = unsafe { libc::fork() };
+        assert!(child >= 0, "{}", io::Error::last_os_error());
+        if child == 0 {
+            unsafe {
+                libc::close(release.as_raw_fd());
+                let mut byte = 0u8;
+                while libc::read(inherited.as_raw_fd(), (&mut byte as *mut u8).cast(), 1) < 0 {}
+                libc::_exit(0);
+            }
+        }
+        drop(inherited);
+        let contended = store.writer_lock();
+        drop(writer);
+        let reacquired = store.writer_lock();
+        let still_exclusive = store.writer_lock();
+        drop(release);
+        let mut status = 0;
+        // Reap this child even if a signal interrupts the wait.
+        let waited = loop {
+            let pid = unsafe { libc::waitpid(child, &mut status, 0) };
+            if pid >= 0 || io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+                break pid;
+            }
+        };
+        assert_eq!(waited, child);
+        assert_eq!(status, 0);
+        assert!(matches!(contended, Err(StoreError::Full(_))), "live writer must retain exclusion");
+        assert!(reacquired.is_ok(), "child retained a finished writer reservation: {reacquired:?}");
+        assert!(matches!(still_exclusive, Err(StoreError::Full(_))), "replacement writer must retain exclusion");
+        drop(reacquired);
+        let stored = store.put(&mut &b"retained"[..], 100, 100).unwrap();
+        store.verify(&stored.sha256, stored.size).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     // R7: each chunk observes changing free space and real temp/orphan quota;
     // unknown observations stop the stream without modifying committed bytes.
