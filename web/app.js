@@ -58,9 +58,10 @@ const items = data => Array.isArray(data) ? data : data.items || [];
 function pageLink(path, data, params = {}) { return data.next ? el('p', {class: 'paging'}, link('Next page →', path, {...params, after: data.next})) : null; }
 function preview(object, compact = false) {
   const box = el('div', {class: compact ? 'thumb' : 'preview'});
-  const fallback = () => box.replaceChildren(el('div', {class: 'file-fallback', title: object.content_type}, compact ? 'File' : object.content_type, compact ? null : el('small', {}, 'Preview unavailable; download the original.')));
+  const caption = !compact && object.content_type === 'model/gltf-binary' ? el('small', {}, 'Retained render of this job; not a live 3D view.') : null;
+  const fallback = () => { caption?.remove(); box.replaceChildren(el('div', {class: 'file-fallback', title: object.content_type}, compact ? 'File' : object.content_type, compact ? null : el('small', {}, 'Preview unavailable; download the original.'))); };
   if (object.content_type !== 'image/png' && object.content_type !== 'model/gltf-binary') { fallback(); return box; }
-  const img = el('img', {src: url(`/browser/v1/objects/${encodeURIComponent(object.id)}/preview`), alt: object.provenance?.name || `Retained PNG ${object.id}`, loading: 'lazy', onerror: fallback});
+  const img = el('img', {src: url(`/browser/v1/objects/${encodeURIComponent(object.id)}/preview`), alt: object.provenance?.name || `Retained PNG ${object.id}`, loading: 'lazy', onload: () => { if (caption) box.after(caption); }, onerror: fallback});
   box.append(img); return box;
 }
 function download(object) { return link('Download original', `/browser/v1/objects/${encodeURIComponent(object.id)}/content`); }
@@ -89,8 +90,7 @@ addEventListener('popstate', () => render(true));
 async function assetDetail(id, token) {
   const [o, related] = await Promise.all([api(`objects/${encodeURIComponent(id)}`), api(`objects/${encodeURIComponent(id)}/related?` + new URLSearchParams({after:new URLSearchParams(location.search).get('after') || ''}))]);
   if (token !== epoch) return null;
-  const image = o, caption = o.content_type === 'model/gltf-binary' ? 'Retained render of this job; not a live 3D view.' : null;
-  const box = panel(el('h2', {}, objectName(o)), el('p', {class: 'muted'}, `${o.content_type} / ${o.size.toLocaleString()} bytes`), preview(image), caption ? el('small', {}, caption) : null,
+  const box = panel(el('h2', {}, objectName(o)), el('p', {class: 'muted'}, `${o.content_type} / ${o.size.toLocaleString()} bytes`), preview(o),
     el('div', {class: 'actions'}, download(o), o.job_id ? link('Open job', `/jobs/${o.job_id}`) : null),
     properties({'Validation': o.provenance?.provider_evidence?.validation?.valid === true ? 'Passed' : o.provenance?.provider_evidence?.validation?.valid === false ? 'Failed' : 'Unknown: no validation verdict recorded in provenance', 'Immutable object': o.id, 'SHA-256': o.sha256, 'Owner acceptance': o.acceptance, 'Synthetic': String(o.synthetic), 'Created': o.created_at, 'Retention': o.retention_until || 'No automatic deletion'}));
   const objectLinks = (label, list) => el('section', {}, el('h3', {}, label), list.length ? el('ul', {}, list.map(x => el('li', {}, link(objectName(x), `/assets/${x.id}`)))) : el('p', {class: 'muted'}, 'None recorded.'));

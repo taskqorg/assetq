@@ -4,6 +4,70 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('../web/requests.js');
 
+// R4/R9: exercise actual detail/preview events; this DOM fixture proves no geometry.
+test('retained-render captions require a loaded model preview and disappear on failure', async () => {
+  const vm = require('node:vm');
+  const {readFileSync} = require('node:fs');
+  class Node {
+    constructor(tag = '', text = '') { this.tag = tag; this.text = text; this.children = []; this.attrs = {}; this.events = {}; }
+    append(...children) {
+      for (const child of children) {
+        if (child.parent) child.parent.children = child.parent.children.filter(n => n !== child);
+        child.parent = this; this.children.push(child);
+      }
+    }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    remove() { if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); this.parent = null; }
+    after(node) {
+      if (!this.parent) return;
+      node.remove(); node.parent = this.parent;
+      this.parent.children.splice(this.parent.children.indexOf(this) + 1, 0, node);
+    }
+    setAttribute(key, value) { this.attrs[key] = value; }
+    addEventListener(name, handler) { this.events[name] = handler; }
+    get textContent() { return this.text + this.children.map(n => n.textContent).join(''); }
+  }
+  const controls = new Map();
+  const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
+    location: {origin: 'https://assets.ufobe.com', search: ''},
+    document: {createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
+      querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
+      addEventListener() {}}, addEventListener() {},
+    // Keep automatic sign-in pending; the fixture supplies an already scoped session.
+    fetch: () => new Promise(() => {})});
+  vm.runInContext(readFileSync(require.resolve('../web/app.js'), 'utf8'), context);
+  vm.runInContext("project = 'project-a'; session = {projects:[{id:project,role:'member'}]}; api = async path => path.includes('/related?') ? {parents:[],outputs:[],children:[]} : fixture;", context);
+  const all = node => [node, ...node.children.flatMap(all)];
+  const caption = 'Retained render of this job; not a live 3D view.';
+  for (const type of ['model/gltf-binary', 'image/png', 'application/x-assetq-synthetic']) {
+    context.fixture = {id:'isolated-copy', content_type:type, size:123, provenance:{name:'Invented isolated copy'}};
+    const detail = await vm.runInContext("assetDetail(fixture.id, epoch)", context);
+    assert.equal(detail.textContent.includes(caption), false, `${type}: loading/unavailable is not a retained render`);
+    const original = all(detail).find(n => n.tag === 'a' && n.textContent === 'Download original');
+    assert.equal(original.attrs.href, '/browser/v1/objects/isolated-copy/content?project=project-a');
+    const image = all(detail).find(n => n.tag === 'img');
+    if (!image) { assert.ok(detail.textContent.includes('Preview unavailable; download the original.')); continue; }
+    assert.equal(image.attrs.src, '/browser/v1/objects/isolated-copy/preview?project=project-a');
+    // Missing retained relationship or denied/corrupt preview must keep the fallback truthful.
+    image.events.error();
+    assert.ok(detail.textContent.includes(type));
+    assert.ok(detail.textContent.includes('Preview unavailable; download the original.'));
+    assert.equal(detail.textContent.includes(caption), false);
+    const loaded = await vm.runInContext("assetDetail(fixture.id, epoch)", context);
+    const loadedImage = all(loaded).find(n => n.tag === 'img');
+    loadedImage.events.load?.(); loadedImage.events.load?.();
+    assert.equal(all(loaded).filter(n => n.tag === 'small' && n.textContent === caption).length, type === 'model/gltf-binary' ? 1 : 0);
+    loadedImage.events.error();
+    assert.equal(loaded.textContent.includes(caption), false);
+  }
+  context.fixture.content_type = 'model/gltf-binary';
+  const thumbnail = vm.runInContext('preview(fixture, true)', context);
+  thumbnail.children[0].events.load?.();
+  assert.equal(thumbnail.textContent.includes(caption), false);
+  thumbnail.children[0].events.error();
+  assert.equal(thumbnail.textContent, 'File');
+});
+
 test('default and cleared filters omit exact empty predicates', () => {
   for(const path of ['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100']) {
     const url=request.apiUrl(path,'project-a','https://assets.ufobe.com');
