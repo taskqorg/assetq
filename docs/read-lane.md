@@ -71,7 +71,7 @@ sed -i '/^<key id>$/d' /var/lib/pipe-read/disabled-keys && systemctl restart pip
 
 Rotate keys: edit `tavily-keys`, restart, then take a new encrypted copy. Connect telemetry once, with owner approval in the browser, as user `pipe-read`: `pipe-read enroll /etc/pipe-read/config.json https://dash.ufobe.com/machine`. Only `POST /machine/*` passes DashQ's guard without a browser session.
 
-Reconcile usage: `systemctl start pipe-read-reconcile.service`, then read its journal. The first run records the baseline per key; each later run prints `tavily_delta`, `recorded` and `difference` per key, and `calls_without_units`. Any other client sharing a key shows up as a positive difference, so the check needs keys that only the lane uses, or an accounted difference.
+Reconcile usage: `systemctl start pipe-read-reconcile.service`, then read its journal. The first run records the baseline per key; each later run prints `tavily_delta`, `recorded` and `difference` per key, `calls_without_units`, and `runtimes`, the recorded calls per caller runtime. Any other client sharing a key shows up as a positive difference, so the check needs keys that only the lane uses, or an accounted difference.
 
 Probe, on another host, from cron or a timer:
 
@@ -90,26 +90,40 @@ python3 pipe_mcp.py install --url http://127.0.0.1:8741 --token-file <file>
 python3 pipe_mcp.py install --url https://pipe.ufobe.com --token-file <file> --access-file <file>
 ```
 
-It writes `~/.config/pipe/read.json` (mode 0600), copies the client to `~/.local/share/pipe/mcp.py` and registers the server `pipe` with `claude mcp add` and `codex mcp add`. It does not touch `shared-search`.
+It writes `~/.config/pipe/read.json` (mode 0600), copies the client to `~/.local/share/pipe/mcp.py` and registers the server `pipe` with `claude mcp add` and a text edit of Codex's `config.toml`, because `codex mcp add` rewrites other servers' fields. It does not touch `shared-search`.
 
 ## Backup
 
-Prerequisites: `sops` and `age` on the lane host, an age identity kept off the host by the operator. No paid service is involved.
+Prerequisites: `sops` and `age` on the lane host, an age identity kept off the host by the operator. No paid service is involved. The named recipient, identity and target are in [prerequisites](read-lane-prerequisites.md#encrypted-copy).
 
 ```sh
-read_lane_backup.sh <age recipient> /root/pipe-read-copy.json
-scp /root/pipe-read-copy.json <off-host target>
+read_lane_backup.sh <age recipient> /root/pipe-read-copy.json   # on the lane host, as root
+scp pds18:/root/pipe-read-copy.json ~/.local/share/pipe/pipe-read-copy.json   # on the off-host target
 ```
 
 Take a new copy after any key, config or grant change. The copy holds keys, config, the retained snapshot (hashes only), the disabled-key list and the usage baseline. It holds no telemetry; records not yet shipped stay on the old host.
 
 ## Restore
 
-Prerequisites on the clean host or container: root, `sops`, `tar`, `curl`, network; from elsewhere only the encrypted copy, the age identity and the `pipe-read` release from CI.
+Prerequisites: root in a clean host or container with network; only the encrypted copy, the age identity and the `pipe-read` release come from elsewhere. These are the steps run on a clean `ubuntu:24.04` container, with the identity from the operator's Keychain on standard input.
 
-1. Unpack the release: `tar -xzf pipe-read-<...>.tar.gz`, after checking it against `SHA256SUMS`.
-2. Restore: `SOPS_AGE_KEY_FILE=<identity> scripts/read_lane_restore.sh <copy> <release>`.
-3. Without systemd, start by hand: `CREDENTIALS_DIRECTORY=/etc/pipe-read setpriv --reuid=pipe-read --regid=pipe-read --init-groups /opt/pipe-read/bin/pipe-read serve <config with "listen">` after making `tavily-keys` readable to that process only.
-4. Accept: `curl -H "Authorization: Bearer <token>" -d '{"query":"..."}' http://127.0.0.1:8741/v1/read/web_search` returns real results.
+1. Add the tools: `apt-get install -y curl ca-certificates`, then install the `sops` release binary after checking it against that release's checksum file.
+2. Unpack the release: check `pipe-read-<...>.tar.gz` against `SHA256SUMS`, then `tar -xzf` it into `<release>` without its top directory.
+3. Restore, reading the identity from standard input so that it never reaches a file or an argument:
 
-The token works because the retained snapshot holds its hash. The control side is not needed to serve; it resumes publishing when restored. Verify by a run: a restore counts only with its exact steps recorded on a clean host or container.
+   ```sh
+   IFS= read -r SOPS_AGE_KEY; export SOPS_AGE_KEY; sh <release>/scripts/read_lane_restore.sh <copy> <release>
+   ```
+
+4. With systemd the units are now running. Without it, start by hand:
+
+   ```sh
+   install -d -m 0700 -o pipe-read /run/cred
+   install -m 0400 -o pipe-read /etc/pipe-read/tavily-keys /run/cred/tavily-keys
+   sed 's|^{|{"listen":"127.0.0.1:8741",|' /etc/pipe-read/config.json > /tmp/c.json
+   CREDENTIALS_DIRECTORY=/run/cred setpriv --reuid=pipe-read --regid=pipe-read --init-groups /opt/pipe-read/bin/pipe-read serve /tmp/c.json
+   ```
+
+5. Accept: `curl -H "Authorization: Bearer <token>" -d '{"query":"..."}' http://127.0.0.1:8741/v1/read/web_search` returns real results.
+
+The token works because the retained snapshot holds its hash. The log line `control snapshot refused` is expected, and neither PostgreSQL nor the control side is needed to serve. A restore counts only when its steps ran on a clean host or container. A new host without user `hermes` keeps its alerts in the spool.

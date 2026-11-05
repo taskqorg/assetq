@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -46,6 +47,11 @@ def config_path():
     return Path.home() / ".config/pipe/read.json"
 
 
+def tls_context():
+    """python.org builds on macOS ship no CA bundle; the OS one lives here. Elsewhere the default store is right."""
+    return ssl.create_default_context(cafile="/etc/ssl/cert.pem" if os.path.exists("/etc/ssl/cert.pem") else None)
+
+
 def access_headers(path):
     """Guard headers from a shell env file, read at use so that its values are never copied."""
     names = {"CF_ACCESS_CLIENT_ID": "CF-Access-Client-Id", "CF_ACCESS_CLIENT_SECRET": "CF-Access-Client-Secret"}
@@ -54,7 +60,8 @@ def access_headers(path):
 
 
 def call_pipe(config, runtime, tool, arguments):
-    headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json", "X-Pipe-Runtime": runtime}
+    headers = {"Authorization": f"Bearer {config['token']}", "Content-Type": "application/json", "X-Pipe-Runtime": runtime,
+               "User-Agent": "pipe-mcp/1"}  # Cloudflare refuses Python's default agent with 403.
     task = os.environ.get("PIPE_TASK") or os.environ.get("TASKQ_TASK")
     if task:
         headers["X-Pipe-Task"] = task
@@ -65,7 +72,7 @@ def call_pipe(config, runtime, tool, arguments):
             return True, f"Pipe {tool} failed: access file {config['access_file']} is unusable: {type(error).__name__}"
     request = urllib.request.Request(f"{config['url']}/v1/read/{tool}", json.dumps(arguments).encode(), headers)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as reply:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS, context=tls_context()) as reply:
             return False, reply.read().decode()
     except urllib.error.HTTPError as error:
         text = error.read(4096).decode(errors="replace")
@@ -119,20 +126,22 @@ def serve(runtime):
 
 
 def register_codex(command):
-    # Same approval shape as the other web server, so a tool call never waits on a person.
-    subprocess.run(["codex", "mcp", "remove", NAME], capture_output=True)
-    subprocess.run(["codex", "mcp", "add", NAME, "--", *command, "codex"], check=True, capture_output=True)
+    # Text edit, not `codex mcp add`: that command rewrites the whole file and drops fields of other servers.
     path = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
-    text = path.read_text()
-    block = f'[mcp_servers.{NAME}]'
-    extra = 'env_vars = ["TASKQ_TASK", "PIPE_TASK"]\n'
-    if block in text and "env_vars" not in text.split(block, 1)[1].split("\n[", 1)[0]:
-        text = text.replace(block + "\n", block + "\n" + extra, 1)
+    text = path.read_text() if path.exists() else ""
+    kept, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("["):
+            skipping = line.startswith((f"[mcp_servers.{NAME}]", f"[mcp_servers.{NAME}."))
+        if not skipping:
+            kept.append(line)
+    # json.dumps writes valid TOML strings and arrays for these plain values.
+    block = (f"[mcp_servers.{NAME}]\ncommand = {json.dumps(command[0])}\nargs = {json.dumps([*command[1:], 'codex'])}\n"
+             'env_vars = ["TASKQ_TASK", "PIPE_TASK"]\n')
+    # Same approval shape as the other web server, so a tool call never waits on a person.
     for tool in TOOLS:
-        section = f'[mcp_servers.{NAME}.tools.{tool["name"]}]'
-        if section not in text:
-            text = text.rstrip("\n") + f'\n\n{section}\napproval_mode = "approve"\n'
-    path.write_text(text)
+        block += f'\n[mcp_servers.{NAME}.tools.{tool["name"]}]\napproval_mode = "approve"\n'
+    path.write_text("".join(kept).rstrip("\n") + "\n\n" + block)
 
 
 def install(arguments):

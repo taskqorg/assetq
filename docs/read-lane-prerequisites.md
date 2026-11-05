@@ -28,6 +28,7 @@ The route in `deploy/read-lane/Caddyfile.snippet` is approved for the existing `
 
 - Second host for live calls and the probe: the Mac.
 - Existing alert path: `hermes send` on pds18 to `telegram:Tight Monitoring`, the host health channel. The Mac's Hermes has no configured platform.
+- Probe on the Mac: launchd job `online.ufobe.pipe-read-probe`, every 60 seconds, from `~/.local/share/pipe/`. It is loaded with `launchctl bootstrap` from there, so a logout or reboot unloads it until the plist is linked into `~/Library/LaunchAgents`.
 - Probe alert command on the Mac: `scripts/read_lane_alert.sh`. It sends through pds18 and shows a local notification when pds18 is unreachable, so during a pds18 outage the alert reaches only the Mac screen.
 - Lane alert command on pds18: `/opt/pipe-read/bin/pipe-read-alert spool`. `pipe-read.service` sets `NoNewPrivileges` and `ProtectHome`, so the lane spools a file and `pipe-read-alert.path` sends it as user `hermes`.
 

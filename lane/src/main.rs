@@ -676,6 +676,7 @@ async fn reconcile(config: Config) -> Res<Value> {
         .unwrap_or(json!({"since_ms": now_ms(), "keys": {}}));
     let since_ms = baseline["since_ms"].as_i64().ok_or("usage baseline is invalid")?;
     let (mut recorded, mut unknown_units) = (HashMap::<String, u64>::new(), 0u64);
+    let mut runtimes = std::collections::BTreeMap::<String, u64>::new();
     let store = config.store_path();
     if store.exists() {
         let reader = Reader::open(&store).map_err(|e| format!("telemetry store: {e}"))?;
@@ -684,10 +685,11 @@ async fn reconcile(config: Config) -> Res<Value> {
             let page = reader.export(since_ms, after, 1024).map_err(|e| format!("telemetry export: {e}"))?;
             for event in page["events"].as_array().into_iter().flatten() {
                 let observation = &event["observation"];
-                let Some(key) = observation["account"].as_str() else { continue };
                 if observation["kind"] != "operation" {
                     continue;
                 }
+                *runtimes.entry(observation["runtime"].as_str().unwrap_or("unreported").to_owned()).or_default() += 1;
+                let Some(key) = observation["account"].as_str() else { continue };
                 match observation["units"].as_u64() {
                     Some(units) => *recorded.entry(key.to_owned()).or_default() += units,
                     None => unknown_units += 1,
@@ -734,7 +736,7 @@ async fn reconcile(config: Config) -> Res<Value> {
         });
     }
     write_atomic(&baseline_path, baseline.to_string().as_bytes()).map_err(|e| format!("usage baseline: {e}"))?;
-    Ok(json!({"since_ms": since_ms, "calls_without_units": unknown_units, "keys": rows}))
+    Ok(json!({"since_ms": since_ms, "calls_without_units": unknown_units, "runtimes": runtimes, "keys": rows}))
 }
 
 fn enroll_command(config: &Config, destination: &str) -> Res<()> {

@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import tomllib
 import unittest
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -61,11 +62,10 @@ class Mcp(Base):
         (self.home / "bin").mkdir(exist_ok=True)
         for runtime in ["claude", "codex"]:
             stub = self.home / "bin" / runtime
-            stub.write_text(f'#!/bin/sh\necho "{runtime} $*" >> "$HOME/registered"\n'
-                            'if [ "$0" != "${0%codex}" ] && [ "$2" = add ]; then printf "\\n[mcp_servers.pipe]\\ncommand = \\"x\\"\\n" >> "$CODEX_HOME/config.toml"; fi\n')
+            stub.write_text(f'#!/bin/sh\necho "{runtime} $*" >> "$HOME/registered"\n')
             stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
         (self.home / "codex-home").mkdir(exist_ok=True)
-        self.original = '[mcp_servers.shared-search]\ncommand = "/invented/mcp"\n'
+        self.original = '[mcp_servers.shared-search]\ncommand = "/invented/mcp"\nargs = []\nrequired = false\n'
         (self.home / "codex-home/config.toml").write_text(self.original)
         (self.home / "token").write_text("invented-token\n")
         env = dict(os.environ, HOME=str(self.home), CODEX_HOME=str(self.home / "codex-home"), PATH=f"{self.home}/bin:{os.environ['PATH']}")
@@ -100,10 +100,15 @@ class Mcp(Base):
         self.install()
         registered = (self.home / "registered").read_text()
         self.assertIn("claude mcp add -s user pipe", registered)
-        self.assertIn("codex mcp add pipe", registered)
+        self.assertNotIn("codex", registered, "codex mcp add rewrites other servers and dropped their empty args")
         self.assertNotIn("shared-search", registered)
         config = (self.home / "codex-home/config.toml").read_text()
         self.assertTrue(config.startswith(self.original), "the existing server stays unchanged")
+        parsed = tomllib.loads(config)["mcp_servers"]["pipe"]
+        self.assertEqual(parsed["args"][-2:], ["serve", "codex"])
+        self.assertEqual(parsed["env_vars"], ["TASKQ_TASK", "PIPE_TASK"])
+        self.install()
+        self.assertEqual((self.home / "codex-home/config.toml").read_text().count("[mcp_servers.pipe]"), 1, "a second install replaces the block")
         self.assertIn('[mcp_servers.pipe.tools.web_search]\napproval_mode = "approve"', config)
         mode = stat.S_IMODE((self.home / ".config/pipe/read.json").stat().st_mode)
         self.assertEqual(mode, 0o600)

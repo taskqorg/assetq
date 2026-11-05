@@ -6,13 +6,20 @@ The alert command is the host's existing alert path; it receives one line as its
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import shlex
 import socket
+import ssl
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+
+def tls_context():
+    """python.org builds on macOS ship no CA bundle; the OS one lives here. Elsewhere the default store is right."""
+    return ssl.create_default_context(cafile="/etc/ssl/cert.pem" if os.path.exists("/etc/ssl/cert.pem") else None)
 
 
 def access_headers(path):
@@ -25,7 +32,7 @@ def access_headers(path):
 def observe(url, headers):
     """Returns None when healthy, else the reason. A probe failure is not proof the lane is down, so it says what it saw."""
     try:
-        with urllib.request.urlopen(urllib.request.Request(f"{url}/healthz", headers=headers), timeout=20) as reply:
+        with urllib.request.urlopen(urllib.request.Request(f"{url}/healthz", headers={"User-Agent": "pipe-read-probe/1", **headers}), timeout=20, context=tls_context()) as reply:
             status = json.load(reply).get("status")
     except urllib.error.HTTPError as error:
         return f"health answered HTTP {error.code}"
