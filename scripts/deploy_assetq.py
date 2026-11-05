@@ -43,6 +43,8 @@ MONOTONIC = ("jobs", "succeeded", "blobs", "methods", "attempts", "physical_obje
 TERMINAL_PHASES = {"succeeded", "failed", "cancelled"}
 UNIT_PROPS = ("ExecStart", "EnvironmentFiles", "ActiveState", "MainPID", "LimitAS", "LimitSTACK",
               "AllowedCPUs", "MemoryMax", "TasksMax")
+INSPECT_KEYS = ("hostname", "machine_id_sha256", "ssh_host_key_sha256", "libc", "current", "previous", "current_binary_sha256",
+                "unit_sha256", "install_free", "data_free", "data_root_stat")
 LIMIT_PROPS = ("LimitAS", "LimitSTACK", "AllowedCPUs", "MemoryMax", "TasksMax")
 EXIT_REFUSED, EXIT_ROLLED_BACK, EXIT_UNCERTAIN = 1, 2, 3
 
@@ -346,12 +348,15 @@ class Host:
         return self.run(f"set -eu\nexec {self.user_command(command)}\n", timeout=seconds + 30)
 
 
-def fields(text):
+def fields(text, keys):
+    """One known key=value per line. A value spanning lines refuses; it never truncates or forges a key (R4)."""
     values = {}
     for line in text.splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            values.setdefault(key, value)
+        key, separator, value = line.partition("=")
+        # systemd repeats EnvironmentFiles per file; inspect_host refuses more than one.
+        if not separator or key not in keys or (key in values and key != "EnvironmentFiles"):
+            raise Refused("host output is not one key=value per line")
+        values.setdefault(key, value)
     return values
 
 
@@ -390,7 +395,7 @@ v=$(df -B1 --output=avail {shlex.quote(target["data_root"])} | sed -n 2p | tr -d
 v=$(stat -c '%U %G %a %d %i' {shlex.quote(target["data_root"])}); printf 'data_root_stat=%s\\n' "$v"
 {systemctl} show {unit} {props}
 """)
-    seen = fields(base)
+    seen = fields(base, INSPECT_KEYS + UNIT_PROPS)
     env_files = [line.split("=", 1)[1].split(" (")[0] for line in base.splitlines() if line.startswith("EnvironmentFiles=")]
     current = release_of(seen.get("current", ""), host.root)
     previous = release_of(seen.get("previous", ""), host.root) if seen.get("previous") else ""
@@ -494,9 +499,14 @@ v=$(curl -fsS --max-time 5 http://127.0.0.1:{target['port']}/v1/health); printf 
 """)
     if code:
         return None, f"health read failed: {err}"
-    seen = fields(out)
+    # The health body is the last field and spans lines: the service pretty-prints its JSON.
+    report, _, body = out.partition("\nhealth=")
     try:
-        health = json.loads(seen.get("health", ""))
+        seen = fields(report, ("exe",) + UNIT_PROPS)
+    except Refused as error:
+        return None, str(error)
+    try:
+        health = json.loads(body)
     except ValueError:
         return None, "health response unreadable"
     pid = seen.get("MainPID", "")
