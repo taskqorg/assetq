@@ -17,9 +17,10 @@ install -m 0755 "$release/deploy/read-lane/pipe-read-alert" "$ROOT/opt/pipe-read
 install -d -m 0750 -o pipe-read -g pipe-read "$ROOT/var/lib/pipe-read"
 install -d -m 2770 -o pipe-read -g pipe-read "$ROOT/var/lib/pipe-read/alerts"
 if id assetq >/dev/null 2>&1; then
-    install -d -m 0750 -o assetq -g pipe-read "$ROOT/var/lib/pipe-read-control"
+    # Setgid: each published snapshot inherits the group the lane reads it through.
+    install -d -m 2750 -o assetq -g pipe-read "$ROOT/var/lib/pipe-read-control"
 else
-    install -d -m 0750 -o root -g pipe-read "$ROOT/var/lib/pipe-read-control"
+    install -d -m 2750 -o root -g pipe-read "$ROOT/var/lib/pipe-read-control"
 fi
 units="$ROOT/etc/systemd/system"
 install -d "$units"

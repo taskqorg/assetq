@@ -75,8 +75,6 @@ impl Config {
         let v: Value = serde_json::from_str(&text).map_err(|e| format!("config {path}: {e}"))?;
         let text_of = |name: &str| v[name].as_str().map(str::to_owned).ok_or(format!("config {name} is required"));
         let number = |name: &str, default: u64| v[name].as_u64().unwrap_or(default);
-        let credentials =
-            std::env::var("CREDENTIALS_DIRECTORY").map_err(|_| "CREDENTIALS_DIRECTORY is unset: keys arrive only by LoadCredential")?;
         let config = Self {
             listen: v["listen"].as_str().map(str::to_owned),
             host: text_of("host")?,
@@ -230,6 +228,12 @@ fn start_shipper(store: Arc<Store>, connection: PathBuf, state: Arc<Mutex<String
         let mut backoff = Backoff::default();
         let mut wire = enroll::Https { browser: false };
         loop {
+            // Nothing enrolled is not a healthy delivery; Store::ship would report an empty pass as success.
+            if matches!(enroll::active(&connection), Ok(None)) {
+                *state.lock().unwrap() = "off".into();
+                std::thread::sleep(Duration::from_secs(30));
+                continue;
+            }
             let wait = match store.ship(&connection, &mut backoff, &mut wire) {
                 Ok(shipped) => {
                     *state.lock().unwrap() = "ok".into();

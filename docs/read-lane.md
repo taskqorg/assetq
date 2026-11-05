@@ -32,7 +32,7 @@ Detail of [pipe.md § Read lane](../pipe.md#read-lane): routes, host layout, ope
 | `/etc/pipe-read/config.json` | root:pipe-read, 0640 | See `deploy/read-lane/config.example.json` |
 | `/var/lib/pipe-read/` | pipe-read, 0750 | `telemetry.db`, `snapshot.good.json`, `disabled-keys`, `telemetry-lost`, `usage-baseline.json`, `coreq/` |
 | `/var/lib/pipe-read/alerts/` | pipe-read, 2770 | One file per unsent alert; `pipe-read-alert.path` sends each as user `hermes` and keeps it until the send succeeds |
-| `/var/lib/pipe-read-control/snapshot.json` | assetq:pipe-read, 0750 directory | Published by the control side, read by the lane |
+| `/var/lib/pipe-read-control/snapshot.json` | assetq:pipe-read, 2750 directory | Published by the control side, read by the lane |
 
 `pipe-read.socket` owns `127.0.0.1:8741`. The lane refuses a non-loopback listener. Public entry is only the `deploy/read-lane/Caddyfile.snippet` route inside the existing `pipe.ufobe.com` site, which requires owner approval like any other Caddy or guard change ([deployment](deployment-operator.md)).
 
@@ -69,7 +69,7 @@ Re-enable a disabled key after fixing it at the provider. This restart drains; c
 sed -i '/^<key id>$/d' /var/lib/pipe-read/disabled-keys && systemctl restart pipe-read.service
 ```
 
-Rotate keys: edit `tavily-keys`, restart, then take a new encrypted copy. Connect telemetry once, with owner approval in the browser: `pipe-read enroll /etc/pipe-read/config.json <dashq-url>` as user `pipe-read`.
+Rotate keys: edit `tavily-keys`, restart, then take a new encrypted copy. Connect telemetry once, with owner approval in the browser, as user `pipe-read`: `pipe-read enroll /etc/pipe-read/config.json https://dash.ufobe.com/machine`. Only `POST /machine/*` passes DashQ's guard without a browser session.
 
 Reconcile usage: `systemctl start pipe-read-reconcile.service`, then read its journal. The first run records the baseline per key; each later run prints `tavily_delta`, `recorded` and `difference` per key, and `calls_without_units`. Any other client sharing a key shows up as a positive difference, so the check needs keys that only the lane uses, or an accounted difference.
 
