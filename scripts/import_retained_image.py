@@ -61,8 +61,8 @@ def main():
                 if not ready.select(40):
                     raise RuntimeError("retained import startup unobserved; inspect private stderr; no new generation")
             line = child.stdout.readline().decode().strip()
-            assert line.startswith("assetq listening on 127.0.0.1:"), "retained import startup refused; inspect private stderr"
-            url = "http://" + line.removeprefix("assetq listening on ")
+            assert line.startswith("pipe listening on 127.0.0.1:"), "retained import startup refused; inspect private stderr"
+            url = "http://" + line.removeprefix("pipe listening on ")
             def api(path, body=None):
                 return request(url, token, path, body)
             deadline = time.monotonic() + 60

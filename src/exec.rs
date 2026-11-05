@@ -537,7 +537,7 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
                     }
                     Ok(Poll::Cancelled) => Event::ProviderFailed {
                         op_id: op,
-                        reason: "native worker interrupted without an AssetQ cancellation request".into(),
+                        reason: "native worker interrupted without a Pipe cancellation request".into(),
                         credits: None,
                     },
                 }

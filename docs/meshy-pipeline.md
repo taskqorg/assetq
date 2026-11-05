@@ -1,6 +1,6 @@
 # Bounded Meshy prop pipeline
 
-Task [#5](https://github.com/taskqorg/assetq/issues/5), acceptance A1-A7, applies AssetQ R2-R8. The original request remains in [intake](intake/2026-11-01-owner-request.md). This specification authorizes no credential, host-grant, purchase, deployment or configuration change.
+Task [#5](https://github.com/taskqorg/assetq/issues/5), acceptance A1-A7, applies Pipe R2-R8. The original request remains in [intake](intake/2026-11-01-owner-request.md). This specification authorizes no credential, host-grant, purchase, deployment or configuration change.
 
 ## Immutable input and recipe
 

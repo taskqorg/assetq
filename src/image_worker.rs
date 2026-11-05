@@ -31,7 +31,7 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant launch is limited to the consumed qualification; general image dispatch unavailable; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant launch is limited to the consumed qualification; legacy TaskQ adapter is recovery-only; new launches and qualification require independent AgentQ/CoreQ authority; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
@@ -86,6 +86,7 @@ impl ImageWorker {
     }
     /// Explicit local operator entry only; never populated by API or environment.
     pub fn qualification_job(cfg: Config, root: PathBuf, job: &str, adapter: &Path) -> Res<Self> {
+        dispatch_authority()?;
         if !cfg!(target_os = "macos") {
             return Err("capability_unavailable: image qualification requires the existing Mac authority".into());
         }
@@ -617,7 +618,7 @@ fn runtime_progress(runtime: &dyn Runtime, run: &mut Run, log: &mut File) -> Res
         if message["method"].is_string() && message.get("id").is_some() {
             runtime.send(
                 run,
-                &json!({"id":message["id"],"error":{"code":-32601,"message":"AssetQ has no authority to approve native requests"}}),
+                &json!({"id":message["id"],"error":{"code":-32601,"message":"Pipe has no authority to approve native requests"}}),
             )?;
         }
     }

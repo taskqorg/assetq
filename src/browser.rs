@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tiny_http::{Method, Request};
 
-pub const ORIGIN: &str = "https://assets.ufobe.com";
+pub const ORIGIN: &str = "https://pipe.ufobe.com";
 const COOKIE: &str = "__Host-assetq";
 const TTL: Duration = Duration::from_secs(1800);
 
@@ -100,7 +100,7 @@ impl Browser {
     }
 
     pub fn identity(&self, req: &Request) -> Result<String> {
-        if unique_header(req, "Host")? != "assets.ufobe.com"
+        if unique_header(req, "Host")? != "pipe.ufobe.com"
             || !equal_secret(&unique_header(req, "X-AssetQ-Guard")?, &self.settings.guard_secret)
         {
             return Err(denied());
@@ -207,7 +207,7 @@ mod tests {
             .insert(id.into(), Session { subject: "invented".into(), csrf: "invented-csrf".into(), expires: Instant::now() + TTL });
         let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
         let mut client = std::net::TcpStream::connect(server.server_addr().to_ip().unwrap()).unwrap();
-        write!(client,"GET /browser/v1/objects?project=invented HTTP/1.1\r\nHost: assets.ufobe.com\r\nX-AssetQ-Guard: {guard}\r\nX-AssetQ-Subject: invented\r\nCookie: {COOKIE}={id}\r\nConnection: close\r\n\r\n").unwrap();
+        write!(client,"GET /browser/v1/objects?project=invented HTTP/1.1\r\nHost: pipe.ufobe.com\r\nX-AssetQ-Guard: {guard}\r\nX-AssetQ-Subject: invented\r\nCookie: {COOKIE}={id}\r\nConnection: close\r\n\r\n").unwrap();
         let req = server.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
         assert_eq!(browser.check_session(&req).unwrap(), "invented");
         browser.sessions.lock().unwrap().get_mut(id).unwrap().expires = Instant::now() - Duration::from_secs(1);

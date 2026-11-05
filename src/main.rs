@@ -1,6 +1,6 @@
-//! `assetq`: service, executor, administration and API client in one binary.
+//! `pipe`: service, executor, administration and API client in one binary.
 
-use assetq::{Config, db, exec, store, traces};
+use pipe::{Config, db, exec, store, traces};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
@@ -8,12 +8,12 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-const USAGE: &str = "assetq <command>
+const USAGE: &str = "pipe <command>
 
 Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   serve [--listen 127.0.0.1:8740] [--http-threads 8]   API plus embedded executors
   work                                                 executors only (separate host)
-  image-serve <accepted-job-id> <pinned-adapter>         isolated one-job qualification; loopback API
+  image-serve <accepted-job-id> <pinned-adapter>         unavailable: legacy adapter is recovery-only
   image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; no generation
   meshy-serve <accepted-job-id> <private-profile.json>  operator-bound initial Meshy qualification
   meshy-admit                                        loopback admission only; zero executors/effects
@@ -24,7 +24,7 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   restore-check                                        verify isolated restored metadata, manifests and payloads
   audit <job-id>                                       replay a stored job's events
   selftest [--database]                                offline checks; --database adds DB checks
-  image-qualify <new-private-workspace-dir>             protected non-generating PM qualification over private stdio
+  image-qualify <new-private-workspace-dir>             unavailable: requires independent host adapter
   image-observe <private-workspace-dir> [--cancel]      reconcile original protected operation; never launch or release
 
 Client (ASSETQ_URL, default http://127.0.0.1:8740; ASSETQ_TOKEN):
@@ -70,21 +70,21 @@ fn run(args: &[String]) -> Result<(), String> {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     let rest = &args[args.len().min(1)..];
     match cmd {
-        "image-qualify" => assetq::image_worker::protected::qualify(std::path::Path::new(&pos(rest, 0)?)),
+        "image-qualify" => pipe::image_worker::protected::qualify(std::path::Path::new(&pos(rest, 0)?)),
         "image-observe" => {
-            print(&assetq::image_worker::protected::observe(std::path::Path::new(&pos(rest, 0)?), rest.iter().any(|s| s == "--cancel"))?);
+            print(&pipe::image_worker::protected::observe(std::path::Path::new(&pos(rest, 0)?), rest.iter().any(|s| s == "--cancel"))?);
             Ok(())
         }
         "image-turn" if rest.len() == 3 => {
-            assetq::image_worker::run_job(Config::from_env()?, &pos(rest, 0)?, &pos(rest, 1)?, std::path::Path::new(&pos(rest, 2)?))
+            pipe::image_worker::run_job(Config::from_env()?, &pos(rest, 0)?, &pos(rest, 1)?, std::path::Path::new(&pos(rest, 2)?))
         }
-        "image-turn" => assetq::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
+        "image-turn" => pipe::image_worker::run(Config::from_env()?, &pos(rest, 0)?),
         "image-serve" => serve(rest, "generate"),
         "image-import-serve" => serve(rest, "retained"),
         "meshy-serve" => serve(rest, "meshy"),
         "meshy-admit" => serve(rest, "meshy-admit"),
         "meshy-preflight" => {
-            print(&assetq::meshy::preflight(rest.first().map(std::path::Path::new))?);
+            print(&pipe::meshy::preflight(rest.first().map(std::path::Path::new))?);
             Ok(())
         }
         "serve" => serve(rest, ""),
@@ -92,7 +92,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let ctx = Arc::new(exec::Ctx::new(Config::from_env()?).map_err(|e| e.to_string())?);
             check_schema(&ctx.cfg)?;
             let handles = spawn_executors(&ctx);
-            eprintln!("assetq executors running: {}", handles.len());
+            eprintln!("pipe executors running: {}", handles.len());
             for h in handles {
                 let _ = h.join();
             }
@@ -149,8 +149,8 @@ fn check_schema(cfg: &Config) -> Result<(), String> {
     let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
     let ok = c
         .query_opt("SELECT 1 FROM schema_version HAVING count(*) = 1 AND min(version) = 1", &[])
-        .map_err(|_| "schema missing: run `assetq migrate`".to_string())?;
-    ok.map(|_| ()).ok_or_else(|| "schema missing: run `assetq migrate`".into())
+        .map_err(|_| "schema missing: run `pipe migrate`".to_string())?;
+    ok.map(|_| ()).ok_or_else(|| "schema missing: run `pipe migrate`".into())
 }
 
 fn spawn_executors(ctx: &Arc<exec::Ctx>) -> Vec<std::thread::JoinHandle<()>> {
@@ -175,8 +175,8 @@ fn serve(rest: &[String], qualification: &str) -> Result<(), String> {
         if !rest.is_empty() || ctx.cfg.executors != 0 || ctx.cfg.fake_provider_dir.is_some() || !listen.starts_with("127.0.0.1:") {
             return Err("Meshy admission requires no arguments, zero executors, loopback and no synthetic provider".into());
         }
-        ctx.providers.retain(|p| p.name() != assetq::meshy::PROVIDER);
-        ctx.providers.push(Arc::new(assetq::meshy::Meshy::observer(ctx.cfg.clone())?));
+        ctx.providers.retain(|p| p.name() != pipe::meshy::PROVIDER);
+        ctx.providers.push(Arc::new(pipe::meshy::Meshy::observer(ctx.cfg.clone())?));
     } else if !qualification.is_empty() {
         if rest.len() != 2
             || ctx.cfg.executors != 1
@@ -187,33 +187,33 @@ fn serve(rest: &[String], qualification: &str) -> Result<(), String> {
             return Err("image qualification/import requires one executor, <=600000 ms, loopback and no synthetic provider".into());
         }
         if qualification == "meshy" {
-            let provider = assetq::meshy::Meshy::bound(ctx.cfg.clone(), &pos(rest, 0)?, std::path::Path::new(&pos(rest, 1)?))?;
-            ctx.providers.retain(|p| p.name() != assetq::meshy::PROVIDER);
+            let provider = pipe::meshy::Meshy::bound(ctx.cfg.clone(), &pos(rest, 0)?, std::path::Path::new(&pos(rest, 1)?))?;
+            ctx.providers.retain(|p| p.name() != pipe::meshy::PROVIDER);
             ctx.providers.push(Arc::new(provider));
         } else {
             let root = ctx.cfg.image_worker_root.clone().ok_or("image worker root required")?;
             let provider = if qualification == "retained" {
-                assetq::image_worker::ImageWorker::retained_job(ctx.cfg.clone(), root, &pos(rest, 0)?, &pos(rest, 1)?)?
+                pipe::image_worker::ImageWorker::retained_job(ctx.cfg.clone(), root, &pos(rest, 0)?, &pos(rest, 1)?)?
             } else {
-                assetq::image_worker::ImageWorker::qualification_job(
+                pipe::image_worker::ImageWorker::qualification_job(
                     ctx.cfg.clone(),
                     root,
                     &pos(rest, 0)?,
                     std::path::Path::new(&pos(rest, 1)?),
                 )?
             };
-            ctx.providers.retain(|p| p.name() != assetq::image_worker::PROVIDER);
+            ctx.providers.retain(|p| p.name() != pipe::image_worker::PROVIDER);
             ctx.providers.push(Arc::new(provider));
         }
     }
     let ctx = Arc::new(ctx);
-    let server = Arc::new(assetq::api::bind(&listen).map_err(|e| format!("bind {listen}: {e}"))?);
+    let server = Arc::new(pipe::api::bind(&listen).map_err(|e| format!("bind {listen}: {e}"))?);
     let addr = server.server_addr().to_ip().map(|a| a.to_string()).unwrap_or(listen);
-    let browser = if qualification.is_empty() { assetq::browser::Browser::from_env()? } else { None };
-    let mut handles = assetq::api::serve_with_browser(ctx.clone(), server, threads, browser);
+    let browser = if qualification.is_empty() { pipe::browser::Browser::from_env()? } else { None };
+    let mut handles = pipe::api::serve_with_browser(ctx.clone(), server, threads, browser);
     handles.extend(spawn_executors(&ctx));
     // Tests and supervisors read this line to learn the bound port.
-    println!("assetq listening on {addr}");
+    println!("pipe listening on {addr}");
     std::io::stdout().flush().ok();
     for h in handles {
         let _ = h.join();
@@ -249,7 +249,7 @@ fn selftest(database: bool) -> Result<(), String> {
         let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
         let methods: i64 = c.query_one("SELECT count(*) FROM methods", &[]).map_err(|e| e.to_string())?.get(0);
         checks.push(json!({"check": "database schema and method registry", "methods": methods, "outcome": "pass"}));
-        let root = assetq::store::Store::open(&cfg.data_root).map_err(|e| format!("data root: {e}"))?;
+        let root = pipe::store::Store::open(&cfg.data_root).map_err(|e| format!("data root: {e}"))?;
         drop(root);
         checks.push(json!({"check": "data root directories available", "outcome": "pass"}));
     } else {

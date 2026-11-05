@@ -16,7 +16,7 @@ The owner request is preserved in [intake](intake/2026-11-01-owner-request.md). 
 | Managed-store connected live journeys | [assetq#6](https://github.com/taskqorg/assetq/issues/6) | Both methods and reviewed private host activation receipts |
 | Method comparisons and guidance | [assetq#7](https://github.com/taskqorg/assetq/issues/7) | Real generation and storage receipts |
 | Management website and API origin | [assetq#9](https://github.com/taskqorg/assetq/issues/9) | Versioned controls and benchmark evidence |
-| Fleet summary and links to the AssetQ site | [dashq#246](https://github.com/taskqorg/dashq/issues/246) | Stable AssetQ metadata and canonical destinations |
+| Fleet summary and links to the Pipe site | [dashq#246](https://github.com/taskqorg/dashq/issues/246) | Stable Pipe metadata and canonical destinations |
 
 Storage preparation has a separate task in the private host repository. Its identity, infrastructure inventory and operator effects stay in restricted PM evidence. GitHub and GitLab dependencies do not cross providers; the PM creates the concrete activation task once the candidate and reviewed effects exist.
 
@@ -39,19 +39,19 @@ The PM created a ten-minute heartbeat in the existing owner chat. It follows thi
 
 ## Asset workstream
 
-1. Build the durable AssetQ request/job/effect model, method registry, immutable object API and first service/CLI, with recovery/fencing/idempotency tests. An initial filesystem object store avoids introducing another storage service.
+1. Build the durable Pipe request/job/effect model, method registry, immutable object API and first service/CLI, with recovery/fencing/idempotency tests. An initial filesystem object store avoids introducing another storage service.
 2. Prepare pds18 deployment with a dedicated identity, PostgreSQL role/database and data root; verify capacity, streaming upload/download, additive activation and rollback. Defer new backup work and local/external backup-restore qualification without blocking initial functionality. Preserve existing backups and keep unproved backup/restore states unknown; no backup-driven stop/restart, cold-backup timer, rotation or new platform. Host changes belong to the private host repository and concrete deployment plan.
 3. Implement and qualify the `agentq.image` route through an AgentQ runtime with the `image_generation` capability. Consume the immutable protected runtime and provide PM one [composed, non-generating consumer](https://github.com/taskqorg/assetq/blob/7388734a40502323fb34932471ed4b8f7a0d089b/docs/evidence/4/protected-consumer.md) under the existing Mac grant. Qualify current authority/tool/output paths before enabling durable slot-backed dispatch. Preserve the accepted crate and operation without generation/replay. A real image-generation capability is required; never substitute a procedural drawing or silently use a direct paid API. Expose a precise capability gap when the selected runtime lacks the tool.
 4. Implement image-to-3D with the csgo Meshy prop baseline, explicit parameters, provider reconciliation and headless Blender validation. Consume the first image, retain source GLB/textures and render views.
 5. Run the connected real journey on the managed store, record generated image/3D asset IDs, methods, actual costs, recovery and download verification, and present outputs for owner visual acceptance.
 6. Expose shared controls and comparison/recommendation records to humans and agents. Seed the two methods without calling either universally best.
-7. Build the canonical management site at `assets.ufobe.com` through the shared design workflow: asset browsing/previews/search/detail, generation jobs, methods and pipeline benchmarks, using the same scoped AssetQ API. Include owner visual review and real browser/API acceptance.
+7. Build the canonical management site at `pipe.ufobe.com` through the shared design workflow: asset browsing/previews/search/detail, generation jobs, methods and pipeline benchmarks, using the same scoped Pipe API. Include owner visual review and real browser/API acceptance.
 8. Publish this approved name through existing pds18 Caddy HTTPS and a loopback-only application after exact DNS/site ownership, authentication and rollback checks. Change only the named record/site, preserving apex/wildcard and other services. Keep private host installation evidence restricted.
-9. Integrate source-backed summary metadata and deep links into DashQ, preserving its existing views and ServerQ's read-only host boundary. The complete asset/benchmark workspace belongs in AssetQ.
+9. Integrate source-backed summary metadata and deep links into DashQ, preserving its existing views and ServerQ's read-only host boundary. The complete asset/benchmark workspace belongs in Pipe.
 
 ## Spend and operational boundaries
 
-Initial Meshy testing has no cumulative credit ceiling and permits no purchase or top-up. Reconcile balance and all prior authorized AssetQ attempts before each paid submission; preserve actual and cumulative cost evidence and stop on unknown spend or insufficient account balance. Per-job limits, exclusive operator binding and other resource bounds remain enforced.
+Initial Meshy testing has no cumulative credit ceiling and permits no purchase or top-up. Reconcile balance and all prior authorized Pipe attempts before each paid submission; preserve actual and cumulative cost evidence and stop on unknown spend or insufficient account balance. Per-job limits, exclusive operator binding and other resource bounds remain enforced.
 
 No other paid-provider budget is implied. Native subscription image generation uses the selected qualified worker and existing account; any paid API fallback needs a separate decision. Do not change worker models, effort, permissions or ordinary host capacity.
 

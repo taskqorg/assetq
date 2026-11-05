@@ -33,6 +33,7 @@ pub(super) fn with_run<T>(
 }
 
 pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedAppServer, PathBuf)> {
+    dispatch_authority()?;
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected Workspace adapter is qualified on Mac only; no Windows grant or fallback".into());
     }
@@ -128,6 +129,7 @@ fn slot_exchange_with(dir: &Path, action: &str, until: Instant, mut read: impl F
 }
 
 pub(super) fn prepare_launch(root: &Path, dir: &Path, op: &str, adapter: &Path) -> Res<(ProtectedAppServer, PathBuf)> {
+    dispatch_authority()?;
     let host = ProtectedHost::new(adapter, ADAPTER_SHA256)?;
     let owner = coreq::process::identity(std::process::id()).map_err(|_| "runner identity unknown")?.ok_or("runner absent")?;
     save(&dir.join("runner.json"), &json!({"pid":owner.pid,"started":owner.started}))?;
@@ -333,6 +335,7 @@ pub fn qualify(dir: &Path) -> Res<()> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: composed protected qualification requires the existing approved Mac Workspace host".into());
     }
+    dispatch_authority()?;
     let root = std::env::current_dir().and_then(|p| p.canonicalize()).map_err(|e| e.to_string())?;
     let parent = dir
         .parent()
@@ -459,6 +462,31 @@ pub fn qualify(dir: &Path) -> Res<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // R10: reject before reading the adapter, reserving capacity or writing a launch marker.
+    #[test]
+    fn image_worker_recovery_only_blocks_native_entry_points() {
+        let absent = std::env::temp_dir().join(format!("pipe-never-launch-{}", uuid::Uuid::new_v4()));
+        let launch = Launch {
+            adapter: absent.clone(),
+            request: json!({}),
+            profile_sha256: String::new(),
+            executable: absent.clone(),
+            executable_sha256: String::new(),
+            account_home: absent.clone(),
+            approver: String::new(),
+        };
+        for error in
+            [super::launch(&absent, &absent, launch).err().unwrap(), prepare_launch(&absent, &absent, "invented", &absent).err().unwrap()]
+        {
+            assert!(error.contains("legacy TaskQ adapter is recovery-only"), "{error}");
+        }
+        // Off Mac, qualify keeps its platform refusal; the qualification test below guards it.
+        if cfg!(target_os = "macos") {
+            assert!(qualify(&absent).unwrap_err().contains("legacy TaskQ adapter is recovery-only"));
+        }
+        assert!(!absent.exists());
+    }
 
     // R3/R4/R7: one reservation request, then same-binding observation; no launch
     // from unknown/mismatched occupancy and no release before AgentQ completion.
