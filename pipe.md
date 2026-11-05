@@ -16,6 +16,7 @@ Any external service call by an agent is a pipeline, even with one step. Agents 
   that host are refused before database access.
 
 - **R10 Independent execution.** Pipe never uses TaskQ except temporarily for observation, cancellation, reconciliation, slot release and retained import of existing protected operations. Preserve their original signed adapter, identities and receipts under R3-R6 until migration to independent AgentQ/CoreQ authority. This exception permits no new TaskQ-backed launch or qualification.
+- **R11 Telemetry contract.** Pipe writes its operations as observations under the [specq telemetry contract](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md#telemetry-contract), to one CoreQ local store and nothing else. `agentq-runtime` owns agent run and model call records. See [Telemetry](#telemetry).
 
 ## Requests and durable execution
 
@@ -75,9 +76,9 @@ Control summaries expose registry/comparison/recommendation revisions for downst
 
 **Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-Infrastructure builds pin CoreQ `v0.19.2` at `b78ca64cac615500b57b4a04983e79333035dd65`; runtime builds retain their own resolved CoreQ dependency.
+Infrastructure builds pin CoreQ `v0.21.0` at `18b177c445e92c5df58bd1dea1b473776dd0c6ae`, the version `agentq-runtime` 0.6.0 resolves, so Pipe and the runtime share one telemetry store type.
 
-New worker builds use `agentq-runtime` 0.2.0, published as `runtime-v0.2.0` at immutable revision `70f85434546bd1c303ccdb7b0dd71866421627e2` by AgentQ PR218. Cargo.lock retains the resolved revision.
+New worker builds use `agentq-runtime` 0.6.0 at immutable revision `c80675a557417532393e143ca2783c0f4c83b8d9` from AgentQ PR243. Cargo.lock retains the resolved revision. Method version 5, its receipts and its provenance keep their original runtime 0.2.0 identity `70f85434546bd1c303ccdb7b0dd71866421627e2`.
 
 The runtime owns structured text/image forwarding and read-only account identity; Pipe verifies attachment ownership, hashes and PNG limits before `Runtime::input`, and requires subscription login through `Runtime::account` before any turn. No raw account request or credential refresh supplies an alternative path.
 
@@ -184,6 +185,42 @@ Expose jobs and step progress, queued/active/uncertain work, provider availabili
 Use the Pipe site for asset operations and pipeline benchmarks. Reuse DashQ for summary metadata/deep links and ServerQ for host observations when their integrations are ready. Pipe API/CLI remain independently operable.
 
 No Langfuse exporter is implemented. Job state and primary assets remain in Pipe; a telemetry outage cannot own or erase them.
+
+## Telemetry
+
+Pipe follows the [specq telemetry contract](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md#telemetry-contract). Each installation keeps one CoreQ local store at `<data root>/telemetry/observations.sqlite3`, bounded by the CoreQ installation budget. Pipe writes observations there and to no other collector or store.
+
+Measured operations:
+
+| Operation | Kind | One record per | Outcome |
+|---|---|---|---|
+| `pipe.step` | `stage` | run of a generation step, including `manifest` | `ok`; `retried` when paused for a later claim; `unknown` for an uncertain submission; `failed`; `cancelled` |
+| `provider.submit` | `operation` | submission | `ok`; `refused`; `unknown` when the reply is uncertain |
+| `provider.lookup` | `operation` | reconciliation lookup | `ok`; `unknown` |
+| `provider.poll` | `operation` | provider poll | `ok`; `failed`; `cancelled`; `unknown` |
+| `provider.fetch` | `operation` | output fetch | `ok`; `failed` |
+| `provider.cancel` | `operation` | cancellation request | `ok`; `unknown` when not confirmed |
+| `provider.validate` | `operation` | provider output validation | `ok`; `failed` |
+| `pipe.exec.pass` | `service.pass` | executor pass | `ok`; `failed` |
+
+A record holds metadata only: codes, numbers and run identity. An error class is a fixed code, never a raw reason. Request text, attachments, provider URLs, keys and paths have no field.
+
+Field meanings:
+
+- `pipeline` is the method ID, `pipeline_revision` its version, `step` the generation step and `runtime` the provider name. `trace` is the job ID without hyphens.
+- `project` is a Pipe project ID that already has the `owner/name` shape, otherwise `pipe/<id>`. An ID that CoreQ cannot accept reads null with a reason.
+- `task`, `attempt` and `actor` read null with `no-caller-context`, because a durable job has no calling process to inherit them from.
+- `units` with `unit_kind` `credits` holds provider credits on the `provider.poll` record that reports completion or failure. A provider that reports no credits reads `units` null with `provider-unreported`, never zero.
+- `units` with `unit_kind` `items` holds the items a service pass handled. `calls` holds the passes the record covers.
+- Any other value not collected reads null with a reason.
+
+A pass that handled an item is one record. Consecutive passes with no item and the same outcome fold into one record per minute, with their count in `calls` and their summed duration. A crash loses at most that minute of folded counts.
+
+`agentq-runtime` writes `agent.turn` and `agent.call` through `Run::record` to the same store. Pipe passes its context and the store and adds no capture of its own. A client that reports no tokens reads null with a reason from the runtime.
+
+A failed observation write never changes a job, an effect or a result. `GET /v1/status` reports `telemetry` as `unknown` with a reason when the store is unavailable or a record was lost since start, and includes the CoreQ shipper state.
+
+The store is local in this build: `shipper.state` reads `off`, which never means that nothing is unsent. Sending records through the one CoreQ shipper needs a DashQ enrollment for the installation and belongs to a separate task. The `observations` table holds job control evidence such as provider health; it is not telemetry.
 
 ## Linked specifications
 
