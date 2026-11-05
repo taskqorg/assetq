@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const request = require('../web/requests.js');
 
 // R4/R9: exercise actual detail/preview events; this DOM fixture proves no geometry.
-test('header reflow stays visible and retained-render captions require a loaded model preview', async () => {
+test('keyboard focus and header reflow stay visible; model captions require a loaded preview', async () => {
   const vm = require('node:vm');
   const {readFileSync} = require('node:fs');
   class Node {
@@ -25,18 +25,23 @@ test('header reflow stays visible and retained-render captions require a loaded 
     }
     setAttribute(key, value) { this.attrs[key] = value; }
     addEventListener(name, handler) { this.events[name] = handler; }
-    getBoundingClientRect() { return {height: this.height}; }
+    getBoundingClientRect() { return this.rect || {height: this.height}; }
+    contains(node) { return this === node || this.children.some(child => child.contains(node)); }
     get textContent() { return this.text + this.children.map(n => n.textContent).join(''); }
   }
   const controls = new Map();
   const styles = new Map();
+  const events = {}, frames = [], scrolls = [];
   let resize, observed;
   const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
     location: {origin: 'https://assets.ufobe.com', search: ''},
     document: {documentElement: {style: {setProperty: (key, value) => styles.set(key, value)}},
       createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
       querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
-      addEventListener() {}}, addEventListener() {},
+      addEventListener: (name, handler) => { events[name] = handler; }}, addEventListener() {},
+    requestAnimationFrame: callback => frames.push(callback),
+    scrollBy: (x, y) => scrolls.push([x, y]), innerHeight: 800,
+    getComputedStyle: () => ({position: context.headerPosition || 'sticky'}),
     // Keep automatic sign-in pending; the fixture supplies an already scoped session.
     fetch: () => new Promise(() => {}),
     ResizeObserver: class { constructor(callback) { resize = callback; } observe(node) { observed = node; } }});
@@ -47,6 +52,29 @@ test('header reflow stays visible and retained-render captions require a loaded 
     observed.height = height; resize();
     assert.equal(styles.get('--header-height'), `${height}px`);
   }
+  // R9/F3: native Tab/Shift+Tab must reveal controls without changing history restoration.
+  assert.equal(typeof events.keydown, 'function');
+  events.keydown({key: 'ArrowUp'}); events.keydown({key: 'Tab', defaultPrevented: true});
+  assert.equal(frames.length, 0);
+  const focused = new Node('input'); controls.get('#main').append(focused);
+  observed.rect = {bottom: 217.35};
+  for (const [top, bottom, expected] of [[200, 244, -23.35], [780, 840, 46], [230, 280, 0], [300, 1300, 76.65]]) {
+    for (const shiftKey of [false, true]) {
+      context.document.activeElement = new Node('button');
+      events.keydown({key: 'Tab', shiftKey});
+      // Default browser focus movement happens after keydown, before the next frame.
+      context.document.activeElement = focused; focused.rect = {top, bottom};
+      frames.shift()();
+      if (expected) assert.ok(Math.abs(scrolls.pop()[1] - expected) < .001);
+      else assert.equal(scrolls.length, 0);
+    }
+  }
+  context.headerPosition = 'relative'; focused.rect = {top: -19, bottom: 20};
+  events.keydown({key: 'Tab', shiftKey: true}); frames.shift()();
+  assert.deepEqual(scrolls.pop(), [0, -25]);
+  context.document.activeElement = new Node('button');
+  events.keydown({key: 'Tab'}); frames.shift()();
+  assert.equal(scrolls.length, 0);
   vm.runInContext("project = 'project-a'; session = {projects:[{id:project,role:'member'}]}; api = async path => path.includes('/related?') ? {parents:[],outputs:[],children:[]} : fixture;", context);
   const all = node => [node, ...node.children.flatMap(all)];
   const caption = 'Retained render of this job; not a live 3D view.';
