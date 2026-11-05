@@ -32,7 +32,7 @@ The first implementation supports a registered bounded sequence of steps, includ
 
 ## Web management and API
 
-Human-facing times follow [specq Time](https://github.com/taskqorg/specq/blob/71fcb39ca9aafa868a57a6f6f5a13845cccec747/caveman/rules/indicators.md#time). Browser timestamps show relative time first and viewer-local exact time on hover. API and CLI JSON retain machine timestamps.
+Human-facing times follow [specq Time](https://github.com/taskqorg/specq/blob/71fcb39ca9aafa868a57a6f6f5a13845cccec747/caveman/rules/indicators.md#time). Browser timestamps, including those nested in event, qualification and operations evidence, show relative time first and viewer-local exact time on hover. API and CLI JSON retain machine timestamps.
 
 The management application and versioned API share `https://assets.ufobe.com`. The browser uses the same AssetQ contracts as CLI and agent callers; it has no separate job state, asset catalog or recommendation store. Define exact API paths in the service contract and preserve published compatibility.
 

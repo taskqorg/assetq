@@ -54,7 +54,18 @@ function url(path, params = {}) {
   return u.pathname + u.search;
 }
 function link(label, path, params) { return el('a', {href: url(path, params)}, label); }
-function jsonDetails(title, data, open = false) { return el('details', open ? {open: ''} : {}, el('summary', {}, title), el('pre', {}, value(data))); }
+function evidenceTimes(data, path = []) {
+  if (!data || typeof data !== 'object') return [];
+  return Object.entries(data).flatMap(([key, v]) => {
+    const name = [...path, key];
+    if (key === 'at' || /_(at|until)$/.test(key)) return [el('dt', {}, name.join('.')), el('dd', {}, timeView(v, /(_until|expires_at)$/.test(key)))];
+    return evidenceTimes(v, name);
+  });
+}
+function jsonDetails(title, data, open = false) {
+  const times = evidenceTimes(data);
+  return el('details', open ? {open: ''} : {}, el('summary', {}, title), times.length ? el('dl', {class:'properties'}, times) : null, el('pre', {}, value(data)));
+}
 function properties(values) { return el('dl', {class: 'properties'}, Object.entries(values).flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v instanceof Node ? v : value(v))])); }
 function role() { return session?.projects.find(p => p.id === project)?.role; }
 function requireOwner(control) { return role() === 'owner' ? control : el('p', {class: 'muted'}, 'An owner grant is required for this action.'); }

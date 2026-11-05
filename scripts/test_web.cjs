@@ -26,13 +26,18 @@ function browser() {
     setAttribute(key, value) { this.attrs[key] = value; }
     addEventListener(name, handler) { this.events[name] = handler; }
     get textContent() { return this.text + this.children.map(n => n.textContent).join(''); }
+    set textContent(text) { this.text = text; this.children = []; }
+    get childNodes() { return this.children; }
+    get elements() { return []; }
+    querySelectorAll() { return []; }
+    focus() {}
   }
   const controls = new Map();
   const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
     location: {origin: 'https://assets.ufobe.com', search: ''},
     document: {createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
       querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
-      addEventListener() {}}, addEventListener() {},
+      addEventListener() {}}, addEventListener() {}, clearTimeout() {}, scrollTo() {},
     // Keep automatic sign-in pending; the fixture supplies an already scoped session.
     fetch: () => new Promise(() => {})});
   vm.runInContext(readFileSync(require.resolve('../web/app.js'), 'utf8'), context);
@@ -70,6 +75,43 @@ test('retained-render captions require a loaded model preview and disappear on f
   assert.equal(thumbnail.textContent.includes(caption), false);
   thumbnail.children[0].events.error();
   assert.equal(thumbnail.textContent, 'File');
+});
+
+// A4/R4/specq Time: evidence panels must not leave timestamps only in raw JSON.
+test('history, qualification and operations handlers render nested evidence times', async t => {
+  for (const surface of ['history', 'qualification', 'operations']) await t.test(surface, async () => {
+    const context = browser(), vm = require('node:vm');
+    context.now = new Date(2026, 10, 5, 14, 30).getTime();
+    context.Date = class extends Date { static now() { return context.now; } };
+    context.location.pathname = '/operations'; context.location.search = '?project=project-a';
+    const read = expression => vm.runInContext(expression, context);
+    const expressions = {
+      history: "jobs(new URLSearchParams(), epoch, 'invented-job')",
+      qualification: "methods(new URLSearchParams(), epoch, 'invented-method', 1)",
+      operations: 'render().then(() => main.childNodes)'
+    };
+    for (const timestamp of ['2026-11-05 12:00:00+00', null, 'invalid']) {
+      context.timestamp = timestamp;
+      read(`api = async path => path.endsWith('/events') ? [{seq:1,event:{type:'completed'},at:timestamp}] :
+        path.startsWith('jobs/') ? {phase:'succeeded'} : path.startsWith('methods/') ?
+        {id:'invented-method',version:1,spec:{},qualification:{observed_at:timestamp}} :
+        {providers:[{value:{health:'unknown'},observed_at:timestamp}],backup:{value:{state:'unknown'},observed_at:null}};`);
+      const nodes = await read(expressions[surface]);
+      const title = {history:'Durable event history',qualification:'Qualification and limitations',operations:'Scoped jobs, methods and recommendations'}[surface];
+      const detail = nodes.filter(Boolean).flatMap(all).find(n => n.tag === 'details' && n.children[0].textContent === title);
+      assert.ok(detail, `${surface}: evidence panel exists`);
+      const times = all(detail).filter(n => n.tag === 'time');
+      if (timestamp === null || timestamp === 'invalid') {
+        assert.equal(times.length, 0); assert.ok(detail.textContent.includes('? unavailable'));
+      } else {
+        assert.equal(times.length, 1, `${surface}: timestamp needs a human display`);
+        assert.equal(times[0].textContent, read('age(timestamp, now)'));
+        assert.equal(times[0].attrs.title, read('exactTime(timestamp, now)'));
+        assert.equal(times[0].attrs.datetime, new Date(timestamp).toISOString());
+      }
+      assert.ok(all(detail).find(n => n.tag === 'pre').textContent.includes(JSON.stringify(timestamp)), 'original evidence stays intact');
+    }
+  });
 });
 
 test('default and cleared filters omit exact empty predicates', () => {
@@ -153,6 +195,7 @@ test('human times round at minute, five-hour and day boundaries with exact local
   context.fixture.retention_until = null;
   assert.ok((await read('assetDetail(fixture.id, epoch)')).textContent.includes('No automatic deletion'));
   context.fixture = {id:'invented-job', phase:'succeeded', updated_at:new Date(context.now - 3600000).toISOString()};
+  read("api = async path => path.endsWith('/events') ? [] : path.endsWith('/result') ? {} : fixture");
   for (const expression of ["jobs(new URLSearchParams(), epoch, fixture.id)", "(api = async () => [fixture], jobs(new URLSearchParams(), epoch))"]) {
     const nodes = await read(expression);
     const times = nodes.filter(Boolean).flatMap(all).filter(n => n.tag === 'time');
