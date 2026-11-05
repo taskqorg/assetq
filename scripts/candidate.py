@@ -28,7 +28,7 @@ def main():
     (stage / "bin").mkdir(parents=True)
     executable = "assetq.exe" if sys.platform == "win32" else "assetq"
     shutil.copy2(ROOT / "target/release" / executable, stage / "bin" / executable)
-    for doc in ["assetq.md", "docs/service.md", "docs/method-evaluation.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md", "docs/meshy-pipeline.md", "docs/evidence/5/operator.md"]:
+    for doc in ["assetq.md", "docs/service.md", "docs/method-evaluation.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md", "docs/meshy-pipeline.md"]:
         (stage / doc).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / doc, stage / doc)
     binary_sha = hashlib.sha256((stage / "bin" / executable).read_bytes()).hexdigest()

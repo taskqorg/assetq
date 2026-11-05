@@ -13,7 +13,7 @@ name = "agentq-runtime"
 version = "0.2.0"
 source = "git+https://github.com/taskqorg/agentq?tag=runtime-v0.2.0#70f85434546bd1c303ccdb7b0dd71866421627e2"
 dependencies = [
- "coreq",
+ "coreq 0.18.0",
  "libc",
  "ring",
  "serde_json",
@@ -31,7 +31,7 @@ version = "0.1.0"
 dependencies = [
  "agentq-runtime",
  "base64 0.22.1",
- "coreq",
+ "coreq 0.19.2",
  "hex",
  "image",
  "libc",
@@ -178,7 +178,22 @@ name = "coreq"
 version = "0.18.0"
 source = "git+https://github.com/taskqorg/coreq?tag=v0.18.0#e84761cdab43723b871a42b3021e9c39afcd9484"
 dependencies = [
- "coreq-instrument",
+ "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.18.0)",
+ "flate2",
+ "libc",
+ "ring",
+ "rusqlite",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "coreq"
+version = "0.19.2"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.19.2#b78ca64cac615500b57b4a04983e79333035dd65"
+dependencies = [
+ "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.19.2)",
  "flate2",
  "libc",
  "ring",
@@ -192,6 +207,16 @@ dependencies = [
 name = "coreq-instrument"
 version = "0.1.0"
 source = "git+https://github.com/taskqorg/coreq?tag=v0.18.0#e84761cdab43723b871a42b3021e9c39afcd9484"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "coreq-instrument"
+version = "0.1.0"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.19.2#b78ca64cac615500b57b4a04983e79333035dd65"
 dependencies = [
  "proc-macro2",
  "quote",

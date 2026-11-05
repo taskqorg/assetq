@@ -32,6 +32,8 @@ The first implementation supports a registered bounded sequence of steps, includ
 
 ## Web management and API
 
+Human-facing times follow [specq Time](https://github.com/taskqorg/specq/blob/71fcb39ca9aafa868a57a6f6f5a13845cccec747/caveman/rules/indicators.md#time). Browser timestamps, including those nested in event, qualification and operations evidence, show relative time first and viewer-local exact time on hover. API and CLI JSON retain machine timestamps.
+
 The management application and versioned API share `https://assets.ufobe.com`. The browser uses the same AssetQ contracts as CLI and agent callers; it has no separate job state, asset catalog or recommendation store. Define exact API paths in the service contract and preserve published compatibility.
 
 Provide an asset library with visual previews, authenticated downloads, text search and project/type filters; asset detail includes versions, source relationships, provenance and validation. Unsupported previews show the file type and download action rather than a fabricated render.
@@ -69,6 +71,8 @@ Control summaries expose registry/comparison/recommendation revisions for downst
 ## Initial generation methods
 
 **Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
+
+Infrastructure builds pin CoreQ `v0.19.2` at `b78ca64cac615500b57b4a04983e79333035dd65`; runtime builds retain their own resolved CoreQ dependency.
 
 New worker builds use `agentq-runtime` 0.2.0, published as `runtime-v0.2.0` at immutable revision `70f85434546bd1c303ccdb7b0dd71866421627e2` by AgentQ PR218. Cargo.lock retains the resolved revision.
 
@@ -170,7 +174,7 @@ Expose jobs and step progress, queued/active/uncertain work, provider availabili
 
 Use the AssetQ site for asset operations and pipeline benchmarks. Reuse DashQ for summary metadata/deep links and ServerQ for host observations when their integrations are ready. AssetQ API/CLI remain independently operable.
 
-Langfuse can receive correlated traces and evaluation records; its outage cannot own or erase job state. Keep primary assets in the AssetQ store.
+No Langfuse exporter is implemented. Job state and primary assets remain in AssetQ; a telemetry outage cannot own or erase them.
 
 ## Linked specifications
 
