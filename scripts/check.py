@@ -79,6 +79,8 @@ def postgres_cluster():
 
 
 def rust_checks(name=None):
+    print(run("node", "--check", "web/app.js"), end="")
+    print(run("node", "--test", "--test-reporter=tap", "scripts/test_web.cjs"), end="")
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
     print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
     print(run(sys.executable, "scripts/test_deploy_assetq.py", timeout=300), end="")

@@ -22,13 +22,22 @@ pub fn bind(listen: &str) -> std::io::Result<tiny_http::Server> {
 
 /// Serve requests on `threads` workers; each keeps its own database session.
 pub fn serve(ctx: Arc<Ctx>, server: Arc<tiny_http::Server>, threads: usize) -> Vec<std::thread::JoinHandle<()>> {
+    serve_with_browser(ctx, server, threads, None)
+}
+
+pub fn serve_with_browser(
+    ctx: Arc<Ctx>,
+    server: Arc<tiny_http::Server>,
+    threads: usize,
+    browser: Option<Arc<crate::browser::Browser>>,
+) -> Vec<std::thread::JoinHandle<()>> {
     (0..threads.max(1))
         .map(|_| {
-            let (ctx, server) = (ctx.clone(), server.clone());
+            let (ctx, server, browser) = (ctx.clone(), server.clone(), browser.clone());
             std::thread::spawn(move || {
                 let mut client: Option<Client> = None;
                 while let Ok(req) = server.recv() {
-                    handle(&ctx, &mut client, req);
+                    handle(&ctx, &mut client, req, browser.as_deref());
                 }
             })
         })
@@ -46,27 +55,43 @@ fn json_response(status: u16, v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(Header::from_bytes("Cache-Control", "private, no-store").unwrap())
 }
 
-fn handle(ctx: &Ctx, client: &mut Option<Client>, mut req: Request) {
+fn handle(ctx: &Ctx, client: &mut Option<Client>, mut req: Request, browser: Option<&crate::browser::Browser>) {
     if client.as_ref().is_none_or(|c| c.is_closed()) {
         *client = db::connect_config(&ctx.cfg).ok();
     }
     let result = match client.as_mut() {
         Some(c) => {
-            if req.method() == &Method::Post {
+            let path = req.url().split('?').next().unwrap_or("");
+            if !path.starts_with("/v1/") && !path.starts_with("/browser/v1/") {
+                browser_reply(c, &req, browser)
+            } else if req.method() == &Method::Post {
                 // Cancellation and recovery must remain available at capacity.
                 if req.url().split('?').next().is_some_and(|p| p.ends_with("/cancel")) {
-                    route(ctx, c, &mut req)
+                    route(ctx, c, &mut req, browser)
                 } else {
-                    principal(c, &req).and_then(|_| db::with_admission(c, ctx.cfg.metadata_quota_bytes, |c| route(ctx, c, &mut req)))
+                    authorize(c, &req, browser)
+                        .and_then(|_| db::with_admission(c, ctx.cfg.metadata_quota_bytes, |c| route(ctx, c, &mut req, browser)))
                 }
             } else {
-                route(ctx, c, &mut req)
+                route(ctx, c, &mut req, browser)
             }
         }
         None => Err(Error::new(503, "database", "database unavailable")),
     };
     let _ = match result {
         Ok(Reply::Json(status, v)) => req.respond(json_response(status, &v)),
+        Ok(Reply::Bytes { bytes, content_type, cookie }) => {
+            let mut response = Response::from_data(bytes)
+                .with_header(Header::from_bytes("Content-Type", content_type).unwrap())
+                .with_header(Header::from_bytes("Cache-Control", "private, no-store").unwrap())
+                .with_header(Header::from_bytes("X-Content-Type-Options", "nosniff").unwrap())
+                .with_header(Header::from_bytes("Referrer-Policy", "no-referrer").unwrap())
+                .with_header(Header::from_bytes("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'").unwrap());
+            if let Some(cookie) = cookie {
+                response.add_header(Header::from_bytes("Set-Cookie", cookie).unwrap());
+            }
+            req.respond(response)
+        }
         Ok(Reply::File { file, size, sha256, content_type }) => {
             let headers = vec![
                 Header::from_bytes("Content-Type", content_type.as_bytes()).unwrap(),
@@ -83,6 +108,7 @@ fn handle(ctx: &Ctx, client: &mut Option<Client>, mut req: Request) {
 
 enum Reply {
     Json(u16, Value),
+    Bytes { bytes: Vec<u8>, content_type: &'static str, cookie: Option<String> },
     File { file: std::fs::File, size: u64, sha256: String, content_type: String },
 }
 
@@ -90,7 +116,7 @@ fn ok(v: Value) -> Result<Reply> {
     Ok(Reply::Json(200, v))
 }
 
-fn query(url: &str) -> Vec<(String, String)> {
+pub(crate) fn query(url: &str) -> Vec<(String, String)> {
     url.split_once('?')
         .map(|(_, q)| q)
         .unwrap_or("")
@@ -145,28 +171,113 @@ fn principal(c: &mut Client, req: &Request) -> Result<Principal> {
     db::authenticate(c, token.trim())
 }
 
-fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
+fn authorize(c: &mut Client, req: &Request, browser: Option<&crate::browser::Browser>) -> Result<Principal> {
+    if req.url().starts_with("/browser/v1/") {
+        browser.ok_or_else(|| Error::new(503, "browser_unavailable", "browser identity adapter is not configured"))?.principal(c, req)
+    } else {
+        principal(c, req)
+    }
+}
+
+fn browser_reply(c: &mut Client, req: &Request, browser: Option<&crate::browser::Browser>) -> Result<Reply> {
+    let browser = browser.ok_or_else(|| Error::new(503, "browser_unavailable", "browser identity adapter is not configured"))?;
+    browser.identity(req)?;
+    let path = req.url().split('?').next().unwrap_or("");
+    if req.method() == &Method::Get && path == "/browser/session" {
+        let (body, cookie) = browser.open_session(c, req)?;
+        return Ok(Reply::Bytes { bytes: serde_json::to_vec(&body).unwrap(), content_type: "application/json", cookie: Some(cookie) });
+    }
+    if req.method() == &Method::Post && path == "/browser/logout" {
+        let cookie = browser.logout(req)?;
+        return Ok(Reply::Bytes { bytes: b"{}".to_vec(), content_type: "application/json", cookie: Some(cookie) });
+    }
+    if req.method() != &Method::Get {
+        return Err(Error::new(404, "no_route", "unknown browser action"));
+    }
+    let (bytes, content_type) = match path {
+        "/ui/app.js" => (include_bytes!("../web/app.js").as_slice(), "text/javascript; charset=utf-8"),
+        "/ui/requests.js" => (include_bytes!("../web/requests.js").as_slice(), "text/javascript; charset=utf-8"),
+        "/ui/style.css" => (include_bytes!("../web/style.css").as_slice(), "text/css; charset=utf-8"),
+        p if !p.starts_with("/browser/") && !p.starts_with("/ui/") => {
+            (include_bytes!("../web/index.html").as_slice(), "text/html; charset=utf-8")
+        }
+        _ => return Err(Error::new(404, "no_route", "unknown browser route")),
+    };
+    Ok(Reply::Bytes { bytes: bytes.to_vec(), content_type, cookie: None })
+}
+
+fn route(ctx: &Ctx, c: &mut Client, req: &mut Request, browser: Option<&crate::browser::Browser>) -> Result<Reply> {
     let url = req.url().to_string();
     let path = url.split('?').next().unwrap_or("");
+    let path = path.strip_prefix("/browser").unwrap_or(path);
     let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
     let q = query(&url);
     let param = |k: &str| q.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     let limit = param("limit").and_then(|l| l.parse::<i64>().ok()).unwrap_or(50).clamp(1, 500);
     let method = req.method().clone();
 
-    if method == Method::Get && segs == ["v1", "health"] {
+    if method == Method::Get && segs == ["v1", "health"] && !url.starts_with("/browser/") {
         let db_ok = c.simple_query("SELECT 1").is_ok();
         return ok(
             json!({"service": "up", "version": env!("CARGO_PKG_VERSION"), "database": if db_ok { "ok" } else { "unknown: query failed" }}),
         );
     }
-    let p = principal(c, req)?;
+    let p = authorize(c, req, browser)?;
     let pid = p.project.clone();
     let providers = ctx.provider_names();
     match (&method, segs.as_slice()) {
         (Method::Post, ["v1", "uploads"]) => upload(ctx, c, &p, req),
-        (Method::Get, ["v1", "objects"]) => ok(db::list_objects(c, &pid, param("after").as_deref(), limit)?),
+        (Method::Get, ["v1", "objects"]) => ok(db::search_objects(
+            c,
+            &pid,
+            param("after").as_deref(),
+            limit,
+            &param("q").unwrap_or_default(),
+            &param("type").unwrap_or_default(),
+        )?),
         (Method::Get, ["v1", "objects", id]) => ok(db::get_object(c, &pid, id)?),
+        (Method::Get, ["v1", "objects", id, "related"]) => ok(db::related_objects(c, &pid, id, param("after").as_deref(), limit)?),
+        (Method::Get, ["v1", "objects", id, "preview"]) => {
+            let mut o = db::get_object(c, &pid, id)?;
+            if o["content_type"] == "model/gltf-binary" {
+                let related = db::related_objects(c, &pid, id, None, 1)?;
+                o = related["outputs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|v| {
+                        v["content_type"] == "image/png"
+                            && matches!(
+                                v["provenance"]["provider_evidence"]["role"].as_str(),
+                                Some("view-front.png" | "view-side.png" | "view-back.png")
+                            )
+                    })
+                    .cloned()
+                    .ok_or_else(|| Error::new(415, "preview_unavailable", "no verified retained render for this model"))?;
+            }
+            if o["content_type"] != "image/png" || o["size"].as_u64().unwrap_or(u64::MAX) > 64 << 20 {
+                return Err(Error::new(415, "preview_unavailable", "no bounded PNG preview for this file type or size"));
+            }
+            let sha = o["sha256"].as_str().unwrap();
+            let mut original = Vec::new();
+            ctx.store
+                .open_object(sha)
+                .map_err(|_| Error::new(500, "store_io", "preview source unreadable"))?
+                .take((64 << 20) + 1)
+                .read_to_end(&mut original)
+                .map_err(|_| Error::new(500, "store_io", "preview source unreadable"))?;
+            if original.len() as u64 != o["size"].as_u64().unwrap() || db::sha256_hex(&original) != sha {
+                return Err(Error::new(500, "store_integrity", "preview source does not match immutable metadata"));
+            }
+            let decoded = crate::image_worker::decode_png(&original, &json!({}))
+                .map_err(|_| Error::new(415, "preview_unavailable", "PNG failed bounded decoding"))?;
+            let mut out = std::io::Cursor::new(Vec::new());
+            decoded
+                .thumbnail(512, 512)
+                .write_to(&mut out, image::ImageFormat::Png)
+                .map_err(|_| Error::new(500, "preview", "PNG encoding failed"))?;
+            Ok(Reply::Bytes { bytes: out.into_inner(), content_type: "image/png", cookie: None })
+        }
         (Method::Get, ["v1", "objects", id, "content"]) => {
             let o = db::get_object(c, &pid, id)?;
             let sha = o["sha256"].as_str().unwrap().to_string();
@@ -188,6 +299,7 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
             Ok(Reply::Json(if created { 201 } else { 200 }, json!({"job": job, "created": created})))
         }
         (Method::Get, ["v1", "jobs"]) => ok(db::list_jobs(c, &pid, param("phase").as_deref(), param("after").as_deref(), limit)?),
+        (Method::Get, ["v1", "jobs", "by-key", key]) => ok(db::job_by_key(c, &pid, &decode(key))?),
         (Method::Get, ["v1", "jobs", id]) => ok(db::get_job(c, &pid, id)?),
         (Method::Get, ["v1", "jobs", id, "events"]) => {
             let events = db::job_events(c, &pid, id)?;
@@ -213,6 +325,7 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request) -> Result<Reply> {
             let body = read_json(req)?;
             Ok(Reply::Json(201, db::create_method_version(c, &p, &body)?))
         }
+        (Method::Get, ["v1", "methods", id, "versions", version]) => ok(db::get_method(c, &pid, &decode(id), version)?),
         (Method::Get, ["v1", "recommendations"]) => {
             let uc = param("use_case").ok_or_else(|| Error::new(422, "bad_request", "use_case required"))?;
             let constraints: Value = serde_json::from_str(&param("constraints").unwrap_or("{}".into()))
@@ -290,7 +403,10 @@ fn upload(ctx: &Ctx, c: &mut Client, p: &Principal, req: &mut Request) -> Result
         }
     }
     // A caller-supplied name is metadata only; storage keys stay server-owned.
-    let name = header(req, "X-Asset-Name").map(|n| n.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
+    let name = header(req, "X-Asset-Name-UTF8")
+        .map(|n| decode(&n))
+        .or_else(|| header(req, "X-Asset-Name"))
+        .map(|n| n.chars().filter(|c| !c.is_control()).take(200).collect::<String>());
     let _writer = ctx.store.writer_lock()?;
     let room = ctx.room()?;
     let stored = ctx.store.put_locked(req.as_reader(), ctx.cfg.max_upload_bytes, room)?;

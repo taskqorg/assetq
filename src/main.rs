@@ -209,7 +209,8 @@ fn serve(rest: &[String], qualification: &str) -> Result<(), String> {
     let ctx = Arc::new(ctx);
     let server = Arc::new(assetq::api::bind(&listen).map_err(|e| format!("bind {listen}: {e}"))?);
     let addr = server.server_addr().to_ip().map(|a| a.to_string()).unwrap_or(listen);
-    let mut handles = assetq::api::serve(ctx.clone(), server, threads);
+    let browser = if qualification.is_empty() { assetq::browser::Browser::from_env()? } else { None };
+    let mut handles = assetq::api::serve_with_browser(ctx.clone(), server, threads, browser);
     handles.extend(spawn_executors(&ctx));
     // Tests and supervisors read this line to learn the bound port.
     println!("assetq listening on {addr}");

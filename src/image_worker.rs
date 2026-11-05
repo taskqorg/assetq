@@ -686,7 +686,7 @@ fn native_image(dir: &Path, thread: Option<&str>, turn: Option<&str>) -> Res<Opt
     Ok(found)
 }
 
-fn decode_png(bytes: &[u8], constraints: &Value) -> Res<image::DynamicImage> {
+pub(crate) fn decode_png(bytes: &[u8], constraints: &Value) -> Res<image::DynamicImage> {
     use image::ImageDecoder;
     let mut decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(bytes)).map_err(|e| format!("invalid PNG: {e}"))?;
     let (w, h) = decoder.dimensions();
