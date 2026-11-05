@@ -41,7 +41,7 @@ class GateTrust(unittest.TestCase):
             self.assertFalse(thread.is_alive())
 
     def test_unknown_impact_keeps_implementation_checks(self):
-        self.assertFalse(check.needs_rust(["assetq.md", "docs/service.md"]))
+        self.assertFalse(check.needs_rust(["pipe.md", "docs/service.md"]))
         for paths in [[], ["Cargo.lock"], ["src/api.rs", "README.md"], ["scripts/check.py"], [".github/workflows/tests.yml"]]:
             self.assertTrue(check.needs_rust(paths), paths)
 

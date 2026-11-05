@@ -101,7 +101,7 @@ impl Meshy {
         binding_check(&binding, now()?)?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
         if binding["assetq_binary_sha256"] != sha_reader(File::open(executable).map_err(|e| e.to_string())?)? {
-            return Err("AssetQ binary differs from the operator qualification candidate".into());
+            return Err("Pipe binary differs from the operator qualification candidate".into());
         }
         let memory = native_memory_bound()?;
         if binding["memory_limit_bytes"].as_u64() != Some(memory) {

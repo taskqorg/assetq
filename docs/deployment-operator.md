@@ -1,6 +1,6 @@
 # Deployment operator workflow
 
-`scripts/deploy_assetq.py` moves one verified CI candidate onto the existing AssetQ service over the operator's existing SSH. It implements the [deployment](deploy.md) lifecycle for candidates only. It does not install a first service, and nothing starts it automatically.
+`scripts/deploy_assetq.py` (path retained for in-flight task #25) moves one verified CI candidate onto the existing Pipe service over the operator's existing SSH. It implements the [deployment](deploy.md) lifecycle for candidates only. It does not install a first service, and nothing starts it automatically.
 
 **Code-ready is not deployed.** The merged tool and its fixtures prove tool logic. Whether a candidate runs on a host is shown only by a successful `apply` readback on that host. No run of this tool against a real host is recorded here.
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | CI | One workflow, `.github/workflows/tests.yml`, with jobs `tests` and `candidate` on GitHub-hosted `ubuntu-latest` | The tool reads this workflow's evidence |
 | Merge result | The merge queue runs that workflow as a `merge_group` event at the exact commit that becomes `main` | The tool requires a green `merge_group` run, not a branch or pull-request run |
-| Candidate | The run's `assetq-candidate` artifact holds `assetq-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz` and `SHA256SUMS` | The tool binds the artifact digest GitHub reports |
+| Candidate | The run's `pipe-candidate` artifact holds `pipe-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz` and `SHA256SUMS` | The tool binds the artifact digest GitHub reports |
 | Repository automation | No self-hosted runners, deployment environments, Actions secrets or webhooks | The tool adds none. It only reads through the operator's existing `gh` login |
 | Host access | Existing operator SSH alias, optional explicit login user and `known_hosts` entry | The tool uses `BatchMode=yes` and `StrictHostKeyChecking=yes`, so it never prompts, learns a new key or creates a key. It refuses a non-root login |
 | Service manager | A systemd **user** unit under the dedicated service account, not a system unit. Root reaches it with `runuser -u <account> -- env XDG_RUNTIME_DIR=/run/user/<uid> systemctl --user ...` | The target binds account, UID and unit. All lifecycle and transient commands use that shape; `systemctl restart <unit>` at system level would not reach this unit |
@@ -23,10 +23,10 @@ The CI and repository rows are read from GitHub. The service manager and release
 
 | CoreQ convention | This tool | Difference and reason |
 |---|---|---|
-| R12, R15: immutable `releases/<id>/`; prepare with verified bytes, then activate | Same. Identical bytes are reused and different bytes refuse and stay preserved | The release ID is the executable SHA-256, matching the host, because AssetQ candidates share one Cargo version |
+| R12, R15: immutable `releases/<id>/`; prepare with verified bytes, then activate | Same. Identical bytes are reused and different bytes refuse and stay preserved | The release ID is the executable SHA-256, matching the host, because Pipe candidates share one Cargo version |
 | R12, R13: atomic `current` and `previous`; a running binary is never overwritten | Same, written with a temporary link and a rename | They are symlinks, not version files, because the unit's `ExecStart` and [deployment](deploy.md) use the `current` symlink |
 | R25: `selftest` before install | Same, under the service's user manager, before the release gets its final name | None |
-| R16: launcher rollback after three unhealthy starts; `healthy` marker | The tool verifies once and rolls back on failure. It writes `releases/<id>/healthy` after success | AssetQ has no CoreQ launcher. A later unit crash is not rolled back automatically |
+| R16: launcher rollback after three unhealthy starts; `healthy` marker | The tool verifies once and rolls back on failure. It writes `releases/<id>/healthy` after success | Pipe has no CoreQ launcher. A later unit crash is not rolled back automatically |
 | R12: self-update and pruning | Not provided | Automatic LIVE action is not authorized. No release is deleted |
 
 ## What the tool cannot do
@@ -45,7 +45,7 @@ It has no code path for DNS, Caddy, sign-in or access guards, firewalls, grants,
   "ssh_user": "invented-operator",
   "service_account": "invented-account",
   "service_uid": 12345,
-  "executable": "bin/assetq",
+  "executable": "bin/pipe",
   "install_root": "/invented/assetq",
   "unit": "invented.service",
   "port": 8740,
@@ -68,7 +68,7 @@ It has no code path for DNS, Caddy, sign-in or access guards, firewalls, grants,
 
 This selects a username only: it changes no credentials, SSH configuration, trust pins or permissions. The actual remote UID must still be zero, and all expected host-identity and deploy/rollback checks remain required under R3.
 
-Obtain the `expected` identity independently of this tool. `executable` is the path inside a release that the unit runs. A release always keeps `bin/assetq`; when the unit expects another path, the tool adds a verified copy there and does not edit the unit.
+Obtain the `expected` identity independently of this tool. `executable` is the path inside a release that the unit runs. A release always keeps `bin/pipe`; when the unit expects another path, the tool adds a verified copy there and does not edit the unit.
 
 Each `status_env_files` entry is a protected host file, readable by the service account, with `ASSETQ_URL` and `ASSETQ_TOKEN` for one project. With an empty list, active work is unknown and the plan refuses unless you accept that explicitly. Status covers only the named projects.
 
@@ -82,7 +82,7 @@ Plans and target files name private infrastructure. Keep them in private storage
 python3 scripts/deploy_assetq.py plan --target <private-target.json> --source <full-main-sha> --out <new-private-dir>
 ```
 
-`plan` makes no host change. Its host reads include short-lived `systemd-run --user` processes for `assetq ops` and `assetq restore-check`, so a large store sees read load. It refuses, and writes nothing, unless all of these hold:
+`plan` makes no host change. Its host reads include short-lived `systemd-run --user` processes for `pipe ops` and `pipe restore-check`, so a large store sees read load. It refuses, and writes nothing, unless all of these hold:
 
 - **CI:** every `merge_group` run of the exact SHA is green, and jobs `tests` and `candidate` succeeded.
 - **Source:** `main` contains the SHA, and packaged documents match the source tree blobs.
@@ -106,7 +106,7 @@ python3 scripts/deploy_assetq.py apply --plan <dir>/plan.json --confirm-plan <pl
 
 ### 3. Apply the plan
 
-**Warning:** `apply` is a LIVE action. It restarts the AssetQ service, which is offline until the new process is healthy. Run it only after approval for this exact candidate and host. Earlier approval of a restart does not carry over.
+**Warning:** `apply` is a LIVE action. It restarts the Pipe service, which is offline until the new process is healthy. Run it only after approval for this exact candidate and host. Earlier approval of a restart does not carry over.
 
 ```sh
 python3 scripts/deploy_assetq.py apply --plan <dir>/plan.json --confirm-plan <plan_sha256>
@@ -117,7 +117,7 @@ python3 scripts/deploy_assetq.py apply --plan <dir>/plan.json --confirm-plan <pl
 | Action | Effect | Service impact |
 |---|---|---|
 | `prepare` | Takes `deploy.lock`, uploads, verifies digests and `selftest`, and creates the immutable release | None |
-| `migrate` | Records `restore-check` counts, then runs the candidate's `assetq migrate` under the service's user manager. Schema-1 migration is additive and stays in place after a rollback | The old process keeps running |
+| `migrate` | Records `restore-check` counts, then runs the candidate's `pipe migrate` under the service's user manager. Schema-1 migration is additive and stays in place after a rollback | The old process keeps running |
 | `activate` | Re-reads the host, switches `previous` and `current`, restarts the user unit and verifies it | Outage until healthy |
 
 Activation succeeds only if all of these hold:
@@ -157,7 +157,7 @@ Each row needs its own confirmation for the exact target and candidate. One conf
 |---|---|---|
 | `plan` or `--dry-run` | Operator, read-only | Yes |
 | `prepare`, `migrate`, `activate`, `rollback` on a LIVE host | Operator, with the owner's approval of that candidate or action, then a typed phrase per action | Yes |
-| `assets.ufobe.com` DNS change | Owner-approved concrete change | No |
+| `pipe.ufobe.com` DNS change | Owner-approved concrete change | No |
 | Caddy site, proxy or TLS change | Owner-approved concrete change | No |
 | Access or sign-in guard, browser subject mapping, proxy secret | Owner-approved security change | No |
 | Firewall, grant, token, key, runner, webhook or other security effect | Owner-approved security change | No |

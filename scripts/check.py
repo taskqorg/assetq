@@ -131,7 +131,7 @@ def main():
     if actual != PIN or run("git", "-C", str(SPECQ), "status", "--porcelain").strip():
         raise RuntimeError(".specq differs from the pinned clean checkout; inspect it")
     print(run(sys.executable, str(SPECQ / "engineering/scripts/contract_lint.py"),
-              "assetq.md"), end="")
+              "pipe.md"), end="")
     print(run("git", "diff", "--check"), end="")
     print(run("git", "diff", "--cached", "--check"), end="")
     print("Contract and whitespace checks passed.")

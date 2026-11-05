@@ -1,5 +1,5 @@
-//! AssetQ: durable asset-generation jobs over PostgreSQL metadata and an
-//! immutable filesystem object store. See `assetq.md` and `docs/service.md`.
+//! Pipe: durable asset-generation jobs over PostgreSQL metadata and an
+//! immutable filesystem object store. See `pipe.md` and `docs/service.md`.
 
 pub mod api;
 pub mod browser;

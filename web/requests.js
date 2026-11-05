@@ -1,6 +1,6 @@
 'use strict';
 // Form-to-API payloads; the service remains the authority for every limit.
-const AssetQRequest = (() => {
+const PipeRequest = (() => {
   function apiUrl(path, project, origin) {
     const url = new URL('/browser/v1/' + path, origin);
     for (const key of ['phase','operation','capability','status','after']) if (url.searchParams.get(key) === '') url.searchParams.delete(key);
@@ -51,4 +51,4 @@ const AssetQRequest = (() => {
   }
   return {apiUrl,pendingRequest,job,comparison,method,recommendation};
 })();
-if (typeof module !== 'undefined') module.exports = AssetQRequest;
+if (typeof module !== 'undefined') module.exports = PipeRequest;

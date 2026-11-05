@@ -5,10 +5,10 @@
 //! The provider is `synthetic.fake`: these tests prove recovery semantics,
 //! never real generation.
 
-use assetq::db::{self, Principal};
-use assetq::exec::{self, Ctx};
-use assetq::provider::{FakeProvider, Output, Poll, Provider, Submit};
-use assetq::{Config, api};
+use pipe::db::{self, Principal};
+use pipe::exec::{self, Ctx};
+use pipe::provider::{FakeProvider, Output, Poll, Provider, Submit};
+use pipe::{Config, api};
 use postgres::Client;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
@@ -50,7 +50,7 @@ impl Fixture {
             metadata_admission_headroom_bytes: 4 << 20,
             metadata_recovery_headroom_bytes: 16 << 20,
             max_execution_ms: 86_400_000,
-            content_types: assetq::DEFAULT_TYPES.split(',').map(String::from).collect(),
+            content_types: pipe::DEFAULT_TYPES.split(',').map(String::from).collect(),
             executors: 1,
             poll_ms: 0,
             lease_ms: 60_000,
@@ -124,7 +124,7 @@ fn meshy_validation_retains_originals_without_success_manifest() {
     let (p, _) = project(&mut c, "meshy-fixture", 1000, 1);
     let mut ctx = f.ctx(1 << 30);
     ctx.providers.push(Arc::new(MeshFixture(f.fake())));
-    let mut spec = assetq::meshy::method();
+    let mut spec = pipe::meshy::method();
     spec["synthetic"] = json!(true);
     let owner = Principal { project: p.project.clone(), role: "owner".into() };
     let method = db::create_method_version(&mut c, &owner, &json!({"id":"model.meshy-prop.v1","spec":spec})).unwrap();
@@ -287,7 +287,7 @@ fn admission_idempotency_scope_and_typed_limits() {
     let (j1b, created) = db::submit_job(&mut c, &a, &req("k1", json!({})), &limits(), FAKE).unwrap();
     assert!(!created);
     assert_eq!(j1b["id"], j1["id"]);
-    let err = |r: Result<(Value, bool), assetq::Error>| r.unwrap_err().code;
+    let err = |r: Result<(Value, bool), pipe::Error>| r.unwrap_err().code;
     assert_eq!(err(db::submit_job(&mut c, &a, &req("k1", json!({"outputs": 2})), &limits(), FAKE)), "idempotency_conflict");
     // The same key in another project is independent.
     assert!(db::submit_job(&mut c, &b, &req("k1", json!({})), &limits(), FAKE).unwrap().1);
@@ -361,7 +361,7 @@ fn manifest_commit_is_atomic_and_fenced() {
     // A stale executor's manifest write rolls back with its rejected event.
     let mut tx = db::write_tx(&mut c, true).unwrap();
     tx.execute("DELETE FROM manifests WHERE job_id = $1", &[&id]).unwrap();
-    let stale = assetq::model::Event::ManifestCommitted { fence: fence - 1, items: 1 };
+    let stale = pipe::model::Event::ManifestCommitted { fence: fence - 1, items: 1 };
     assert_eq!(db::apply_event(&mut tx, id, &stale, 1000, 0).unwrap_err().code, "invalid_transition");
     drop(tx);
     let n: i64 = c.query_one("SELECT count(*) FROM manifests WHERE job_id = $1", &[&id]).unwrap().get(0);
@@ -382,8 +382,8 @@ fn crash_after_intent_reconciles_before_one_resubmission() {
     let id = j["id"].as_str().unwrap();
     // A dead executor persisted dispatch intent and never called the provider.
     let mut tx = db::write_tx(&mut c, true).unwrap();
-    db::apply_event(&mut tx, id, &assetq::model::Event::Claimed { owner: "dead".into(), fence: 1 }, 60_000, 0).unwrap();
-    db::apply_event(&mut tx, id, &assetq::model::Event::DispatchIntended { fence: 1, effect_id: "dead-effect".into() }, 60_000, 0).unwrap();
+    db::apply_event(&mut tx, id, &pipe::model::Event::Claimed { owner: "dead".into(), fence: 1 }, 60_000, 0).unwrap();
+    db::apply_event(&mut tx, id, &pipe::model::Event::DispatchIntended { fence: 1, effect_id: "dead-effect".into() }, 60_000, 0).unwrap();
     db::commit_write(tx).unwrap();
     c.execute("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", &[&id]).unwrap();
     let job = drive(&mut c, &ctx, "eps", id, phase("succeeded"));
@@ -735,14 +735,8 @@ fn uncertain_cancellation_retains_capacity_until_terminal_observation() {
         let mut c = f.client();
         if outcome == "confirmed" {
             let mut tx = db::write_tx(&mut c, true).unwrap();
-            db::apply_event(
-                &mut tx,
-                id,
-                &assetq::model::Event::CancelConfirmed { op_id: op.as_str().unwrap().into() },
-                ctx.cfg.lease_ms,
-                0,
-            )
-            .unwrap();
+            db::apply_event(&mut tx, id, &pipe::model::Event::CancelConfirmed { op_id: op.as_str().unwrap().into() }, ctx.cfg.lease_ms, 0)
+                .unwrap();
             db::commit_write(tx).unwrap();
         } else {
             exec::tick(&mut c, &f.ctx(1 << 30), "restarted-observer").unwrap();
@@ -867,10 +861,10 @@ fn registry_recommendations_and_comparisons() {
     let owner = db::authenticate(&mut c, &owner_token).unwrap();
     let methods = db::list_methods(&mut c, "kappa").unwrap();
     assert_eq!(methods.as_array().unwrap().len(), 8);
-    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, assetq::image_worker::legacy_method());
-    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, assetq::image_worker::protected_method_v3());
-    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, assetq::image_worker::protected_method_v4());
-    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@5").unwrap().2, assetq::image_worker::method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@2").unwrap().2, pipe::image_worker::legacy_method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@3").unwrap().2, pipe::image_worker::protected_method_v3());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@4").unwrap().2, pipe::image_worker::protected_method_v4());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "image.worker.v1@5").unwrap().2, pipe::image_worker::method());
     // A1/R5 adds Meshy v2; migrate old catalogs without rewriting disabled v1 or another project's registry.
     let old_meshy = db::list_methods(&mut c, "kappa")
         .unwrap()
@@ -882,7 +876,7 @@ fn registry_recommendations_and_comparisons() {
         .clone();
     c.execute("DELETE FROM methods WHERE project='kappa' AND id='model.meshy-prop.v1' AND version=2", &[]).unwrap();
     db::migrate(&mut c).unwrap();
-    assert_eq!(db::resolve_method(&mut c, "kappa", "model.meshy-prop.v1@2").unwrap().2, assetq::meshy::method());
+    assert_eq!(db::resolve_method(&mut c, "kappa", "model.meshy-prop.v1@2").unwrap().2, pipe::meshy::method());
     assert_eq!(db::resolve_method(&mut c, "kappa", "model.meshy-prop.v1@1").unwrap_err().code, "method_disabled");
     assert_eq!(
         db::list_methods(&mut c, "kappa")
@@ -959,7 +953,7 @@ fn registry_recommendations_and_comparisons() {
 // identities and human judgment must survive registry and recommendation edits.
 #[test]
 fn registry_bounded_comparison_jobs_and_pins() {
-    use assetq::registry;
+    use pipe::registry;
     let f = fixture();
     let mut c = f.client();
     let (member, _) = project(&mut c, "bench", 64, 1);
@@ -1085,7 +1079,7 @@ fn registry_bounded_comparison_jobs_and_pins() {
 // or unreported usage cannot produce a perfect failure/cost result.
 #[test]
 fn registry_operation_separation_and_unknown_comparisons() {
-    use assetq::registry;
+    use pipe::registry;
     let f = fixture();
     let mut c = f.client();
     let (member, _) = project(&mut c, "bench-unknown", 16, 4);
@@ -1193,12 +1187,12 @@ fn registry_scope_and_expired_fences() {
     let (j, _) = db::submit_job(&mut c, &a, &req("expired", json!({})), &limits(), FAKE).unwrap();
     let id = j["id"].as_str().unwrap();
     let mut tx = db::write_tx(&mut c, true).unwrap();
-    db::apply_event(&mut tx, id, &assetq::model::Event::Claimed { owner: "old".into(), fence: 1 }, 60_000, 0).unwrap();
+    db::apply_event(&mut tx, id, &pipe::model::Event::Claimed { owner: "old".into(), fence: 1 }, 60_000, 0).unwrap();
     db::commit_write(tx).unwrap();
     c.execute("UPDATE jobs SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1", &[&id]).unwrap();
     let mut tx = db::write_tx(&mut c, true).unwrap();
     assert_eq!(
-        db::apply_event(&mut tx, id, &assetq::model::Event::DispatchIntended { fence: 1, effect_id: "stale".into() }, 1000, 0)
+        db::apply_event(&mut tx, id, &pipe::model::Event::DispatchIntended { fence: 1, effect_id: "stale".into() }, 1000, 0)
             .unwrap_err()
             .code,
         "stale_fence"
@@ -1221,7 +1215,7 @@ fn registry_scope_and_expired_fences() {
 // old comparisons, and unrelated specs cannot borrow real qualification.
 #[test]
 fn registry_publication_limits_and_receipt_identity() {
-    use assetq::registry;
+    use pipe::registry;
     let f = fixture();
     let mut c = f.client();
     let (member, _) = project(&mut c, "registry-limits", 8, 4);
@@ -1309,7 +1303,7 @@ fn registry_cli_api_projection() {
         .unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("assetq listening on ").unwrap()) };
+    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("pipe listening on ").unwrap()) };
     let file = f.dir.join("invented.json");
     for (command, body) in [
         (
@@ -1413,6 +1407,21 @@ fn http() -> ureq::Agent {
 
 // R3/R5/R9: browser proof, sessions and CSRF cannot widen the shared API grant;
 // search and preview must protect private objects before any file access.
+// R10/A2: public identity and refusal must hold before any host effect or spool write.
+#[test]
+fn management_pipe_identity_and_recovery_only() {
+    let help = Command::new(bin()).arg("--help").output().unwrap();
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).starts_with("pipe <command>"));
+    let dir = std::env::temp_dir().join(format!("pipe-refused-{}", uuid::Uuid::new_v4()));
+    let out = Command::new(bin()).args(["image-qualify", dir.to_str().unwrap()]).output().unwrap();
+    assert!(!out.status.success());
+    // Off Mac the platform refusal comes first; both refuse before any effect.
+    let expected = if cfg!(target_os = "macos") { "legacy TaskQ adapter is recovery-only" } else { "existing approved Mac Workspace" };
+    assert!(String::from_utf8_lossy(&out.stderr).contains(expected));
+    assert!(!dir.exists(), "refusal must precede spool creation and TaskQ calls");
+}
+
 #[test]
 fn management_browser_scope_csrf_search_preview_and_durable_request() {
     let f = fixture();
@@ -1423,7 +1432,7 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
     let owner = db::create_token(&mut c, "web-a", "owner").unwrap();
     let guard = uuid::Uuid::new_v4().simple().to_string();
     let browser = Arc::new(
-        assetq::browser::Browser::from_json(
+        pipe::browser::Browser::from_json(
             &json!({"guard_secret":guard,
         "subjects":{"invented-member":[member],"invented-owner":[owner],"invented-foreign":[foreign]}})
             .to_string(),
@@ -1434,20 +1443,35 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
     let base = format!("http://{}", server.server_addr().to_ip().unwrap());
     api::serve_with_browser(ctx.clone(), server, 3, Some(browser));
     let h = http();
+    // R9/A4: the retired hostname serves neither browser nor API, even with authority.
+    for host in ["assets.ufobe.com", "ASSETS.UFOBE.COM:443", "assets.ufobe.com."] {
+        for path in ["/v1/health", "/v1/status", "/assets", "/browser/session"] {
+            let response = h
+                .get(format!("{base}{path}"))
+                .header("Host", host)
+                .header("X-AssetQ-Guard", &guard)
+                .header("X-AssetQ-Subject", "invented-owner")
+                .header("Authorization", format!("Bearer {owner}"))
+                .call()
+                .unwrap();
+            assert_eq!(response.status().as_u16(), 421, "retired host {host}{path}");
+            assert!(response.headers().get("Location").is_none(), "no redirect is authorized");
+        }
+    }
     let get = |path: &str, subject: &str, cookie: &str| {
         h.get(format!("{base}{path}"))
-            .header("Host", "assets.ufobe.com")
+            .header("Host", "pipe.ufobe.com")
             .header("X-AssetQ-Guard", &guard)
             .header("X-AssetQ-Subject", subject)
             .header("Cookie", cookie)
     };
     let post = |path: &str, subject: &str, cookie: &str, csrf: &str| {
         h.post(format!("{base}{path}"))
-            .header("Host", "assets.ufobe.com")
+            .header("Host", "pipe.ufobe.com")
             .header("X-AssetQ-Guard", &guard)
             .header("X-AssetQ-Subject", subject)
             .header("Cookie", cookie)
-            .header("Origin", assetq::browser::ORIGIN)
+            .header("Origin", pipe::browser::ORIGIN)
             .header("X-CSRF-Token", csrf)
     };
     let mut r = get("/browser/session", "invented-member", "").call().unwrap();
@@ -1547,7 +1571,7 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
     let job: Value = serde_json::from_str(&r.body_mut().read_to_string().unwrap()).unwrap();
     let jid = job["job"]["id"].as_str().unwrap();
     let urls = Command::new("node").current_dir(env!("CARGO_MANIFEST_DIR"))
-        .args(["-e", "const r=require('./web/requests.js'); console.log(JSON.stringify(['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100'].map(p=>{const u=r.apiUrl(p,'web-a','https://assets.ufobe.com');return {before:'/browser/v1/'+p+'&project=web-a',after:u.pathname+u.search};})))"])
+        .args(["-e", "const r=require('./web/requests.js'); console.log(JSON.stringify(['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100'].map(p=>{const u=r.apiUrl(p,'web-a','https://pipe.ufobe.com');return {before:'/browser/v1/'+p+'&project=web-a',after:u.pathname+u.search};})))"])
         .output().unwrap();
     assert!(urls.status.success());
     for paths in serde_json::from_slice::<Vec<Value>>(&urls.stdout).unwrap() {
@@ -1599,8 +1623,8 @@ fn management_browser_scope_csrf_search_preview_and_durable_request() {
     );
     // Members can freeze a comparison/propose guidance; only owners run/promote.
     let owner_principal = db::authenticate(&mut c, &owner).unwrap();
-    assetq::registry::register(&mut c,&owner_principal,"dataset",&json!({"id":"browser-input","version":1,"document":{"operation":"synthetic.generate","cases":[{"id":"one","text":"invented fixture","attachments":[]}]}})).unwrap();
-    assetq::registry::register(
+    pipe::registry::register(&mut c,&owner_principal,"dataset",&json!({"id":"browser-input","version":1,"document":{"operation":"synthetic.generate","cases":[{"id":"one","text":"invented fixture","attachments":[]}]}})).unwrap();
+    pipe::registry::register(
         &mut c,
         &owner_principal,
         "evaluator",
@@ -1753,7 +1777,7 @@ impl Drop for Service {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_assetq")
+    env!("CARGO_BIN_EXE_pipe")
 }
 
 fn env_cmd(f: &Fixture) -> Command {
@@ -1771,7 +1795,7 @@ fn start(f: &Fixture) -> Service {
     let mut child = env_cmd(f).args(["serve", "--listen", "127.0.0.1:0"]).stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn().unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let addr = line.trim().strip_prefix("assetq listening on ").unwrap_or_else(|| panic!("unexpected: {line}")).to_string();
+    let addr = line.trim().strip_prefix("pipe listening on ").unwrap_or_else(|| panic!("unexpected: {line}")).to_string();
     Service { child, url: format!("http://{addr}") }
 }
 
@@ -1789,7 +1813,7 @@ fn resource_bounds_floor_refuses_native_upload() {
         .unwrap();
     let mut line = String::new();
     BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
-    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("assetq listening on ").unwrap()) };
+    let s = Service { child, url: format!("http://{}", line.trim().strip_prefix("pipe listening on ").unwrap()) };
     let r = http()
         .post(format!("{}/v1/uploads", s.url))
         .header("Authorization", format!("Bearer {token}"))
@@ -1999,7 +2023,7 @@ fn resource_bounds_guarded_writes_measure_once_per_lock_boundary() {
 // must still finish using recovery headroom after admission closes.
 #[test]
 fn resource_bounds_local_progress_resumes_at_admission_ceiling() {
-    use assetq::model::Event;
+    use pipe::model::Event;
     let f = fixture();
     let mut c = f.client();
     let (p, _) = project(&mut c, "local", 10, 4);
