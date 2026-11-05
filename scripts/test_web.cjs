@@ -77,6 +77,14 @@ function browser() {
   context.headerPosition = 'relative'; focused.rect = {top: -19, bottom: 20};
   events.keydown({key: 'Tab', shiftKey: true}); frames.shift()();
   assert.deepEqual(scrolls.pop(), [0, -25]);
+  // R9/F3: narrow navigation is in the page scroll, outside the workspace.
+  const navigation = new Node('a'); context.document.querySelector('#nav').append(navigation);
+  context.document.activeElement = navigation;
+  for (const shiftKey of [false, true]) {
+    navigation.rect = {top: -26.6167, bottom: 37.3833};
+    events.keydown({key: 'Tab', shiftKey}); frames.shift()();
+    assert.deepEqual(scrolls.pop(), [0, -32.6167]);
+  }
   context.document.activeElement = new Node('button');
   events.keydown({key: 'Tab'}); frames.shift()();
   assert.equal(scrolls.length, 0);
