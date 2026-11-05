@@ -50,6 +50,8 @@ for line in sys.stdin:
                     "total": {"inputTokens": 30, "cachedInputTokens": 20, "outputTokens": 4},
                     "last": {"inputTokens": 30, "cachedInputTokens": 20, "outputTokens": 4}}}})
             terminal("completed")
+        if outcome == "failed":
+            terminal("failed")
         result = {"turn": {"id": "invented-turn"}}
     elif method == "turn/interrupt":
         terminal("interrupted")

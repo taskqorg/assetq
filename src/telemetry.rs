@@ -3,10 +3,12 @@
 //! Error classes are `&'static str`, so a raw reason, prompt or path cannot reach a record.
 //! A failed write never changes a job (R2); `state` reads unknown instead (R4).
 
-use crate::provider::{Output, Poll, Submit};
+use crate::provider::{Poll, Submit};
 use agentq_runtime::agent::{Context, Run};
 use coreq::telemetry::{Budget, Event, INSTALLATION_BYTES, PEER_BYTES, Store};
 use serde_json::{Map, Value, json};
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -82,6 +84,7 @@ pub struct Passes {
 pub struct Telemetry {
     store: Result<Store, String>,
     lost: AtomicU64,
+    losses: PathBuf,
 }
 
 /// The store path below a data root.
@@ -96,10 +99,17 @@ impl Telemetry {
         if let Err(error) = &store {
             eprintln!("telemetry unavailable: {error}");
         }
-        Telemetry { store, lost: AtomicU64::new(0) }
+        let losses = data_root.join("telemetry/lost");
+        if let Ok(_lock) = loss_lock(&losses) {
+            if let Ok(mut file) = OpenOptions::new().create_new(true).write(true).open(&losses) {
+                let _ = file.write_all(&0u64.to_le_bytes()).and_then(|_| file.sync_all());
+            }
+        }
+        Telemetry { store, lost: AtomicU64::new(0), losses }
     }
 
-    fn lost(&self, error: &str) {
+    pub(crate) fn lost(&self, error: &str) {
+        let _ = loss_count(&self.losses, true);
         if self.lost.fetch_add(1, Ordering::Relaxed) == 0 {
             eprintln!("telemetry record lost: {error}");
         }
@@ -184,11 +194,33 @@ impl Telemetry {
             return json!({"state": "unknown", "reason": "local store unavailable"});
         };
         let shipper = store.shipper().unwrap_or_else(|_| json!({"state": "unknown", "reason": "shipper state unreadable"}));
-        match self.lost.load(Ordering::Relaxed) {
-            0 => json!({"state": "observed", "lost": 0, "shipper": shipper}),
-            lost => json!({"state": "unknown", "reason": "observations lost since start", "lost": lost, "shipper": shipper}),
+        match loss_count(&self.losses, false) {
+            Ok(0) if self.lost.load(Ordering::Relaxed) == 0 => json!({"state": "observed", "lost": 0, "shipper": shipper}),
+            Ok(lost) if lost > 0 => json!({"state": "unknown", "reason": "observations lost", "lost": lost, "shipper": shipper}),
+            _ => json!({"state": "unknown", "reason": "loss counter unreadable", "lost": null, "shipper": shipper}),
         }
     }
+}
+
+// Shared health metadata, not an observation store. Never reset a missing or corrupt counter.
+fn loss_lock(path: &Path) -> std::io::Result<File> {
+    let lock = File::options().create(true).truncate(false).write(true).open(path.with_extension("lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+fn loss_count(path: &Path, increment: bool) -> std::io::Result<u64> {
+    let _lock = loss_lock(path)?;
+    let mut file = File::options().read(true).write(true).open(path)?;
+    let mut bytes = [0u8; 8];
+    file.read_exact(&mut bytes)?;
+    let count = u64::from_le_bytes(bytes);
+    if increment {
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(&count.saturating_add(1).to_le_bytes())?;
+        file.sync_all()?;
+    }
+    Ok(count)
 }
 
 fn open_store(data_root: &Path) -> Result<Store, String> {
@@ -307,14 +339,6 @@ pub fn poll_outcome(reply: &Result<Poll, String>) -> (Outcome, Units) {
         Ok(Poll::Cancelled) => (("cancelled", "provider-cancelled"), Units::None),
         Err(reason) => (("unknown", class(reason, "poll-unknown")), Units::None),
     }
-}
-
-pub fn fetch_outcome(reply: &Result<Output, String>) -> (Outcome, Units) {
-    let outcome = match reply {
-        Ok(_) => OK,
-        Err(reason) => ("failed", class(reason, "fetch-failed")),
-    };
-    (outcome, Units::None)
 }
 
 pub fn cancel_outcome(reply: &Result<bool, String>) -> (Outcome, Units) {
@@ -437,6 +461,36 @@ mod tests {
         );
         assert!(rows.iter().all(|r| r["kind"] == "service.pass" && r["unit_kind"] == "items" && r["unknown"]["trace"] == "no-job"));
         drop(telemetry);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R4/R11: the API and a restarted service must see losses from a separate worker.
+    #[test]
+    fn telemetry_worker_loss_survives_exit_and_is_visible_to_other_processes() {
+        let dir = fixture();
+        let api = Telemetry::open(&dir);
+        let worker = Telemetry::open(&dir);
+        worker.write(json!({"product":"invalid product"}));
+        assert_eq!(worker.state()["lost"], 1);
+        assert_eq!(api.state()["state"], "unknown");
+        assert_eq!(api.state()["lost"], 1);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| Telemetry::open(&dir).write(json!({"product":"invalid product"})));
+            }
+        });
+        assert_eq!(api.state()["lost"], 9, "concurrent workers cannot overwrite losses");
+        drop(worker);
+        drop(api);
+        let restarted = Telemetry::open(&dir);
+        assert_eq!(restarted.state()["lost"], 9);
+        assert_eq!(restarted.state()["state"], "unknown");
+        drop(restarted);
+        std::fs::write(dir.join("telemetry/lost"), b"bad").unwrap();
+        let corrupt = Telemetry::open(&dir);
+        assert_eq!(corrupt.state()["state"], "unknown");
+        assert_eq!(corrupt.state()["lost"], Value::Null);
+        drop(corrupt);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

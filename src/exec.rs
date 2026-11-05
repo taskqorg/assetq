@@ -417,20 +417,51 @@ fn import(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInfo) -> Res
             continue;
         }
         renew(c, ctx, id, &job)?;
-        let out = match observed(ctx, &info.scope, "provider.fetch", || provider.fetch(&op, i), telemetry::fetch_outcome) {
+        let started = Started::now();
+        let out = match provider.fetch(&op, i) {
             Ok(o) => o,
             Err(e) => {
+                ctx.telemetry.provider(&info.scope, "provider.fetch", &started, ("failed", "fetch-failed"), Units::None);
                 event(c, ctx, id, &Event::Paused { fence: job.fence, reason: format!("fetch failed: {e}") }, ctx.cfg.poll_ms)?;
                 return Ok(None);
             }
         };
-        let mut reader = out.reader;
-        match put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op), out.evidence)? {
+        let mut reader = FetchReader { inner: out.reader, eof: false, failed: false };
+        let imported = put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op), out.evidence);
+        let outcome = if reader.failed {
+            ("failed", "fetch-failed")
+        } else if reader.eof {
+            telemetry::OK
+        } else {
+            ("unknown", "fetch-incomplete")
+        };
+        ctx.telemetry.provider(&info.scope, "provider.fetch", &started, outcome, Units::None);
+        match imported? {
             Some(j) => job = j,
             None => return Ok(None),
         }
     }
     Ok(Some(event(c, ctx, id, &Event::StepCompleted { fence: job.fence, step: job.step }, 0)?))
+}
+
+struct FetchReader {
+    inner: Box<dyn Read + Send>,
+    eof: bool,
+    failed: bool,
+}
+
+impl Read for FetchReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = self.inner.read(buf);
+        if !buf.is_empty() {
+            match &result {
+                Ok(0) => self.eof = true,
+                Err(e) if e.kind() != std::io::ErrorKind::Interrupted => self.failed = true,
+                _ => (),
+            }
+        }
+        result
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

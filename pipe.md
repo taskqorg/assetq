@@ -198,7 +198,7 @@ Measured operations:
 | `provider.submit` | `operation` | submission | `ok`; `refused`; `unknown` when the reply is uncertain |
 | `provider.lookup` | `operation` | reconciliation lookup | `ok`; `unknown` |
 | `provider.poll` | `operation` | provider poll | `ok`; `failed`; `cancelled`; `unknown` |
-| `provider.fetch` | `operation` | output fetch | `ok`; `failed` |
+| `provider.fetch` | `operation` | output fetch through the final stream read | `ok`; `failed`; `unknown` if the read did not finish |
 | `provider.cancel` | `operation` | cancellation request | `ok`; `unknown` when not confirmed |
 | `provider.validate` | `operation` | provider output validation | `ok`; `failed` |
 | `pipe.exec.pass` | `service.pass` | executor pass | `ok`; `failed` |
@@ -216,9 +216,9 @@ Field meanings:
 
 A pass that handled an item is one record. Consecutive passes with no item and the same outcome fold into one record per minute, with their count in `calls` and their summed duration. A crash loses at most that minute of folded counts.
 
-`agentq-runtime` writes `agent.turn` and `agent.call` through `Run::record` to the same store. Pipe passes its context and the store and adds no capture of its own. A client that reports no tokens reads null with a reason from the runtime.
+`agentq-runtime` writes `agent.turn` and `agent.call` through `Run::record` to the same store. Pipe passes its context and the store on success, failure and offline recovery and adds no capture of its own. Repeated recovery keeps the runtime's immutable record identity; an unavailable terminal report remains unknown. A client that reports no tokens reads null with a reason from the runtime.
 
-A failed observation write never changes a job, an effect or a result. `GET /v1/status` reports `telemetry` as `unknown` with a reason when the store is unavailable or a record was lost since start, and includes the CoreQ shipper state.
+A failed observation write never changes a job, an effect or a result. `GET /v1/status` reports `telemetry` as `unknown` with a reason when the store is unavailable, the shared loss counter is unreadable or a record was lost, and includes the CoreQ shipper state. The loss counter survives worker exit and service restart; another process cannot report zero for a known loss.
 
 The store is local in this build: `shipper.state` reads `off`, which never means that nothing is unsent. Sending records through the one CoreQ shipper needs a DashQ enrollment for the installation and belongs to a separate task. The `observations` table holds job control evidence such as provider health; it is not telemetry.
 

@@ -554,6 +554,10 @@ fn partial_import_resumes_and_full_store_preserves_work() {
     assert_eq!(db::job_result(&mut c, "eta", id).unwrap()["status"], "incomplete");
     let objs: i64 = c.query_one("SELECT count(*) FROM objects WHERE job_id = $1", &[&id]).unwrap().get(0);
     assert_eq!(objs, 1, "the first output stays committed; no partial object");
+    // R4/R11: opening a response is not a successful fetch when its stream breaks.
+    let fetches = named(&traced(&observations(&f), id), "provider.fetch");
+    assert_eq!(fetches.iter().map(|r| r["outcome"].as_str().unwrap()).collect::<Vec<_>>(), ["ok", "failed"]);
+    assert_eq!(fetches[1]["error"], "fetch-failed");
     let job = drive(&mut c, &ctx, "eta", id, phase("succeeded"));
     assert_eq!(job["submissions"], 1);
     assert_eq!(db::job_result(&mut c, "eta", id).unwrap()["manifest"]["items"].as_array().unwrap().len(), 2);
@@ -567,6 +571,8 @@ fn partial_import_resumes_and_full_store_preserves_work() {
     let id2 = j2["id"].as_str().unwrap();
     let job2 = drive(&mut c, &full, "eta", id2, |j| j["reason"].as_str().is_some_and(|r| r.contains("store_full")));
     assert_eq!(job2["phase"], "active");
+    let fetch = named(&traced(&observations(&f), id2), "provider.fetch").remove(0);
+    assert_eq!((&fetch["outcome"], &fetch["error"]), (&json!("unknown"), &json!("fetch-incomplete")));
     for o in db::job_result(&mut c, "eta", id).unwrap()["manifest"]["items"].as_array().unwrap() {
         full.store.verify(o["sha256"].as_str().unwrap(), o["size"].as_u64().unwrap()).unwrap();
     }
@@ -683,6 +689,8 @@ fn slow_import_renews_live_leases_without_reviving_expired_ones() {
             let item = &result["manifest"]["items"][0];
             ctx.store.verify(item["sha256"].as_str().unwrap(), item["size"].as_u64().unwrap()).unwrap();
         }
+        let fetch = named(&traced(&observations(&f), id), "provider.fetch").remove(0);
+        assert!(fetch["duration_us"].as_u64().unwrap() >= delay.as_micros() as u64 * 2, "fetch includes the stream read");
         assert_eq!(j["submissions"], 1);
         assert_eq!(f.fake().submissions(), 1);
         db::audit_job(&mut c, id).unwrap();

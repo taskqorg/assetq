@@ -84,7 +84,8 @@ def rust_checks(name=None):
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
     print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
     print(run(sys.executable, "scripts/test_deploy_assetq.py", timeout=300), end="")
-    print(run("cargo", "fmt", "--check"), end="")
+    # Formatting needs no dependency resolution or network; retain the last target on timeout.
+    print(run("cargo", "fmt", "--check", "--verbose", env=dict(os.environ, CARGO_NET_OFFLINE="true")), end="")
     with postgres_cluster() as pg:
         env = dict(os.environ, ASSETQ_TEST_PG=pg, ASSETQ_TEST_PG_BIN=str(pg_bin()))
         if os.name == "nt":
