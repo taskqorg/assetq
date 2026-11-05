@@ -2,9 +2,10 @@
 //! observe provider operations without holding executor capacity (R2, R6).
 
 use crate::db::{self, NewObject};
-use crate::model::{CancelState, EffectState, Event, Job, MAX_OUTPUTS};
+use crate::model::{CancelState, EffectState, Event, Job, MAX_OUTPUTS, Phase};
 use crate::provider::{Poll, Provider, Submit};
 use crate::store::{Store, StoreError};
+use crate::telemetry::{self, Outcome, Passes, Scope, Started, Telemetry, Units};
 use crate::{Config, Error, Result};
 use postgres::Client;
 use serde_json::{Value, json};
@@ -17,6 +18,7 @@ pub struct Ctx {
     pub cfg: Config,
     pub store: Store,
     pub providers: Vec<Arc<dyn Provider>>,
+    pub telemetry: Telemetry,
 }
 
 impl Ctx {
@@ -34,7 +36,8 @@ impl Ctx {
         if cfg.data_root.join("tmp/meshy/bound-job.json").is_file() {
             providers.push(Arc::new(crate::meshy::Meshy::observer(cfg.clone()).map_err(std::io::Error::other)?));
         }
-        Ok(Ctx { cfg, store, providers })
+        let telemetry = Telemetry::open(&cfg.data_root);
+        Ok(Ctx { cfg, store, providers, telemetry })
     }
     pub fn provider_names(&self) -> Vec<&str> {
         self.providers.iter().map(|p| p.name()).collect()
@@ -60,21 +63,26 @@ fn event(c: &mut Client, ctx: &Ctx, id: &str, e: &Event, wake_ms: u64) -> Result
 /// Run executor and poller duties until `stop` is set.
 pub fn run_loop(ctx: Arc<Ctx>, owner: String, stop: Arc<AtomicBool>) {
     let mut client: Option<Client> = None;
+    let mut passes = Passes::default();
     while !stop.load(Ordering::Relaxed) {
+        let started = Started::now();
         if client.as_ref().is_none_or(|c| c.is_closed()) {
             client = db::connect_config(&ctx.cfg).map_err(|e| eprintln!("executor {owner}: {e}")).ok();
         }
-        let busy = match client.as_mut() {
-            Some(c) => tick(c, &ctx, &owner).unwrap_or_else(|e| {
+        let pass = match client.as_mut() {
+            Some(c) => tick(c, &ctx, &owner).map_err(|e| {
                 eprintln!("executor {owner}: {e}");
-                false
+                e.code
             }),
-            None => false,
+            None => Err("database"),
         };
+        let busy = pass == Ok(true);
+        ctx.telemetry.pass(&mut passes, started, pass);
         if !busy {
             std::thread::sleep(Duration::from_millis(ctx.cfg.poll_ms.min(200)));
         }
     }
+    ctx.telemetry.flush(&mut passes);
 }
 
 /// One unit of work: a claimed job or one provider observation.
@@ -155,14 +163,46 @@ struct JobInfo {
     project: String,
     request: Value,
     spec: Value,
+    scope: Scope,
 }
 
 fn info(c: &mut Client, id: &str) -> Result<JobInfo> {
     let r = c.query_one(
-        "SELECT j.project, j.request, m.spec FROM jobs j JOIN methods m ON m.id = j.method_id AND m.version = j.method_version AND m.project = j.project WHERE j.id = $1",
+        "SELECT j.project, j.request, m.spec, j.method_id, j.method_version FROM jobs j JOIN methods m ON m.id = j.method_id AND m.version = j.method_version AND m.project = j.project WHERE j.id = $1",
         &[&id],
     )?;
-    Ok(JobInfo { project: r.get(0), request: r.get(1), spec: r.get(2) })
+    let (project, spec): (String, Value) = (r.get(0), r.get(2));
+    let scope = Scope::job(id, &project, r.get(3), r.get(4), spec["provider"].as_str());
+    Ok(JobInfo { project, request: r.get(1), spec, scope })
+}
+
+/// One provider call and its observation (pipe.md § Telemetry).
+fn observed<T>(ctx: &Ctx, scope: &Scope, operation: &'static str, call: impl FnOnce() -> T, classify: fn(&T) -> (Outcome, Units)) -> T {
+    let started = Started::now();
+    let reply = call();
+    let (outcome, units) = classify(&reply);
+    ctx.telemetry.provider(scope, operation, &started, outcome, units);
+    reply
+}
+
+/// The observed result of a step; when it ended the claim, the job's own state says why.
+fn step_outcome(c: &mut Client, id: &str, result: &Result<bool>) -> Outcome {
+    match result {
+        Ok(true) => telemetry::OK,
+        Err(e) => ("failed", e.code),
+        Ok(false) => {
+            let job = c.transaction().map_err(Error::from).and_then(|mut tx| db::load_job(&mut tx, id));
+            let Ok(job) = job else { return ("unknown", "state-unread") };
+            let reason = job.reason.as_deref().unwrap_or("");
+            match (job.phase, job.effect) {
+                (Phase::Failed, _) => ("failed", telemetry::class(reason, "step-failed")),
+                (Phase::Cancelled, _) => ("cancelled", "none"),
+                (_, EffectState::Uncertain) => ("unknown", "submit-uncertain"),
+                (Phase::Waiting, _) => telemetry::OK,
+                _ => ("retried", telemetry::class(reason, "paused")),
+            }
+        }
+    }
 }
 
 fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> {
@@ -195,74 +235,94 @@ fn run_claimed(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<()> 
             return Ok(());
         }
         if job.step == job.steps.len() {
-            return commit_manifest(c, ctx, id, f);
+            let started = Started::now();
+            let result = commit_manifest(c, ctx, id, f);
+            let outcome = result.as_ref().map_or_else(|e| ("failed", e.code), |_| telemetry::OK);
+            ctx.telemetry.step(&info.scope, "manifest", &started, outcome);
+            return result;
         }
         renew(c, ctx, id, &job)?;
-        match job.steps[job.step].as_str() {
-            "provider.submit" => return submit(c, ctx, id, &job, &info),
-            "provider.import" => match import(c, ctx, id, &job, &info)? {
-                Some(j) => j,
-                None => return Ok(()),
-            },
-            "synthetic.generate" => {
-                let body = format!(
-                    "SYNTHETIC ASSETQ LOCAL OUTPUT - not a real generation\ntext={}\n",
-                    info.request["text"].as_str().unwrap_or("")
-                );
-                let mut src = std::io::Cursor::new(body.into_bytes());
-                if !job.imported.contains("output-0") {
-                    match put_output(c, ctx, id, &job, &info, "output-0", "application/x-assetq-synthetic", &mut src, None, Value::Null)? {
-                        Some(j) => job = j,
-                        None => return Ok(()),
-                    }
-                }
-                event(c, ctx, id, &Event::StepCompleted { fence: f, step: job.step }, 0)?
-            }
-            "validate" => {
-                let allowed: Vec<String> = serde_json::from_value(info.spec["outputs"].clone()).unwrap_or_default();
-                let rows = c.query("SELECT sha256, size, content_type, import_key FROM objects WHERE job_id = $1", &[&id])?;
-                let mut problem = None;
-                for r in &rows {
-                    let (sha, size, ct, key): (String, i64, String, String) = (r.get(0), r.get(1), r.get(2), r.get(3));
-                    if size <= 0 {
-                        problem = Some(format!("{key} is empty"));
-                    } else if !allowed.contains(&ct) {
-                        problem = Some(format!("{key} has undeclared type {ct}"));
-                    } else if let Err(e) = ctx.store.verify(&sha, size as u64) {
-                        problem = Some(format!("{key}: {e}"));
-                    } else if ct == "image/png" {
-                        let mut header = vec![];
-                        let read = ctx.store.open_object(&sha).and_then(|f| f.take(24).read_to_end(&mut header));
-                        let refusal = read.err().map(|e| e.to_string()).or_else(|| png_problem(&header, &info.request["constraints"]));
-                        if let Some(p) = refusal {
-                            problem = Some(format!("{key}: {p}"));
-                        }
-                    }
-                }
-                if rows.len() != job.imported.len() {
-                    problem = Some("imported objects and records differ".into());
-                }
-                if info.spec["provider"] == crate::meshy::PROVIDER {
-                    if let Some(op) = job.op_id.as_deref() {
-                        if let Err(reason) = ctx.provider(crate::meshy::PROVIDER)?.validate(op) {
-                            problem = Some(reason);
-                        }
-                    } else {
-                        problem = Some("Meshy validation has no original operation".into());
-                    }
-                }
-                if let Some(p) = problem {
-                    event(c, ctx, id, &Event::Failed { fence: f, reason: format!("validation failed: {p}") }, 0)?;
-                    return Ok(());
-                }
-                event(c, ctx, id, &Event::StepCompleted { fence: f, step: job.step }, 0)?
-            }
-            other => {
-                event(c, ctx, id, &Event::Failed { fence: f, reason: format!("unsupported step {other}") }, 0)?;
-                return Ok(());
-            }
-        };
+        let started = Started::now();
+        let result = run_step(c, ctx, id, &job, &info);
+        let outcome = step_outcome(c, id, &result);
+        ctx.telemetry.step(&info.scope, &job.steps[job.step], &started, outcome);
+        if !result? {
+            return Ok(());
+        }
     }
+}
+
+/// One step. `false` ends this claim: the job waits, paused or reached a terminal state.
+fn run_step(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInfo) -> Result<bool> {
+    let f = job.fence;
+    match job.steps[job.step].as_str() {
+        "provider.submit" => {
+            submit(c, ctx, id, job, info)?;
+            return Ok(false);
+        }
+        "provider.import" => match import(c, ctx, id, job, info)? {
+            Some(j) => j,
+            None => return Ok(false),
+        },
+        "synthetic.generate" => {
+            let body =
+                format!("SYNTHETIC ASSETQ LOCAL OUTPUT - not a real generation\ntext={}\n", info.request["text"].as_str().unwrap_or(""));
+            let mut src = std::io::Cursor::new(body.into_bytes());
+            if !job.imported.contains("output-0")
+                && put_output(c, ctx, id, job, info, "output-0", "application/x-assetq-synthetic", &mut src, None, Value::Null)?.is_none()
+            {
+                return Ok(false);
+            }
+            event(c, ctx, id, &Event::StepCompleted { fence: f, step: job.step }, 0)?
+        }
+        "validate" => {
+            let allowed: Vec<String> = serde_json::from_value(info.spec["outputs"].clone()).unwrap_or_default();
+            let rows = c.query("SELECT sha256, size, content_type, import_key FROM objects WHERE job_id = $1", &[&id])?;
+            let mut problem = None;
+            for r in &rows {
+                let (sha, size, ct, key): (String, i64, String, String) = (r.get(0), r.get(1), r.get(2), r.get(3));
+                if size <= 0 {
+                    problem = Some(format!("{key} is empty"));
+                } else if !allowed.contains(&ct) {
+                    problem = Some(format!("{key} has undeclared type {ct}"));
+                } else if let Err(e) = ctx.store.verify(&sha, size as u64) {
+                    problem = Some(format!("{key}: {e}"));
+                } else if ct == "image/png" {
+                    let mut header = vec![];
+                    let read = ctx.store.open_object(&sha).and_then(|f| f.take(24).read_to_end(&mut header));
+                    let refusal = read.err().map(|e| e.to_string()).or_else(|| png_problem(&header, &info.request["constraints"]));
+                    if let Some(p) = refusal {
+                        problem = Some(format!("{key}: {p}"));
+                    }
+                }
+            }
+            if rows.len() != job.imported.len() {
+                problem = Some("imported objects and records differ".into());
+            }
+            if info.spec["provider"] == crate::meshy::PROVIDER {
+                if let Some(op) = job.op_id.as_deref() {
+                    let provider = ctx.provider(crate::meshy::PROVIDER)?;
+                    if let Err(reason) =
+                        observed(ctx, &info.scope, "provider.validate", || provider.validate(op), telemetry::validate_outcome)
+                    {
+                        problem = Some(reason);
+                    }
+                } else {
+                    problem = Some("Meshy validation has no original operation".into());
+                }
+            }
+            if let Some(p) = problem {
+                event(c, ctx, id, &Event::Failed { fence: f, reason: format!("validation failed: {p}") }, 0)?;
+                return Ok(false);
+            }
+            event(c, ctx, id, &Event::StepCompleted { fence: f, step: job.step }, 0)?
+        }
+        other => {
+            event(c, ctx, id, &Event::Failed { fence: f, reason: format!("unsupported step {other}") }, 0)?;
+            return Ok(false);
+        }
+    };
+    Ok(true)
 }
 
 // ponytail: header only, enough for the size limit; a full bitmap decode arrives with the first real image method.
@@ -337,7 +397,8 @@ fn submit_admitted(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInf
             "free-space floor exhausted before provider dispatch; intent retained for reconciliation",
         ));
     }
-    let e = match provider.submit(&effect_id, &info.request) {
+    let reply = observed(ctx, &info.scope, "provider.submit", || provider.submit(&effect_id, &info.request), telemetry::submit_outcome);
+    let e = match reply {
         Submit::Accepted(op) => Event::SubmitAcked { fence: f, effect_id, op_id: op },
         Submit::Uncertain(reason) => Event::SubmitUncertain { fence: f, effect_id, reason },
         Submit::Refused(reason) => Event::SubmitRefused { fence: f, effect_id, reason },
@@ -356,20 +417,51 @@ fn import(c: &mut Client, ctx: &Ctx, id: &str, job: &Job, info: &JobInfo) -> Res
             continue;
         }
         renew(c, ctx, id, &job)?;
+        let started = Started::now();
         let out = match provider.fetch(&op, i) {
             Ok(o) => o,
             Err(e) => {
+                ctx.telemetry.provider(&info.scope, "provider.fetch", &started, ("failed", "fetch-failed"), Units::None);
                 event(c, ctx, id, &Event::Paused { fence: job.fence, reason: format!("fetch failed: {e}") }, ctx.cfg.poll_ms)?;
                 return Ok(None);
             }
         };
-        let mut reader = out.reader;
-        match put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op), out.evidence)? {
+        let mut reader = FetchReader { inner: out.reader, eof: false, failed: false };
+        let imported = put_output(c, ctx, id, &job, info, &key, &out.content_type, &mut reader, Some(&op), out.evidence);
+        let outcome = if reader.failed {
+            ("failed", "fetch-failed")
+        } else if reader.eof {
+            telemetry::OK
+        } else {
+            ("unknown", "fetch-incomplete")
+        };
+        ctx.telemetry.provider(&info.scope, "provider.fetch", &started, outcome, Units::None);
+        match imported? {
             Some(j) => job = j,
             None => return Ok(None),
         }
     }
     Ok(Some(event(c, ctx, id, &Event::StepCompleted { fence: job.fence, step: job.step }, 0)?))
+}
+
+struct FetchReader {
+    inner: Box<dyn Read + Send>,
+    eof: bool,
+    failed: bool,
+}
+
+impl Read for FetchReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let result = self.inner.read(buf);
+        if !buf.is_empty() {
+            match &result {
+                Ok(0) => self.eof = true,
+                Err(e) if e.kind() != std::io::ErrorKind::Interrupted => self.failed = true,
+                _ => (),
+            }
+        }
+        result
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -502,7 +594,7 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
     let e = match job.effect {
         EffectState::Intended | EffectState::Uncertain => {
             let effect_id = job.effect_id.clone().unwrap();
-            match provider.lookup(&effect_id) {
+            match observed(ctx, &info.scope, "provider.lookup", || provider.lookup(&effect_id), telemetry::lookup_outcome) {
                 Ok(op) => Event::Reconciled { effect_id, op_id: op },
                 Err(_) => return Ok(true), // still uncertain; never replay blindly
             }
@@ -510,13 +602,13 @@ fn observe(c: &mut Client, ctx: &Ctx, id: &str, mut job: Job) -> Result<bool> {
         EffectState::Submitted => {
             let op = job.op_id.clone().unwrap();
             if job.cancel == CancelState::Requested {
-                match provider.cancel(&op) {
+                match observed(ctx, &info.scope, "provider.cancel", || provider.cancel(&op), telemetry::cancel_outcome) {
                     Ok(true) => Event::CancelConfirmed { op_id: op },
                     Ok(false) => Event::CancelUncertain { reason: "provider did not confirm the cancel".into() },
                     Err(e) => Event::CancelUncertain { reason: format!("provider cancel failed: {e}") },
                 }
             } else {
-                match provider.poll(&op) {
+                match observed(ctx, &info.scope, "provider.poll", || provider.poll(&op), telemetry::poll_outcome) {
                     Ok(Poll::Pending) => return Ok(true),
                     Err(reason) => {
                         if job.reason.as_deref() == Some(reason.as_str()) {
