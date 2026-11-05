@@ -21,6 +21,8 @@ use std::{
 pub mod protected;
 pub mod retained;
 
+/// The runtime identity bound into method version 5, its receipts and provenance. A runtime upgrade never changes it;
+/// Cargo.lock names the runtime this build resolves (pipe.md § Initial generation methods).
 pub const PIN: &str = "70f85434546bd1c303ccdb7b0dd71866421627e2";
 pub const PROVIDER: &str = "agentq.image";
 const LEGACY_PROVIDER: &str = "agentq.codex-image";
@@ -257,7 +259,7 @@ impl Provider for ImageWorker {
         }
         if dir.join("preparation.json").exists() && !dir.join("result.json").exists() && !runner_alive(&dir)? {
             protected::cancel_prepared(&dir)?;
-            recover_native(&dir)?;
+            recover_native(&self.cfg, &dir)?;
         }
         if dir.join("unknown.json").exists() && !dir.join("result.json").exists() {
             return Err(read_json(&dir.join("unknown.json"))?["reason"].as_str().unwrap_or("native outcome unknown").into());
@@ -382,7 +384,27 @@ fn retain_observation(dir: &Path, observation: &Res<Value>) -> Res<()> {
     save(&dir.join("turn-observation.json"), &json!({"turn":observation.as_ref().ok(),"unknown":observation.as_ref().err()}))
 }
 
-fn recover_native(dir: &Path) -> Res<()> {
+fn recover_native(cfg: &Config, dir: &Path) -> Res<()> {
+    let telemetry = crate::telemetry::Telemetry::open(&cfg.data_root);
+    let captured = (|| -> Res<()> {
+        let receipt = read_json(&dir.join("request.json"))?;
+        let root = PathBuf::from(receipt["root"].as_str().ok_or("original root missing")?);
+        let home = protected::prepared_home(dir)?;
+        let mut c = db::connect(&cfg.database_url).map_err(|e| e.to_string())?;
+        let project: String = c
+            .query_one(
+                "SELECT j.project FROM effects e JOIN jobs j ON j.id=e.job_id WHERE e.id=$1",
+                &[&receipt["effect"].as_str().ok_or("original effect missing")?],
+            )
+            .map_err(|e| e.to_string())?
+            .get(0);
+        let mut run = recovered_run(dir, &root, &home)?;
+        telemetry.agent_run(&mut run, &project);
+        Ok(())
+    })();
+    if let Err(error) = captured {
+        telemetry.lost(&error);
+    }
     recover_native_with(dir, || protected::reconcile_release(dir))
 }
 
@@ -469,7 +491,7 @@ pub fn run_job(cfg: Config, op: &str, job: &str, adapter: &Path) -> Res<()> {
             // Never leave a failed launch running; errors still reconcile the original identity.
             if dir.join("preparation.json").exists() {
                 let _ = protected::cancel_prepared(&dir);
-                if recover_native(&dir).is_ok() {
+                if recover_native(&cfg, &dir).is_ok() {
                     return Ok(());
                 }
             } else if dir.join("slot-request.json").exists() {
@@ -535,69 +557,78 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     let opt = server.optimization();
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
+    let telemetry = crate::telemetry::Telemetry::open(&cfg.data_root);
     let launch = runtime_launch(cfg.image_worker_root.as_deref().unwrap(), &home, deadline);
     // Empty launch input: subscription and inherited provider are checked before Runtime::input.
     let (observed, cleanup) = protected::with_run(
         server.open(None, &launch),
         |run| {
-            let observed = (|| {
-                if store.room().map_err(|e| e.to_string())? == 0 {
-                    return Err("store_full: no native input".into());
-                }
-                if let Some(refusal) = runtime_start(runtime, run, dir, &mut log, &input)? {
-                    return Ok(refusal);
-                }
-                let mut interrupt_at = None;
-                loop {
-                    runtime.poll(run)?;
-                    runtime_progress(runtime, run, &mut log)?;
-                    if let Ok(report) = runtime.report(run) {
-                        let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
-                        let turn = checkpoint["app"]["turn"].as_str();
-                        let mut result = agentq_runtime::cli::report_json(&report);
-                        result["optimization"] = opt.json();
-                        result["thread"] = json!(runtime.session_id(run));
-                        result["turn"] = json!(turn);
-                        if report.outcome == "cancelled" {
-                            result["status"] = json!("cancelled");
-                            return Ok(result);
+            observed_run(&telemetry, &project, run, |run| {
+                let observed = (|| {
+                    if store.room().map_err(|e| e.to_string())? == 0 {
+                        return Err("store_full: no native input".into());
+                    }
+                    if let Some(refusal) = runtime_start(runtime, run, dir, &mut log, &input)? {
+                        return Ok(refusal);
+                    }
+                    let mut interrupt_at = None;
+                    loop {
+                        runtime.poll(run)?;
+                        runtime_progress(runtime, run, &mut log)?;
+                        if let Ok(report) = runtime.report(run) {
+                            let checkpoint = runtime.checkpoint(run).map_err(|e| e.to_string())?;
+                            let turn = checkpoint["app"]["turn"].as_str();
+                            let mut result = agentq_runtime::cli::report_json(&report);
+                            result["optimization"] = opt.json();
+                            result["thread"] = json!(runtime.session_id(run));
+                            result["turn"] = json!(turn);
+                            if report.outcome == "cancelled" {
+                                result["status"] = json!("cancelled");
+                                return Ok(result);
+                            }
+                            if report.outcome != "ok" {
+                                result["status"] = json!("failed");
+                                result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
+                                return Ok(result);
+                            }
+                            let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
+                                result["status"] = json!("refused");
+                                result["reason"] = json!(
+                                    "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
+                                );
+                                return Ok(result);
+                            };
+                            result["native_outcome"] = json!(report.outcome);
+                            save(&dir.join("native-report.json"), &result)?;
+                            return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
                         }
-                        if report.outcome != "ok" {
-                            result["status"] = json!("failed");
-                            result["reason"] = json!(format!("native worker {}: {}", report.outcome, report.error));
-                            return Ok(result);
+                        if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
+                            journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
+                            runtime.cancel(run)?;
+                            interrupt_at = Some(Instant::now());
                         }
-                        let Some(item) = native_image(dir, report.session.as_deref(), turn)? else {
-                            result["status"] = json!("refused");
-                            result["reason"] = json!(
-                                "capability_unavailable: native turn ended without a successful imageGeneration item and savedPath; use a Codex worker with the built-in image tool"
-                            );
-                            return Ok(result);
-                        };
-                        result["native_outcome"] = json!(report.outcome);
-                        save(&dir.join("native-report.json"), &result)?;
-                        return complete(cfg, dir, &home, &item, result, &attachments, &request["constraints"]);
+                        if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
+                            return Err("native interrupt unconfirmed; original operation retained; no replay".into());
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
                     }
-                    if interrupt_at.is_none() && (dir.join("cancel").exists() || Instant::now() >= deadline) {
-                        journal(&mut log, "runtime-intent", &json!({"operation":"cancel"}))?;
-                        runtime.cancel(run)?;
-                        interrupt_at = Some(Instant::now());
-                    }
-                    if interrupt_at.is_some_and(|t| t.elapsed() >= Duration::from_secs(30)) {
-                        return Err("native interrupt unconfirmed; original operation retained; no replay".into());
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-            })();
-            retain_observation(dir, &observed)?;
-            observed
+                })();
+                retain_observation(dir, &observed)?;
+                observed
+            })
         },
         || protected::cancel_prepared(dir),
     );
     // Drop Runtime only after cancellation readback; then certify the original scope.
     record_native_observation(dir, &observed, &cleanup.map(|_| false))?;
-    recover_native(dir)?;
+    recover_native(cfg, dir)?;
     read_json(&dir.join("result.json"))
+}
+
+fn observed_run<T>(telemetry: &crate::telemetry::Telemetry, project: &str, run: &mut Run, work: impl FnOnce(&mut Run) -> Res<T>) -> Res<T> {
+    let result = work(run);
+    telemetry.agent_run(run, project);
+    result
 }
 
 fn runtime_launch(root: &Path, home: &Path, deadline: Instant) -> RuntimeLaunch {
@@ -736,14 +767,7 @@ fn original_png(cfg: &Config, home: &Path, item: &Value, constraints: &Value) ->
 }
 
 // AgentQ restores its terminal report offline; there is no new transport or input.
-fn completed_report(dir: &Path, root: &Path, home: &Path) -> Res<Value> {
-    if dir.join("native-report.json").exists() {
-        let report = read_json(&dir.join("native-report.json"))?;
-        if report["native_outcome"] != "ok" {
-            return Err("original Runtime completion not successful; no import".into());
-        }
-        return Ok(report);
-    }
+fn recovered_run(dir: &Path, root: &Path, home: &Path) -> Res<Run> {
     let bytes = read_bounded(&dir.join("native.jsonl"), LOG_LIMIT)?;
     let text = std::str::from_utf8(&bytes).map_err(|_| "native journal encoding invalid")?;
     let mut checkpoint = None;
@@ -758,7 +782,31 @@ fn completed_report(dir: &Path, root: &Path, home: &Path) -> Res<Value> {
     let mut launch = runtime_launch(root, home, Instant::now() + Duration::from_secs(5));
     // Reconstruct the operator launch's explicit marker offline; ambient worker markers must not change its scope.
     launch.env.push(("AGENTQ_LAUNCHER".into(), "assetq".into()));
-    let run = runtime.recover(&checkpoint, &launch)?;
+    runtime.recover(&checkpoint, &launch)
+}
+
+fn completed_report(cfg: &Config, dir: &Path, root: &Path, home: &Path, project: &str) -> Res<Value> {
+    let telemetry = crate::telemetry::Telemetry::open(&cfg.data_root);
+    let recovered = recovered_run(dir, root, home);
+    let recovered = recovered
+        .map(|mut run| {
+            telemetry.agent_run(&mut run, project);
+            run
+        })
+        .map_err(|error| {
+            telemetry.lost(&error);
+            error
+        });
+    if dir.join("native-report.json").exists() {
+        let report = read_json(&dir.join("native-report.json"))?;
+        if report["native_outcome"] != "ok" {
+            return Err("original Runtime completion not successful; no import".into());
+        }
+        return Ok(report);
+    }
+    let run = recovered?;
+    let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
+    let checkpoint = runtime.checkpoint(&run).map_err(|e| e.to_string())?;
     let native = runtime.report(&run)?;
     if native.outcome != "ok" {
         return Err("original Runtime completion unsuccessful; no import".into());
@@ -1122,41 +1170,52 @@ mod tests {
     // environment and obtain the same terminal report without another input.
     #[test]
     fn image_worker_completed_report_recovery_preserves_operator_marker() {
-        let (dir, _cfg, _worker) = fixture();
-        let home = dir.join("invented-home");
-        fs::create_dir(&home).unwrap();
-        let trace = dir.join("wire.jsonl");
-        let mut launch = runtime_launch(&dir, &home, Instant::now() + Duration::from_secs(10));
-        launch.env.push(("AGENTQ_LAUNCHER".into(), "assetq".into()));
-        launch.install = Some(dir.join("absent-optimizer"));
-        launch.command = vec![
-            if cfg!(windows) { "python" } else { "python3" }.into(),
-            "-u".into(),
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-runtime.py").into_os_string(),
-            trace.clone().into_os_string(),
-            "chatgpt".into(),
-            "openai".into(),
-            "complete".into(),
-        ];
-        let runtime = agent::runtime("codex").unwrap();
-        let mut run = runtime.launch(&launch).unwrap();
-        let mut log = File::create(dir.join("native.jsonl")).unwrap();
-        runtime_start(runtime, &mut run, &dir, &mut log, &[Part::Text("invented fixture input".into())]).unwrap();
-        let until = Instant::now() + Duration::from_secs(5);
-        while runtime.report(&run).is_err() && Instant::now() < until {
-            runtime.poll(&mut run).unwrap();
-            runtime_progress(runtime, &mut run, &mut log).unwrap();
-            std::thread::sleep(Duration::from_millis(10));
+        for outcome in ["complete", "failed"] {
+            let (dir, cfg, _worker) = fixture();
+            let home = dir.join("invented-home");
+            fs::create_dir(&home).unwrap();
+            let trace = dir.join("wire.jsonl");
+            let mut launch = runtime_launch(&dir, &home, Instant::now() + Duration::from_secs(10));
+            launch.env.push(("AGENTQ_LAUNCHER".into(), "assetq".into()));
+            launch.install = Some(dir.join("absent-optimizer"));
+            launch.command = vec![
+                if cfg!(windows) { "python" } else { "python3" }.into(),
+                "-u".into(),
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image-runtime.py").into_os_string(),
+                trace.clone().into_os_string(),
+                "chatgpt".into(),
+                "openai".into(),
+                outcome.into(),
+            ];
+            let runtime = agent::runtime("codex").unwrap();
+            let mut run = runtime.launch(&launch).unwrap();
+            let mut log = File::create(dir.join("native.jsonl")).unwrap();
+            runtime_start(runtime, &mut run, &dir, &mut log, &[Part::Text("invented fixture input".into())]).unwrap();
+            let until = Instant::now() + Duration::from_secs(5);
+            while runtime.report(&run).is_err() && Instant::now() < until {
+                runtime.poll(&mut run).unwrap();
+                runtime_progress(runtime, &mut run, &mut log).unwrap();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(runtime.report(&run).unwrap().outcome, if outcome == "complete" { "ok" } else { "failed" });
+            drop(run);
+            let report = completed_report(&cfg, &dir, &dir, &home, "csgo");
+            if outcome == "complete" {
+                assert_eq!(report.as_ref().unwrap()["native_outcome"], "ok");
+            } else {
+                assert!(report.as_ref().unwrap_err().contains("unsuccessful"));
+            }
+            assert_eq!(completed_report(&cfg, &dir, &dir, &home, "csgo"), report);
+            // R11/A3: offline recovery records the original run and calls exactly once.
+            let rows = coreq::telemetry::Reader::open(&crate::telemetry::path(&cfg.data_root)).unwrap().export(0, 0, 100).unwrap();
+            let rows = rows["events"].as_array().unwrap();
+            assert_eq!(rows.iter().filter(|r| r["observation"]["kind"] == "agent.turn").count(), 1);
+            assert_eq!(rows.iter().filter(|r| r["observation"]["kind"] == "agent.call").count(), usize::from(outcome == "complete"));
+            let wire = fs::read_to_string(trace).unwrap();
+            let inputs = wire.lines().filter(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "turn/start").count();
+            assert_eq!(inputs, 1);
+            fs::remove_dir_all(dir).unwrap();
         }
-        assert_eq!(runtime.report(&run).unwrap().outcome, "ok");
-        drop(run);
-        let report = completed_report(&dir, &dir, &home).unwrap();
-        assert_eq!(report["native_outcome"], "ok");
-        assert_eq!(completed_report(&dir, &dir, &home).unwrap(), report);
-        let wire = fs::read_to_string(trace).unwrap();
-        let inputs = wire.lines().filter(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "turn/start").count();
-        assert_eq!(inputs, 1);
-        fs::remove_dir_all(dir).unwrap();
     }
 
     // A2/R3/R4: the actual consumer forwards verified image parts once, gates them on
@@ -1167,6 +1226,7 @@ mod tests {
         for (login, provider, outcome, accepted) in [
             ("chatgpt", "openai", "complete", true),
             ("chatgpt", "agentq", "wait", true),
+            ("chatgpt", "openai", "failed", true),
             ("apiKey", "openai", "complete", false),
             ("none", "openai", "complete", false),
             ("unknown", "openai", "complete", false),
@@ -1219,7 +1279,49 @@ mod tests {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 let report = runtime.report(&run).unwrap();
-                assert_eq!(report.outcome, if outcome == "wait" { "cancelled" } else { "ok" });
+                assert_eq!(
+                    report.outcome,
+                    match outcome {
+                        "wait" => "cancelled",
+                        "failed" => "failed",
+                        _ => "ok",
+                    }
+                );
+                // R11: Pipe hands the run to the runtime's own capture; repeated observation never counts twice.
+                let telemetry = crate::telemetry::Telemetry::open(&dir);
+                let work = observed_run(&telemetry, "csgo", &mut run, |_| Err::<(), _>("invented consumer error".into()));
+                assert_eq!(work.unwrap_err(), "invented consumer error");
+                telemetry.agent_run(&mut run, "csgo");
+                let rows =
+                    coreq::telemetry::Reader::open(&crate::telemetry::path(&dir)).unwrap().export(0, 0, 100).unwrap()["events"].clone();
+                let kinds = |kind: &str| {
+                    rows.as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| r["observation"]["kind"] == kind)
+                        .map(|r| r["observation"].clone())
+                        .collect::<Vec<_>>()
+                };
+                let (turns, calls) = (kinds("agent.turn"), kinds("agent.call"));
+                assert_eq!(turns.len(), 1);
+                assert_eq!(turns[0]["outcome"], report.outcome);
+                assert_eq!(telemetry.state()["state"], "observed");
+                assert_eq!(turns[0]["project"], "pipe/csgo");
+                assert_eq!(turns[0]["product"], "pipe");
+                assert_eq!(turns[0]["unknown"]["task"], "no-task");
+                if outcome == "complete" {
+                    assert_eq!(calls.len(), 1);
+                    assert_eq!(calls[0]["input_tokens"], 10, "the runtime reports uncached input");
+                    assert_eq!(calls[0]["cache_read_tokens"], 20);
+                    assert_eq!(calls[0]["output_tokens"], 4);
+                    assert_eq!(turns[0]["output_tokens"], 4);
+                } else {
+                    assert!(calls.is_empty(), "no model request observed writes no agent.call");
+                    assert_eq!(turns[0]["output_tokens"], Value::Null, "a client reporting no tokens reads null, never zero");
+                    assert!(turns[0]["unknown"]["output_tokens"].is_string());
+                }
+                let text = rows.to_string();
+                assert!(!text.contains("invented request") && !text.contains(dir.to_str().unwrap()), "metadata only");
                 let checkpoint = runtime.checkpoint(&run).unwrap();
                 let mut recovered = runtime.recover(&checkpoint, &launch).unwrap();
                 assert!(runtime.account(&mut recovered).is_err());

@@ -391,6 +391,7 @@ fn route(ctx: &Ctx, c: &mut Client, req: &mut Request, browser: Option<&crate::b
                     "admission": if bytes.saturating_sub(ctx.cfg.free_space_floor_bytes) > 64 << 10 { "available" } else { "exhausted" }}),
                 Err(_) => json!({"state": "unknown", "reason": "filesystem free-space observation unavailable"}),
             };
+            status["telemetry"] = ctx.telemetry.state();
             ok(status)
         }
         _ => Err(Error::new(404, "no_route", format!("{method} {path}"))),

@@ -58,7 +58,7 @@ impl ImageWorker {
         }
         protected::reconcile_release(&dir)?;
         let home = protected::prepared_home(&dir)?;
-        let report = completed_report(&dir, &worker.root, &home)?;
+        let report = completed_report(&cfg, &dir, &worker.root, &home, &project)?;
         let item = native_image(&dir, report["thread"].as_str(), report["turn"].as_str())?.ok_or("original native image item missing")?;
         let mut attachments = vec![];
         let store = Store::existing(&cfg.data_root).map_err(|e| e.to_string())?;

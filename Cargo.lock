@@ -10,10 +10,10 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agentq-runtime"
-version = "0.2.0"
-source = "git+https://github.com/taskqorg/agentq?tag=runtime-v0.2.0#70f85434546bd1c303ccdb7b0dd71866421627e2"
+version = "0.6.0"
+source = "git+https://github.com/taskqorg/agentq?rev=c80675a557417532393e143ca2783c0f4c83b8d9#c80675a557417532393e143ca2783c0f4c83b8d9"
 dependencies = [
- "coreq 0.18.0",
+ "coreq",
  "libc",
  "ring",
  "serde_json",
@@ -24,26 +24,6 @@ name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
-
-[[package]]
-name = "pipe"
-version = "0.1.0"
-dependencies = [
- "agentq-runtime",
- "base64 0.22.1",
- "coreq 0.19.2",
- "hex",
- "image",
- "libc",
- "postgres",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tiny_http",
- "ureq",
- "uuid",
- "windows-sys 0.61.2",
-]
 
 [[package]]
 name = "async-trait"
@@ -175,25 +155,10 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "coreq"
-version = "0.18.0"
-source = "git+https://github.com/taskqorg/coreq?tag=v0.18.0#e84761cdab43723b871a42b3021e9c39afcd9484"
+version = "0.21.0"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.21.0#18b177c445e92c5df58bd1dea1b473776dd0c6ae"
 dependencies = [
- "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.18.0)",
- "flate2",
- "libc",
- "ring",
- "rusqlite",
- "serde_json",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "coreq"
-version = "0.19.2"
-source = "git+https://github.com/taskqorg/coreq?tag=v0.19.2#b78ca64cac615500b57b4a04983e79333035dd65"
-dependencies = [
- "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.19.2)",
+ "coreq-instrument",
  "flate2",
  "libc",
  "ring",
@@ -206,17 +171,7 @@ dependencies = [
 [[package]]
 name = "coreq-instrument"
 version = "0.1.0"
-source = "git+https://github.com/taskqorg/coreq?tag=v0.18.0#e84761cdab43723b871a42b3021e9c39afcd9484"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "coreq-instrument"
-version = "0.1.0"
-source = "git+https://github.com/taskqorg/coreq?tag=v0.19.2#b78ca64cac615500b57b4a04983e79333035dd65"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.21.0#18b177c445e92c5df58bd1dea1b473776dd0c6ae"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -724,6 +679,26 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pipe"
+version = "0.1.0"
+dependencies = [
+ "agentq-runtime",
+ "base64 0.22.1",
+ "coreq",
+ "hex",
+ "image",
+ "libc",
+ "postgres",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tiny_http",
+ "ureq",
+ "uuid",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "pkg-config"
