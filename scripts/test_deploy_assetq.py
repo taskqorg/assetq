@@ -546,7 +546,7 @@ class Plan(Fixture):
         (self.state / "account_uid").write_text(f"{UID}\n")
         self.target["service_uid"] = UID
         self.assertEqual(deploy.Host(self.target).user_command("systemctl --user show"),
-                         f"runuser -u assetq -- env XDG_RUNTIME_DIR=/run/user/{UID} systemctl --user show")
+                         f"runuser -u assetq -- env XDG_RUNTIME_DIR=/run/user/{UID} DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{UID}/bus systemctl --user show")
         self.assertEqual(deploy.subprocess.run([self.sh, "-c", "systemctl show"], capture_output=True).returncode, 1)
 
     def test_active_or_unknown_work_needs_a_reviewed_plan_record(self):
