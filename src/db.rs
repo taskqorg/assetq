@@ -350,6 +350,34 @@ pub fn create_token(c: &mut Client, project: &str, role: &str) -> Result<String>
     Ok(token)
 }
 
+/// A web-read grant for the read lane: the token is shown once and only its hash is kept.
+pub fn create_read_grant(c: &mut Client, project: &str) -> Result<String> {
+    let token = format!("pr_{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, project.len() + token.len())?;
+    tx.execute("INSERT INTO read_grants (hash, project) VALUES ($1, $2)", &[&sha256_hex(token.as_bytes()), &project])
+        .map_err(|e| Error::new(400, "bad_grant", e.to_string()))?;
+    commit_write(tx)?;
+    Ok(token)
+}
+
+pub fn revoke_read_grants(c: &mut Client, project: &str) -> Result<u64> {
+    let mut tx = write_tx(c, false)?;
+    charge(&mut tx, project.len())?;
+    let revoked = tx.execute("UPDATE read_grants SET revoked_at = now() WHERE project = $1 AND revoked_at IS NULL", &[&project])?;
+    commit_write(tx)?;
+    Ok(revoked)
+}
+
+/// What the read lane serves from when PostgreSQL is gone: active grant hashes, never a token.
+pub fn read_snapshot(c: &mut impl GenericClient) -> Result<Value> {
+    let rows = c.query("SELECT hash, project FROM read_grants WHERE revoked_at IS NULL ORDER BY hash", &[])?;
+    let grants: Vec<Value> =
+        rows.iter().map(|r| json!({"token_sha256": r.get::<_, String>(0), "project": r.get::<_, String>(1)})).collect();
+    let generated_ms: i64 = c.query_one("SELECT (extract(epoch FROM now()) * 1000)::bigint", &[])?.get(0);
+    Ok(json!({"schema": 1, "generated_ms": generated_ms, "grants": grants}))
+}
+
 // ---------------------------------------------------------------- objects
 
 pub fn used_bytes(c: &mut impl GenericClient) -> Result<u64> {

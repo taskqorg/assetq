@@ -1,0 +1,12 @@
+[Unit]
+Description=Compare Tavily per-key usage with recorded units
+
+[Service]
+Type=oneshot
+User=pipe-read
+Group=pipe-read
+ExecStart=/opt/pipe-read/bin/pipe-read reconcile /etc/pipe-read/config.json
+LoadCredential=tavily-keys:/etc/pipe-read/tavily-keys
+StateDirectory=pipe-read
+ProtectHome=true
+NoNewPrivileges=true

@@ -21,6 +21,8 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   migrate                                              apply schema and built-in methods
   project <id> [--budget N] [--max-active N]           create or update a project
   token <project> [--role member|owner]                create a grant; prints it once
+  read-grant create|revoke <owner/repository>          manage web-read grants; create prints the token once
+  read-snapshot <path>                                 publish active web-read grants for the read lane
   restore-check                                        verify isolated restored metadata, manifests and payloads
   audit <job-id>                                       replay a stored job's events
   selftest [--database]                                offline checks; --database adds DB checks
@@ -120,6 +122,28 @@ fn run(args: &[String]) -> Result<(), String> {
             let t =
                 db::create_token(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?, &project, &role).map_err(|e| e.to_string())?;
             println!("{t}");
+            Ok(())
+        }
+        "read-grant" => {
+            let cfg = Config::from_env()?;
+            let mut c = db::connect_config(&cfg).map_err(|e| e.to_string())?;
+            let project = pos(rest, 1)?;
+            match pos(rest, 0)?.as_str() {
+                "create" => println!("{}", db::create_read_grant(&mut c, &project).map_err(|e| e.to_string())?),
+                "revoke" => {
+                    print(&json!({"project": project, "revoked": db::revoke_read_grants(&mut c, &project).map_err(|e| e.to_string())?}))
+                }
+                _ => return Err("usage: pipe read-grant create|revoke <owner/repository>".into()),
+            }
+            Ok(())
+        }
+        "read-snapshot" => {
+            let cfg = Config::from_env()?;
+            let out = std::path::PathBuf::from(pos(rest, 0)?);
+            let snapshot = db::read_snapshot(&mut db::connect_config(&cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let temporary = out.with_extension("tmp");
+            std::fs::write(&temporary, snapshot.to_string()).map_err(|e| format!("write {}: {e}", temporary.display()))?;
+            std::fs::rename(&temporary, &out).map_err(|e| format!("publish {}: {e}", out.display()))?;
             Ok(())
         }
         "restore-check" => {

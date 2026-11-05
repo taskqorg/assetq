@@ -1,0 +1,10 @@
+[Unit]
+Description=Pipe read lane socket, held open across restarts
+
+[Socket]
+ListenStream=127.0.0.1:8741
+NoDelay=true
+Backlog=4096
+
+[Install]
+WantedBy=sockets.target

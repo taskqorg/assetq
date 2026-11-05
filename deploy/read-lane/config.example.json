@@ -1,0 +1,11 @@
+{
+  "host": "invented-host",
+  "snapshot": "/var/lib/pipe-read-control/snapshot.json",
+  "state_dir": "/var/lib/pipe-read",
+  "concurrency": 16,
+  "queue": 64,
+  "request_timeout_ms": 30000,
+  "drain_timeout_ms": 35000,
+  "alert_command": ["/opt/pipe-read/bin/pipe-read-alert", "spool"],
+  "coreq_connection": "/var/lib/pipe-read/coreq"
+}

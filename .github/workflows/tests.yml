@@ -29,3 +29,9 @@ jobs:
           name: pipe-candidate
           path: dist/
           if-no-files-found: error
+      - run: python3 scripts/candidate_read.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pipe-read-candidate
+          path: dist-read/
+          if-no-files-found: error

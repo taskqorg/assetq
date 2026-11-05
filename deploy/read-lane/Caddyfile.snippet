@@ -1,0 +1,11 @@
+# First inside the route block of the existing pipe.ufobe.com site: that block sends /v1/* to the service without forward_auth,
+# so a later placement leaves /v1/read/* unguarded. The bearer token still authenticates the project in the lane.
+@read_lane path /v1/read/* /healthz
+handle @read_lane {
+	forward_auth 127.0.0.1:9122 {
+		uri /verify
+		header_up -Upgrade
+		header_up -Connection
+	}
+	reverse_proxy 127.0.0.1:8741
+}

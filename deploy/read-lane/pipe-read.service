@@ -1,0 +1,28 @@
+[Unit]
+Description=Pipe read lane
+Requires=pipe-read.socket
+After=pipe-read.socket network-online.target
+Wants=network-online.target
+
+[Service]
+User=pipe-read
+Group=pipe-read
+ExecStart=/opt/pipe-read/bin/pipe-read serve /etc/pipe-read/config.json
+LoadCredential=tavily-keys:/etc/pipe-read/tavily-keys
+StateDirectory=pipe-read
+StateDirectoryMode=0750
+Restart=always
+RestartSec=1
+TimeoutStopSec=45
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

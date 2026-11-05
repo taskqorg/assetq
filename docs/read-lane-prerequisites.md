@@ -22,17 +22,15 @@ Named inputs for the live stages of the [read lane](https://github.com/taskqorg/
 
 ## Caddy route
 
-The route from `deploy/read-lane/Caddyfile.snippet` is approved for the existing `pipe.ufobe.com` site, with these corrections:
-
-- Guard: `forward_auth 127.0.0.1:9122` with `uri /verify`, the live guard of this site. The snippet's `uri /` is wrong.
-- Placement: first inside the site's `route` block. The site sends `/v1/*` to the service without `forward_auth`, so a later placement leaves `/v1/read/*` unguarded.
+The route in `deploy/read-lane/Caddyfile.snippet` is approved for the existing `pipe.ufobe.com` site. It uses the live guard `127.0.0.1:9122` with `uri /verify` and goes first inside the site's `route` block, because that block sends `/v1/*` to the service without `forward_auth`.
 
 ## Second host and alerts
 
 - Second host for live calls and the probe: the Mac.
 - Existing alert path: `hermes send` on pds18 to `telegram:Tight Monitoring`, the host health channel. The Mac's Hermes has no configured platform.
+- Probe on the Mac: launchd job `online.ufobe.pipe-read-probe`, every 60 seconds, from `~/.local/share/pipe/`. It is loaded with `launchctl bootstrap` from there, so a logout or reboot unloads it until the plist is linked into `~/Library/LaunchAgents`.
 - Probe alert command on the Mac: `scripts/read_lane_alert.sh`. It sends through pds18 and shows a local notification when pds18 is unreachable, so during a pds18 outage the alert reaches only the Mac screen.
-- Lane alert command on pds18: not delivered yet. `pipe-read.service` sets `NoNewPrivileges` and `ProtectHome`, so `alert_command` cannot run Hermes directly. Install a spool file in the lane state directory and a path unit that sends it as user `hermes`.
+- Lane alert command on pds18: `/opt/pipe-read/bin/pipe-read-alert spool`. `pipe-read.service` sets `NoNewPrivileges` and `ProtectHome`, so the lane spools a file and `pipe-read-alert.path` sends it as user `hermes`.
 
 ## Enrollment
 

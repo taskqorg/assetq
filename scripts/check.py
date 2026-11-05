@@ -84,6 +84,9 @@ def rust_checks(name=None):
     print(run(sys.executable, "scripts/test_qualify_image.py"), end="")
     print(run(sys.executable, "scripts/test_validate_meshy.py"), end="")
     print(run(sys.executable, "scripts/test_deploy_assetq.py", timeout=300), end="")
+    print(run(sys.executable, "scripts/test_pipe_mcp.py"), end="")
+    print(run("cargo", "fmt", "--check", "--manifest-path", "lane/Cargo.toml"), end="")
+    print(run("cargo", "test", "--locked", "--manifest-path", "lane/Cargo.toml", timeout=300), end="")
     # Formatting needs no dependency resolution or network; retain the last target on timeout.
     print(run("cargo", "fmt", "--check", "--verbose", env=dict(os.environ, CARGO_NET_OFFLINE="true")), end="")
     with postgres_cluster() as pg:

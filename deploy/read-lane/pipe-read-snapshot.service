@@ -1,0 +1,9 @@
+# Control side: runs as the generation service identity, publishes hashes only. Its failure leaves the last snapshot in place.
+[Unit]
+Description=Publish read lane grants from PostgreSQL
+
+[Service]
+Type=oneshot
+User=assetq
+EnvironmentFile=@PIPE_ENV_FILE@
+ExecStart=@PIPE_BINARY@ read-snapshot /var/lib/pipe-read-control/snapshot.json
