@@ -5,6 +5,32 @@ let session, project, epoch = 0, pollTimer, lastView;
 const drafts = new Map(), views = new Map();
 const terminal = p => ['succeeded', 'failed', 'cancelled'].includes(p);
 const value = v => v === null || v === undefined ? 'Unknown' : typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+// A4/specq Time: display strings never feed back into machine timestamps.
+const instant = time => time === null || time === undefined || time === '' ? NaN : new Date(time).getTime();
+function age(time, now = Date.now()) {
+  const minutes = Math.floor(Math.max(0, now - instant(time)) / 60000);
+  if (!Number.isFinite(minutes)) return '? unavailable';
+  return (minutes < 1 ? '<1m' : minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`) + ' ago';
+}
+function countdown(time, now = Date.now()) {
+  const left = instant(time) - now;
+  if (!Number.isFinite(left)) return '? unavailable';
+  if (left <= 0) return 'now';
+  if (left >= 86400000) return `${Math.ceil(left / 86400000)}d`;
+  if (left >= 18000000) return `${Math.ceil(left / 3600000)}h`;
+  const minutes = Math.ceil(left / 60000);
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`;
+}
+function exactTime(time, now = Date.now()) {
+  const date = new Date(instant(time));
+  if (!Number.isFinite(date.getTime())) return '? unavailable';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {weekday:'short', month:'short', day:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).formatToParts(date).map(p => [p.type, p.value]));
+  return `${parts.weekday} ${parts.month} ${parts.day}${date.getFullYear() === new Date(now).getFullYear() ? '' : ' ' + parts.year}, ${parts.hour}:${parts.minute}`;
+}
+function timeView(time, future = false, now = Date.now()) {
+  if (!Number.isFinite(instant(time))) return '? unavailable';
+  return el('time', {datetime: new Date(instant(time)).toISOString(), title: exactTime(time, now)}, future ? countdown(time, now) : age(time, now));
+}
 const short = id => id ? `${id.slice(0, 8)}…` : 'Unknown';
 function el(tag, attrs = {}, ...children) {
   const n = document.createElement(tag);
@@ -28,7 +54,18 @@ function url(path, params = {}) {
   return u.pathname + u.search;
 }
 function link(label, path, params) { return el('a', {href: url(path, params)}, label); }
-function jsonDetails(title, data, open = false) { return el('details', open ? {open: ''} : {}, el('summary', {}, title), el('pre', {}, value(data))); }
+function evidenceTimes(data, path = []) {
+  if (!data || typeof data !== 'object') return [];
+  return Object.entries(data).flatMap(([key, v]) => {
+    const name = [...path, key];
+    if (key === 'at' || /_(at|until)$/.test(key)) return [el('dt', {}, name.join('.')), el('dd', {}, timeView(v, /(_until|expires_at)$/.test(key)))];
+    return evidenceTimes(v, name);
+  });
+}
+function jsonDetails(title, data, open = false) {
+  const times = evidenceTimes(data);
+  return el('details', open ? {open: ''} : {}, el('summary', {}, title), times.length ? el('dl', {class:'properties'}, times) : null, el('pre', {}, value(data)));
+}
 function properties(values) { return el('dl', {class: 'properties'}, Object.entries(values).flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v instanceof Node ? v : value(v))])); }
 function role() { return session?.projects.find(p => p.id === project)?.role; }
 function requireOwner(control) { return role() === 'owner' ? control : el('p', {class: 'muted'}, 'An owner grant is required for this action.'); }
@@ -92,7 +129,7 @@ async function assetDetail(id, token) {
   if (token !== epoch) return null;
   const box = panel(el('h2', {}, objectName(o)), el('p', {class: 'muted'}, `${o.content_type} / ${o.size.toLocaleString()} bytes`), preview(o),
     el('div', {class: 'actions'}, download(o), o.job_id ? link('Open job', `/jobs/${o.job_id}`) : null),
-    properties({'Validation': o.provenance?.provider_evidence?.validation?.valid === true ? 'Passed' : o.provenance?.provider_evidence?.validation?.valid === false ? 'Failed' : 'Unknown: no validation verdict recorded in provenance', 'Immutable object': o.id, 'SHA-256': o.sha256, 'Owner acceptance': o.acceptance, 'Synthetic': String(o.synthetic), 'Created': o.created_at, 'Retention': o.retention_until || 'No automatic deletion'}));
+    properties({'Validation': o.provenance?.provider_evidence?.validation?.valid === true ? 'Passed' : o.provenance?.provider_evidence?.validation?.valid === false ? 'Failed' : 'Unknown: no validation verdict recorded in provenance', 'Immutable object': o.id, 'SHA-256': o.sha256, 'Owner acceptance': o.acceptance, 'Synthetic': String(o.synthetic), 'Created': timeView(o.created_at), 'Retention': o.retention_until == null ? 'No automatic deletion' : timeView(o.retention_until, true)}));
   const objectLinks = (label, list) => el('section', {}, el('h3', {}, label), list.length ? el('ul', {}, list.map(x => el('li', {}, link(objectName(x), `/assets/${x.id}`)))) : el('p', {class: 'muted'}, 'None recorded.'));
   box.append(objectLinks('Source attachments', related.parents), objectLinks('Committed job outputs', related.outputs), objectLinks('Derived objects / versions', related.children));
   if (related.next_children) box.append(link('More derived objects →', `/assets/${id}`, {after: related.next_children}));
@@ -197,7 +234,7 @@ async function jobs(params, token, id) {
   if (id) {
     const [job, events, result] = await Promise.all([api(`jobs/${id}`), api(`jobs/${id}/events`), api(`jobs/${id}/result`)]);
     const live = el('div');
-    const show = j => live.replaceChildren(properties({'State': j.phase, 'Step': `${j.step} / ${(j.steps || []).length}`, 'Cancellation': j.cancel, 'Reason': j.reason || 'None recorded', 'Credits': j.usage?.credits, 'Usage evidence': j.usage?.unknown_reason || 'Reported', 'Observed': j.updated_at, 'Provider operation': j.provider_operation}));
+    const show = j => live.replaceChildren(properties({'State': j.phase, 'Step': `${j.step} / ${(j.steps || []).length}`, 'Cancellation': j.cancel, 'Reason': j.reason || 'None recorded', 'Credits': j.usage?.credits, 'Usage evidence': j.usage?.unknown_reason || 'Reported', 'Observed': timeView(j.updated_at), 'Provider operation': j.provider_operation}));
     show(job);
     const status = el('p', {role: 'status'});
     const cancel = button('Request cancellation', async () => { cancel.disabled = true; try { const j = await api(`jobs/${id}/cancel`, {method: 'POST'}); show(j); status.textContent = 'Cancellation requested; provider and descendant completion require readback.'; } catch(e) {status.textContent=e.message;} finally{cancel.disabled=false;} });
@@ -214,7 +251,7 @@ async function jobs(params, token, id) {
   const phase = params.get('phase') || '', after = params.get('after') || '';
   const page = await api('jobs?' + new URLSearchParams({phase, after, limit: 50}));
   const select = el('select', {'aria-label': 'Job phase', onchange: () => navigate(url('/jobs', {phase: select.value}))}, ['', 'queued', 'active', 'waiting', 'succeeded', 'failed', 'cancelled'].map(v => el('option', {value: v, selected: phase === v}, v || 'All phases')));
-  return [heading('Jobs', link('New generation', '/jobs/new')), el('div', {class: 'filters'}, select), panel(items(page).length ? items(page).map(j => el('div', {class: 'row'}, link(`${j.phase} / ${j.method}`, `/jobs/${j.id}`), el('small', {}, ` ${j.id}`), el('p', {class: 'muted'}, j.reason || `Credits: ${value(j.usage?.credits)} / ${j.updated_at}`))) : note('No jobs match this view.')), pageLink('/jobs', page, {phase})];
+  return [heading('Jobs', link('New generation', '/jobs/new')), el('div', {class: 'filters'}, select), panel(items(page).length ? items(page).map(j => el('div', {class: 'row'}, link(`${j.phase} / ${j.method}`, `/jobs/${j.id}`), el('small', {}, ` ${j.id}`), el('p', {class: 'muted'}, j.reason || el('span', {}, `Credits: ${value(j.usage?.credits)} / `, timeView(j.updated_at))))) : note('No jobs match this view.')), pageLink('/jobs', page, {phase})];
 }
 
 async function methods(params, token, id, version) {
@@ -270,7 +307,7 @@ async function benchmarks(params, token, id) {
   return [heading(useCase || `Benchmark ${short(id)}`,link('Benchmarks','/benchmarks')),actions,comparison.state==='incomplete'?note('Incomplete evidence. Missing, failed, unknown-usage and unjudged cases remain visible.'):null,
     panel(el('h2',{},'Frozen plan'),jsonDetails('Dataset, evaluator, methods and bounds',comparison.plan || comparison,true)),
     panel(el('h2',{},'Candidate evidence'),metricTable(comparison.method_metrics || []),jsonDetails('Full metrics',comparison.method_metrics || comparison.results),jsonDetails('Missing evidence',comparison.missing_cases || [])),
-    el('h2',{},'Case outputs'),el('div',{class:'samples'},sampleViews),panel(el('h2',{},'Scoped recommendation'),el('p',{},recommendation.recommended ? value(recommendation.recommended) : `None qualified: ${recommendation.none_reason || recommendation.reason || 'No promoted route.'}`),properties({'Revision':recommendation.revision,'Observed':recommendation.observed_at}),jsonDetails('Scope, records and qualification evidence',recommendation)),recommendationForm(comparison,methodsFromComparison(comparison))];
+    el('h2',{},'Case outputs'),el('div',{class:'samples'},sampleViews),panel(el('h2',{},'Scoped recommendation'),el('p',{},recommendation.recommended ? value(recommendation.recommended) : `None qualified: ${recommendation.none_reason || recommendation.reason || 'No promoted route.'}`),properties({'Revision':recommendation.revision,'Observed':timeView(recommendation.observed_at)}),jsonDetails('Scope, records and qualification evidence',recommendation)),recommendationForm(comparison,methodsFromComparison(comparison))];
 }
 
 function metricTable(metrics) {
@@ -313,7 +350,7 @@ async function render(restore = false) {
     if(token!==epoch)return;main.replaceChildren(...nodes.filter(Boolean));
     lastView={key:viewKey,nodes:[...main.childNodes],observed:new Date().toISOString()};
     if(restore)requestAnimationFrame(()=>{const anchor=[...main.querySelectorAll('a')].find(a=>a.getAttribute('href')===history.state?.focus);(anchor || main).focus({preventScroll:true});scrollTo(0,history.state?.scroll || 0);});else{scrollTo(0,0);main.focus({preventScroll:true});}
-  }catch(e){if(token===epoch){if(lastView?.key===viewKey)main.replaceChildren(note(`Last-known view is stale (read ${lastView.observed}): ${e.message}`),...lastView.nodes,button('Retry read',()=>render()));else main.replaceChildren(heading('Unable to load this view'),note(e.message),button('Retry read',()=>render()),link('Asset library','/assets'));}}
+  }catch(e){if(token===epoch){if(lastView?.key===viewKey)main.replaceChildren(el('div',{class:'notice',role:'status'},'Last-known view is stale (read ',timeView(lastView.observed),`): ${e.message}`),...lastView.nodes,button('Retry read',()=>render()));else main.replaceChildren(heading('Unable to load this view'),note(e.message),button('Retry read',()=>render()),link('Asset library','/assets'));}}
 }
 async function bootstrap(){
   try{

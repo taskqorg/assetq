@@ -4,8 +4,8 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('../web/requests.js');
 
-// R4/R9: exercise actual detail/preview events; this DOM fixture proves no geometry.
-test('retained-render captions require a loaded model preview and disappear on failure', async () => {
+// R4/R9: exercise actual handlers; this DOM fixture proves no geometry.
+function browser() {
   const vm = require('node:vm');
   const {readFileSync} = require('node:fs');
   class Node {
@@ -26,18 +26,27 @@ test('retained-render captions require a loaded model preview and disappear on f
     setAttribute(key, value) { this.attrs[key] = value; }
     addEventListener(name, handler) { this.events[name] = handler; }
     get textContent() { return this.text + this.children.map(n => n.textContent).join(''); }
+    set textContent(text) { this.text = text; this.children = []; }
+    get childNodes() { return this.children; }
+    get elements() { return []; }
+    querySelectorAll() { return []; }
+    focus() {}
   }
   const controls = new Map();
   const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
     location: {origin: 'https://assets.ufobe.com', search: ''},
     document: {createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
       querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
-      addEventListener() {}}, addEventListener() {},
+      addEventListener() {}}, addEventListener() {}, clearTimeout() {}, scrollTo() {},
     // Keep automatic sign-in pending; the fixture supplies an already scoped session.
     fetch: () => new Promise(() => {})});
   vm.runInContext(readFileSync(require.resolve('../web/app.js'), 'utf8'), context);
   vm.runInContext("project = 'project-a'; session = {projects:[{id:project,role:'member'}]}; api = async path => path.includes('/related?') ? {parents:[],outputs:[],children:[]} : fixture;", context);
-  const all = node => [node, ...node.children.flatMap(all)];
+  return context;
+}
+const all = node => [node, ...node.children.flatMap(all)];
+test('retained-render captions require a loaded model preview and disappear on failure', async () => {
+  const context = browser(), vm = require('node:vm');
   const caption = 'Retained render of this job; not a live 3D view.';
   for (const type of ['model/gltf-binary', 'image/png', 'application/x-assetq-synthetic']) {
     context.fixture = {id:'isolated-copy', content_type:type, size:123, provenance:{name:'Invented isolated copy'}};
@@ -66,6 +75,43 @@ test('retained-render captions require a loaded model preview and disappear on f
   assert.equal(thumbnail.textContent.includes(caption), false);
   thumbnail.children[0].events.error();
   assert.equal(thumbnail.textContent, 'File');
+});
+
+// A4/R4/specq Time: evidence panels must not leave timestamps only in raw JSON.
+test('history, qualification and operations handlers render nested evidence times', async t => {
+  for (const surface of ['history', 'qualification', 'operations']) await t.test(surface, async () => {
+    const context = browser(), vm = require('node:vm');
+    context.now = new Date(2026, 10, 5, 14, 30).getTime();
+    context.Date = class extends Date { static now() { return context.now; } };
+    context.location.pathname = '/operations'; context.location.search = '?project=project-a';
+    const read = expression => vm.runInContext(expression, context);
+    const expressions = {
+      history: "jobs(new URLSearchParams(), epoch, 'invented-job')",
+      qualification: "methods(new URLSearchParams(), epoch, 'invented-method', 1)",
+      operations: 'render().then(() => main.childNodes)'
+    };
+    for (const timestamp of ['2026-11-05 12:00:00+00', null, 'invalid']) {
+      context.timestamp = timestamp;
+      read(`api = async path => path.endsWith('/events') ? [{seq:1,event:{type:'completed'},at:timestamp}] :
+        path.startsWith('jobs/') ? {phase:'succeeded'} : path.startsWith('methods/') ?
+        {id:'invented-method',version:1,spec:{},qualification:{observed_at:timestamp}} :
+        {providers:[{value:{health:'unknown'},observed_at:timestamp}],backup:{value:{state:'unknown'},observed_at:null}};`);
+      const nodes = await read(expressions[surface]);
+      const title = {history:'Durable event history',qualification:'Qualification and limitations',operations:'Scoped jobs, methods and recommendations'}[surface];
+      const detail = nodes.filter(Boolean).flatMap(all).find(n => n.tag === 'details' && n.children[0].textContent === title);
+      assert.ok(detail, `${surface}: evidence panel exists`);
+      const times = all(detail).filter(n => n.tag === 'time');
+      if (timestamp === null || timestamp === 'invalid') {
+        assert.equal(times.length, 0); assert.ok(detail.textContent.includes('? unavailable'));
+      } else {
+        assert.equal(times.length, 1, `${surface}: timestamp needs a human display`);
+        assert.equal(times[0].textContent, read('age(timestamp, now)'));
+        assert.equal(times[0].attrs.title, read('exactTime(timestamp, now)'));
+        assert.equal(times[0].attrs.datetime, new Date(timestamp).toISOString());
+      }
+      assert.ok(all(detail).find(n => n.tag === 'pre').textContent.includes(JSON.stringify(timestamp)), 'original evidence stays intact');
+    }
+  });
 });
 
 test('default and cleared filters omit exact empty predicates', () => {
@@ -108,4 +154,52 @@ test('benchmark and method forms use the published versioned API shapes', () => 
   const c={id:'comparison-1',plan:{use_case:'props'}};
   const r=request.recommendation({method:'synthetic.fake@1',observed_at:'2026-11-05T00:00:00Z',constraints:'{}',evidence:'invented judgment'},c);
   assert.equal(r.use_case,'props');assert.equal(r.evidence.comparison,c.id);assert.equal(r.observed_at,'2026-11-05T00:00:00Z');
+});
+
+// A4/specq Time: boundary rounding and missing observations must stay truthful.
+test('human times round at minute, five-hour and day boundaries with exact local hover', async () => {
+  const context = browser(), vm = require('node:vm');
+  context.now = new Date(2026, 10, 5, 14, 30).getTime();
+  const read = expression => vm.runInContext(expression, context);
+  for (const [delta, expected] of [[-1,'<1m ago'],[0,'<1m ago'],[59999,'<1m ago'],[60000,'1m ago'],[3599999,'59m ago'],[3600000,'1h ago'],[86399999,'23h ago'],[86400000,'1d ago']]) {
+    context.time = context.now - delta;
+    assert.equal(read('age(time, now)'), expected);
+  }
+  for (const [delta, expected] of [[-1,'now'],[0,'now'],[1,'0:01'],[60000,'0:01'],[60001,'0:02'],[17999999,'5:00'],[18000000,'5h'],[18000001,'6h'],[86399999,'24h'],[86400000,'1d'],[86400001,'2d']]) {
+    context.time = context.now + delta;
+    assert.equal(read('countdown(time, now)'), expected);
+  }
+  for (const missing of [null, undefined, '', 'invalid', NaN, Infinity]) {
+    context.time = missing;
+    for (const call of ['age(time, now)','countdown(time, now)','exactTime(time, now)','timeView(time)']) assert.equal(read(call), '? unavailable');
+  }
+  context.time = context.now;
+  assert.equal(read('exactTime(time, now)'), 'Thu Nov 05, 14:30');
+  context.time = new Date(2025, 10, 5, 14, 30).getTime();
+  assert.equal(read('exactTime(time, now)'), 'Wed Nov 05 2025, 14:30');
+  context.time = context.now - 60000;
+  const node = read('timeView(time, false, now)');
+  assert.equal(node.tag, 'time'); assert.equal(node.textContent, '1m ago');
+  assert.equal(node.attrs.title, 'Thu Nov 05, 14:29');
+  assert.equal(node.attrs.datetime, new Date(context.time).toISOString());
+  assert.equal(read('timeView(now + 1, true, now)').textContent, '0:01');
+  assert.equal(read('age(0, 60000)'), '1m ago');
+  context.Date = class extends Date { static now() { return context.now; } };
+  context.fixture = {id:'invented-object', content_type:'image/png', size:1,
+    created_at:new Date(context.now - 60000).toISOString(), retention_until:new Date(context.now + 1).toISOString()};
+  const detail = await read('assetDetail(fixture.id, epoch)');
+  assert.deepEqual(all(detail).filter(n => n.tag === 'time').map(n => n.textContent), ['1m ago','0:01']);
+  context.fixture.retention_until = 'invalid';
+  assert.ok((await read('assetDetail(fixture.id, epoch)')).textContent.includes('? unavailable'));
+  assert.equal((await read('assetDetail(fixture.id, epoch)')).textContent.includes('No automatic deletion'), false);
+  context.fixture.retention_until = null;
+  assert.ok((await read('assetDetail(fixture.id, epoch)')).textContent.includes('No automatic deletion'));
+  context.fixture = {id:'invented-job', phase:'succeeded', updated_at:new Date(context.now - 3600000).toISOString()};
+  read("api = async path => path.endsWith('/events') ? [] : path.endsWith('/result') ? {} : fixture");
+  for (const expression of ["jobs(new URLSearchParams(), epoch, fixture.id)", "(api = async () => [fixture], jobs(new URLSearchParams(), epoch))"]) {
+    const nodes = await read(expression);
+    const times = nodes.filter(Boolean).flatMap(all).filter(n => n.tag === 'time');
+    assert.equal(times.length, 1); assert.equal(times[0].textContent, '1h ago');
+    assert.equal(times[0].attrs.datetime, context.fixture.updated_at);
+  }
 });

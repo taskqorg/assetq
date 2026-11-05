@@ -56,7 +56,7 @@ Verify private values for all bounds before preparing activation. All service/ex
 
 ## Qualification readback
 
-The [managed-delivery evidence](evidence/6/README.md) records candidate `ed30cd1`, exact archive/binary identities, the owner-accepted historical activation outage, managed authenticated retrieval and a separate bounded isolated restart. It does not grant another restart or paid run. Its current-store `restore-check` observation is not backup/restore qualification.
+The [managed-delivery evidence](https://github.com/taskqorg/assetq/blob/7388734a40502323fb34932471ed4b8f7a0d089b/docs/evidence/6/README.md) records candidate `ed30cd1`, exact archive/binary identities, the owner-accepted historical activation outage, managed authenticated retrieval and a separate bounded isolated restart. It does not grant another restart or paid run. Its current-store `restore-check` observation is not backup/restore qualification.
 
 Before a separately approved control-process restart, retain the exact listener, protected database/data-root identity, candidate digest, resource limits, job/provider IDs and execution deadline. Restart on the same explicit `--listen 127.0.0.1:<port>` selection; default-port availability does not establish the intended service identity. Read back that the same provider operation is observed and the execution deadline is unchanged. A bind failure is a failed restart, not a reason to extend the deadline or stop another listener.
 

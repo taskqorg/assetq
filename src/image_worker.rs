@@ -341,7 +341,9 @@ fn private_file(path: &Path) -> std::io::Result<File> {
 }
 
 fn private_dir(path: &Path) -> std::io::Result<()> {
-    let mut builder = fs::DirBuilder::new();
+    let builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    let mut builder = builder;
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;

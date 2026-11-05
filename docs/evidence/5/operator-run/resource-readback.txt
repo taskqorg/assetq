@@ -1,8 +1,0 @@
-RESOURCE DESCRIPTION               SOFT       HARD UNITS
-AS       address space limit 2147483648 2147483648 bytes
-STACK    max stack size         2097152    2097152 bytes
-pid 2951230's current affinity list: 0,1
-RESOURCE DESCRIPTION               SOFT       HARD UNITS
-AS       address space limit 2147483648 2147483648 bytes
-STACK    max stack size         2097152    2097152 bytes
-pid 2951893's current affinity list: 0,1
