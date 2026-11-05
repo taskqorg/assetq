@@ -6,7 +6,7 @@ The trial retained the explicit Meshy CLI/API plus headless Blender route for a 
 
 The compared Blender MCP request had no exposed topology/polycount controls, produced 479557 triangles, cost 30 credits and required GUI Blender. The recommendation was to keep the explicit API/CLI and headless route.
 
-Reuse request parameters, submit/wait/download reconciliation, source retention and headless measurement/rendering. Do not import the Glock geometry, csgo-specific rig/socket bindings, resident animations, runtime packer or credit grants. Use the new original crate image and a new AssetQ spend ledger.
+Reuse request parameters, submit/wait/download reconciliation, source retention and headless measurement/rendering. Do not import the Glock geometry, csgo-specific rig/socket bindings, resident animations, runtime packer or credit grants. Use the new original crate image and a new Pipe spend ledger.
 
 Before dispatch, verify current official API support, parameter meanings, available credentials, quota/balance and expected cost. If `meshy-t2` or its parameters are unavailable, report that gap and propose a versioned replacement; never silently request `latest`.
 

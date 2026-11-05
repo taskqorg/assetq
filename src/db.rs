@@ -1244,7 +1244,7 @@ pub fn status(c: &mut impl GenericClient, project: &str, quota: u64, providers: 
         "backup": backup,
         "restore": restore,
         "revisions": revisions,
-        "integration": {"origin":"https://assets.ufobe.com", "control_path":"/v1/status", "asset_authority":"project-scoped AssetQ API", "host_observations_owner":"ServerQ", "dashq":"summary metadata and deep links only"},
+        "integration": {"origin":"https://pipe.ufobe.com", "control_path":"/v1/status", "asset_authority":"project-scoped Pipe API", "host_observations_owner":"ServerQ", "dashq":"summary metadata and deep links only"},
         "states": "generation success (job phase), asset validation (manifest) and owner acceptance (object acceptance) are separate fields",
     }))
 }

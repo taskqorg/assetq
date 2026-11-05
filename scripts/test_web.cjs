@@ -33,8 +33,8 @@ function browser() {
     focus() {}
   }
   const controls = new Map();
-  const context = vm.createContext({Node, URL, URLSearchParams, AssetQRequest: request,
-    location: {origin: 'https://assets.ufobe.com', search: ''},
+  const context = vm.createContext({Node, URL, URLSearchParams, PipeRequest: request,
+    location: {origin: 'https://pipe.ufobe.com', search: ''},
     document: {createElement: tag => new Node(tag), createTextNode: text => new Node('', text),
       querySelector: selector => { if (!controls.has(selector)) controls.set(selector, new Node()); return controls.get(selector); },
       addEventListener() {}}, addEventListener() {}, clearTimeout() {}, scrollTo() {},
@@ -116,11 +116,11 @@ test('history, qualification and operations handlers render nested evidence time
 
 test('default and cleared filters omit exact empty predicates', () => {
   for(const path of ['jobs?phase=&after=&limit=50','methods?operation=&after=&limit=100']) {
-    const url=request.apiUrl(path,'project-a','https://assets.ufobe.com');
+    const url=request.apiUrl(path,'project-a','https://pipe.ufobe.com');
     assert.equal(url.searchParams.has('phase'),false);assert.equal(url.searchParams.has('operation'),false);
     assert.equal(url.searchParams.get('project'),'project-a');assert.ok(url.searchParams.get('limit'));
   }
-  assert.equal(request.apiUrl('jobs?phase=failed','project-a','https://assets.ufobe.com').searchParams.get('phase'),'failed');
+  assert.equal(request.apiUrl('jobs?phase=failed','project-a','https://pipe.ufobe.com').searchParams.get('phase'),'failed');
 });
 test('unknown submissions retain the original key; verified recovery permits another request', async () => {
   const data=new Map(), storage={getItem:k=>data.get(k)||null,setItem:(k,v)=>data.set(k,v),removeItem:k=>data.delete(k)};

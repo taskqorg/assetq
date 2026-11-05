@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Plan, apply and roll back one verified AssetQ CI candidate over existing operator SSH.
+"""Plan, apply and roll back one verified Pipe CI candidate over existing operator SSH.
 
 `plan` and `apply --dry-run` only read GitHub and the host. `apply` and `rollback` are
 LIVE: they require an interactive operator, the reviewed plan digest and a typed phrase
@@ -25,7 +25,7 @@ from pathlib import Path
 # Compiled in, never read from a plan, target or environment (CoreQ R8).
 REPO = "taskqorg/assetq"
 WORKFLOW = ".github/workflows/tests.yml"
-ARTIFACT = "assetq-candidate"
+ARTIFACT = "pipe-candidate"
 REQUIRED_JOBS = ("tests", "candidate")
 TARGET = "x86_64-unknown-linux-gnu"
 FORMAT = "assetq.deploy-plan/1"
@@ -261,14 +261,14 @@ def verify_artifact(artifact_bytes, ci, source, blobs, allow_no_ui):
             sums = artifact.read("SHA256SUMS").decode()
     except (zipfile.BadZipFile, UnicodeDecodeError) as error:
         raise Refused(f"artifact unreadable: {error}")
-    match = re.fullmatch(rf"assetq-([0-9A-Za-z.-]+)-{source[:12]}-{re.escape(TARGET)}\.tar\.gz", archive_name)
+    match = re.fullmatch(rf"pipe-([0-9A-Za-z.-]+)-{source[:12]}-{re.escape(TARGET)}\.tar\.gz", archive_name)
     if not match:
         raise Refused(f"archive {archive_name} does not name source {source[:12]} and target {TARGET}")
     archive_sha = sha256_hex(archive_bytes)
     if sums.split() != [archive_sha, archive_name]:
         raise Refused("archive digest differs from artifact SHA256SUMS")
     members = read_tar_members(archive_bytes, archive_name[:-len(".tar.gz")])
-    for required in ("bin/assetq", "candidate.json", "SHA256SUMS"):
+    for required in ("bin/pipe", "candidate.json", "SHA256SUMS"):
         if required not in members:
             raise Refused(f"archive lacks {required}")
     try:
@@ -276,9 +276,9 @@ def verify_artifact(artifact_bytes, ci, source, blobs, allow_no_ui):
         inner = members["SHA256SUMS"].decode().split()
     except (ValueError, UnicodeDecodeError) as error:
         raise Refused(f"candidate metadata unreadable: {error}")
-    binary = members["bin/assetq"]
+    binary = members["bin/pipe"]
     binary_sha = sha256_hex(binary)
-    if inner != [binary_sha, "bin/assetq"] or manifest.get("binary_sha256") != binary_sha:
+    if inner != [binary_sha, "bin/pipe"] or manifest.get("binary_sha256") != binary_sha:
         raise Refused("executable digest differs from candidate metadata")
     if manifest.get("source_sha") != source:
         raise Refused(f"candidate source {manifest.get('source_sha')} differs from {source}")
@@ -290,7 +290,7 @@ def verify_artifact(artifact_bytes, ci, source, blobs, allow_no_ui):
     if not (isinstance(libc, list) and len(libc) == 2 and libc[0] == "glibc" and re.fullmatch(r"\d+(\.\d+)+", str(libc[1]))):
         raise Refused("candidate does not record a glibc build version")
     for relative, data in members.items():
-        if relative not in ("bin/assetq", "candidate.json", "SHA256SUMS") and blobs.get(relative) != git_blob_sha(data):
+        if relative not in ("bin/pipe", "candidate.json", "SHA256SUMS") and blobs.get(relative) != git_blob_sha(data):
             raise Refused(f"packaged {relative} differs from the source tree")
     ui = verify_ui(manifest.get("embedded_ui"), blobs, binary, allow_no_ui)
     # The existing host names immutable releases by executable digest.
@@ -770,9 +770,9 @@ a=$(sha256sum archive.tar.gz | cut -d' ' -f1); [ "$a" = {candidate['archive_sha2
 tar --no-same-owner --strip-components=1 -xzf archive.tar.gz
 rm archive.tar.gz
 sha256sum -c SHA256SUMS >/dev/null
-b=$(sha256sum bin/assetq | cut -d' ' -f1); [ "$b" = {candidate['binary_sha256']} ] || {{ echo "extracted executable digest differs" >&2; exit 43; }}
+b=$(sha256sum bin/pipe | cut -d' ' -f1); [ "$b" = {candidate['binary_sha256']} ] || {{ echo "extracted executable digest differs" >&2; exit 43; }}
 c=$(sha256sum candidate.json | cut -d' ' -f1); [ "$c" = {candidate['candidate_json_sha256']} ] || {{ echo "extracted metadata digest differs" >&2; exit 44; }}
-[ -e {executable} ] || cp bin/assetq {executable}
+[ -e {executable} ] || cp bin/pipe {executable}
 chmod -R a+rX,go-w .
 chown -R --reference={root}/releases/{shlex.quote(binding['current'])} .
 """, timeout=300)

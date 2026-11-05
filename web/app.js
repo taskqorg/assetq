@@ -77,7 +77,7 @@ function loseSession(message) {
 async function api(path, {method = 'GET', body, binary = false} = {}) {
   if (!session) throw new Error('No authorized browser session.');
   const scope = project, identity = session;
-  const u = AssetQRequest.apiUrl(path, project, location.origin);
+  const u = PipeRequest.apiUrl(path, project, location.origin);
   const headers = {};
   if (method !== 'GET') headers['X-CSRF-Token'] = session.csrf;
   if (body !== undefined && !binary) headers['Content-Type'] = 'application/json';
@@ -213,14 +213,14 @@ async function newJob() {
     } catch (e) { uploadStatus.textContent = e.message; } finally { files.disabled = false; }
   }});
   const storageKey = `assetq-pending-key:${project}`;
-  const pending = await AssetQRequest.pendingRequest(sessionStorage,storageKey,key=>api(`jobs/by-key/${encodeURIComponent(key)}`),()=>crypto.randomUUID());
+  const pending = await PipeRequest.pendingRequest(sessionStorage,storageKey,key=>api(`jobs/by-key/${encodeURIComponent(key)}`),()=>crypto.randomUUID());
   const key = pending.key;
   if (pending.job) return [heading('Request already accepted'),note('The retained key resolved to the original durable job. A new request now requires an explicit action.'),link('Open original job',`/jobs/${pending.job.id}`),button('Start another request',()=>render())];
   return editor('New generation', [el('label', {}, 'Pinned method', select), evidence, field('Brief', 'text', '', 'textarea', {maxlength: 65536}), el('label', {}, 'Attachments', attachments), files, uploadStatus,
     input('Maximum credits for this job', 'max_credits', '0', 'number', {min: 0, step: 1, required: ''}), jsonField('Method constraints', 'constraints', {}),
     note('Submission uses one retained request key. A lost response stays unknown; retry preserves that key and never authorizes a replacement provider operation.')], async (f, status) => {
       const m = methods.find(m => `${m.id}@${m.version}` === f.method);
-      const body = AssetQRequest.job(f, m, key);
+      const body = PipeRequest.job(f, m, key);
       status.textContent = 'Submitting with the retained key…';
       try {
         const result = await api('jobs', {method: 'POST', body});
@@ -257,14 +257,14 @@ async function jobs(params, token, id) {
 async function methods(params, token, id, version) {
   if (id) {
     const method = await api(`methods/${id}/versions/${version}`);
-    const edit = editor('Create method version', [note('The server creates a new version; existing jobs and original method revisions stay unchanged.'), input('Lifecycle status','status',method.status), jsonField('Version specification', 'spec', method.spec)], async f => { const m = await api('methods', {method: 'POST', body: AssetQRequest.method(f,method.id)}); navigate(url(`/methods/${encodeURIComponent(m.id)}/versions/${m.version}`)); }, 'Create version')[1];
+    const edit = editor('Create method version', [note('The server creates a new version; existing jobs and original method revisions stay unchanged.'), input('Lifecycle status','status',method.status), jsonField('Version specification', 'spec', method.spec)], async f => { const m = await api('methods', {method: 'POST', body: PipeRequest.method(f,method.id)}); navigate(url(`/methods/${encodeURIComponent(m.id)}/versions/${m.version}`)); }, 'Create version')[1];
     return [heading(`${method.id}@${method.version}`, link('Methods', '/methods'), link('New generation', '/jobs/new', {method: `${method.id}@${method.version}`})),
       panel(properties({'Status':method.status,'Operation':method.spec.operation,'Provider':method.spec.provider,'API / model':method.spec.model || method.spec.api || 'See specification'}), jsonDetails('Qualification and limitations', method.qualification, true), jsonDetails('Pipeline, parameters and validation recipe', method.spec, true)), requireOwner(edit)];
   }
   const page = await api('methods?' + new URLSearchParams({operation: params.get('operation') || '', after: params.get('after') || '', limit: 100}));
   const list = items(page);
   const filter = el('form', {class:'filters', onsubmit:e=>{e.preventDefault();navigate(url('/methods',{operation:new FormData(filter).get('operation')}));}}, input('Operation','operation',params.get('operation')||''), el('button',{type:'submit'},'Filter'));
-  const add = editor('Add a versioned method', [input('Method identity','id',''), input('Lifecycle status','status','experimental'), jsonField('Method specification (review all copied fields)', 'spec', list[0]?.spec || {})], async f=>{const m=await api('methods',{method:'POST',body:AssetQRequest.method(f)});navigate(url(`/methods/${encodeURIComponent(m.id)}/versions/${m.version}`));},'Create method')[1];
+  const add = editor('Add a versioned method', [input('Method identity','id',''), input('Lifecycle status','status','experimental'), jsonField('Method specification (review all copied fields)', 'spec', list[0]?.spec || {})], async f=>{const m=await api('methods',{method:'POST',body:PipeRequest.method(f)});navigate(url(`/methods/${encodeURIComponent(m.id)}/versions/${m.version}`));},'Create method')[1];
   return [heading('Methods'),filter,panel(list.length ? list.map(m=>el('div',{class:'row'},link(`${m.id}@${m.version}`,`/methods/${encodeURIComponent(m.id)}/versions/${m.version}`),el('p',{},`${m.status} / ${m.spec.operation} / ${m.spec.provider}`),el('small',{},m.qualification?.reason || 'No qualification evidence.'))) : note('No methods match this scope.')),pageLink('/methods',page,{operation:params.get('operation')}),requireOwner(el('details',{},el('summary',{},'Add method'),add))];
 }
 
@@ -277,7 +277,7 @@ async function benchmarkSetup() {
   const fields=[input('Use case','use_case',''),el('label',{},'Dataset revision',revisions('dataset',datasets)),el('label',{},'Evaluator revision',revisions('evaluator',evaluators)),el('label',{},'Pinned candidates (select one or more)',methodSelect),input('Repeats per case','repeats','1','number',{min:1,max:8}),input('Maximum jobs','max_jobs','4','number',{min:1,max:32}),input('Maximum credits','max_credits','0','number',{min:0}),jsonField('Exact method constraints','constraints',{}),matrix,note('Running comparisons currently admits only explicitly synthetic methods. A real-provider method cannot be enabled by this form.')];
   const result=editor('New benchmark',fields,async f=>{
     const pins=[...methodSelect.selectedOptions].map(o=>o.value);
-    const comparison=await api('comparisons',{method:'POST',body:AssetQRequest.comparison(f,pins)});
+    const comparison=await api('comparisons',{method:'POST',body:PipeRequest.comparison(f,pins)});
     navigate(url(`/benchmarks/${comparison.id}`));
   },'Create frozen comparison');
   const form=result[1];
@@ -317,7 +317,7 @@ function metricTable(metrics) {
 }
 function methodsFromComparison(c){return c.method_versions || [...new Set((c.samples||[]).map(s=>s.method))];}
 function recommendationForm(c,pins){
-  const form=editor('Propose scoped recommendation',[input('Pinned method','method',pins[0]||''),input('Evidence observed at (ISO UTC)','observed_at',new Date().toISOString()),jsonField('Exact constraints','constraints',c.plan?.constraints || {}),field('Evidence and limitations','evidence','','textarea',{required:''})],async(f,status)=>{const record=await api('recommendations',{method:'POST',body:AssetQRequest.recommendation(f,c)});status.replaceChildren('Proposal retained. ',requireOwner(button('Promote this exact scope',async()=>{if(!confirm('Promote this pinned method for the displayed use case and exact constraints?'))return;try{await api(`recommendations/${record.id}/promote`,{method:'POST'});status.textContent='Promotion recorded.';}catch(e){status.textContent=e.message;}})));},'Retain proposal')[1];
+  const form=editor('Propose scoped recommendation',[input('Pinned method','method',pins[0]||''),input('Evidence observed at (ISO UTC)','observed_at',new Date().toISOString()),jsonField('Exact constraints','constraints',c.plan?.constraints || {}),field('Evidence and limitations','evidence','','textarea',{required:''})],async(f,status)=>{const record=await api('recommendations',{method:'POST',body:PipeRequest.recommendation(f,c)});status.replaceChildren('Proposal retained. ',requireOwner(button('Promote this exact scope',async()=>{if(!confirm('Promote this pinned method for the displayed use case and exact constraints?'))return;try{await api(`recommendations/${record.id}/promote`,{method:'POST'});status.textContent='Promotion recorded.';}catch(e){status.textContent=e.message;}})));},'Retain proposal')[1];
   return el('details',{},el('summary',{},'Recommendation proposal and owner promotion'),form);
 }
 
@@ -361,5 +361,5 @@ async function bootstrap(){
   }catch(e){loseSession(e.message);}
 }
 document.querySelector('#project').addEventListener('change',e=>{drafts.clear();main.replaceChildren();navigate(url('/assets',{project:e.target.value}));});
-document.querySelector('#logout').addEventListener('click',async()=>{try{const r=await fetch('/browser/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':session?.csrf||''}});if(!r.ok)throw new Error('Could not confirm session termination.');loseSession('AssetQ session ended. Host sign-in is managed separately.');}catch(e){loseSession(e.message);}});
+document.querySelector('#logout').addEventListener('click',async()=>{try{const r=await fetch('/browser/logout',{method:'POST',credentials:'same-origin',headers:{'X-CSRF-Token':session?.csrf||''}});if(!r.ok)throw new Error('Could not confirm session termination.');loseSession('Pipe session ended. Host sign-in is managed separately.');}catch(e){loseSession(e.message);}});
 bootstrap();

@@ -1,4 +1,4 @@
-//! Replayable lifecycle traces, embedded so `assetq selftest` can run them.
+//! Replayable lifecycle traces, embedded so `pipe selftest` can run them.
 
 use crate::model::{self, Event};
 use serde_json::Value;

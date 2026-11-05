@@ -1,15 +1,15 @@
 # Deployment and rollback
 
-Instructions for the separate host task that activates an AssetQ candidate. This page performs no host change. The target host, its inventory and receipts stay in the private host repository.
+Instructions for the separate host task that activates a Pipe candidate. This page performs no host change. The target host, its inventory and receipts stay in the private host repository.
 
 ## Candidate
 
-`python3 scripts/candidate.py` builds `dist/assetq-<version>-<source12>-<target>.tar.gz` with `bin/assetq`, this page, the contract and the service spec, plus `candidate.json`, binary checksums and archive `SHA256SUMS`. The manifest records the full source SHA, target, schema version and actual build libc. Packaging extracts the archive, verifies its binary digest and runs that extracted executable. CI publishes the Linux candidate as the `assetq-candidate` workflow artifact. Verify it before use:
+`python3 scripts/candidate.py` builds `dist/pipe-<version>-<source12>-<target>.tar.gz` with `bin/pipe`, this page, the contract and the service spec, plus `candidate.json`, binary checksums and archive `SHA256SUMS`. The manifest records the full source SHA, target, schema version and actual build libc. Packaging extracts the archive, verifies its binary digest and runs that extracted executable. CI publishes the Linux candidate as the `pipe-candidate` workflow artifact. Verify it before use:
 
 ```sh
 sha256sum -c SHA256SUMS
-tar -xzf assetq-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz
-./assetq-<version>-<source12>-x86_64-unknown-linux-gnu/bin/assetq selftest
+tar -xzf pipe-<version>-<source12>-x86_64-unknown-linux-gnu.tar.gz
+./pipe-<version>-<source12>-x86_64-unknown-linux-gnu/bin/pipe selftest
 ```
 
 Match the full `candidate.json` source SHA to the reviewed PR/CI revision and obtain the archive checksum from that immutable CI run. Inside the extracted directory, also run `sha256sum -c SHA256SUMS`.
@@ -48,11 +48,11 @@ Verify private values for all bounds before preparing activation. All service/ex
 
 1. Prepare an isolated candidate directory, for example `/opt/assetq/releases/<version>`, and verify `SHA256SUMS` and `selftest`.
 2. Create the role, database, user and data root without touching other databases, services or the existing Langfuse object store.
-3. Run `assetq migrate` with the environment file. It creates schema version 1 once; project creation seeds built-in methods. It never drops data.
-4. Run `assetq selftest --database`.
-5. Create the project and grants: `assetq project <id> --budget N --max-active N` and `assetq token <id> --role member|owner`. Store tokens in the consumers' protected configuration.
-6. Point a `current` symlink at the release and start a service unit running `assetq serve --listen 127.0.0.1:<port>` as `assetq` with the environment file. Reuse the host's existing CoreQ lifecycle/install and service mechanism; this candidate ships no parallel launcher or service installer.
-7. Verify `GET /v1/health`, `assetq ops`, one upload and a hash-verified download with a test grant.
+3. Run `pipe migrate` with the environment file. It creates schema version 1 once; project creation seeds built-in methods. It never drops data.
+4. Run `pipe selftest --database`.
+5. Create the project and grants: `pipe project <id> --budget N --max-active N` and `pipe token <id> --role member|owner`. Store tokens in the consumers' protected configuration.
+6. Point a `current` symlink at the release and start a service unit running `pipe serve --listen 127.0.0.1:<port>` as `assetq` with the environment file. Reuse the host's existing CoreQ lifecycle/install and service mechanism; this candidate ships no parallel launcher or service installer.
+7. Verify `GET /v1/health`, `pipe ops`, one upload and a hash-verified download with a test grant.
 
 ## Qualification readback
 
@@ -62,7 +62,7 @@ Before a separately approved control-process restart, retain the exact listener,
 
 The Meshy one-effect selector deliberately refuses another POST in a previously used store. Preserve it and the original receipts. The completed operator examples authorize only original-operation observation and authenticated retrieval; removing the selector, changing stores or repeating `submit` with a fresh key does not grant a new paid effect. The separately authorized isolated A3 repeat is retained as a distinct example, not a managed-store recovery claim.
 
-For retained results, use `assetq result <job-id>` to obtain actual manifest object IDs and `assetq download <object-id> <new-local-file>` through the existing scoped API. Compare each payload's SHA-256 and byte count with its manifest, including the source image, GLB and original texture maps. Keep payloads private and report technical, managed-live, restore and owner-visual verdicts separately.
+For retained results, use `pipe result <job-id>` to obtain actual manifest object IDs and `pipe download <object-id> <new-local-file>` through the existing scoped API. Compare each payload's SHA-256 and byte count with its manifest, including the source image, GLB and original texture maps. Keep payloads private and report technical, managed-live, restore and owner-visual verdicts separately.
 
 ## Rollback
 
@@ -81,7 +81,7 @@ The private host task supplies `ASSETQ_BROWSER_CONFIG`, pointing to an owner-onl
 
 The host's current sign-in implementation must be inspected before adapting its proof to the browser headers described in [service](service.md#management-browser-boundary). Strip client identity/proof headers, preserve the existing guard, and set verified identity/proof only on its authenticated loopback upstream. `/v1` needs its own scoped Bearer authentication and no wildcard browser-auth exemption. A header name or an accessible HTML page does not establish that this integration is qualified.
 
-Before publication retain the exact approved candidate/archive/executable/UI digests; current DNS ownership/target/TTL; only the `assets.ufobe.com` Caddy site and guard; loopback listener/service identity; protected mapping identity; TLS/origin results; active job/provider identities; and previous site/candidate/configuration recovery references. Keep concrete protected values and the host task identity in restricted evidence. This Windows source task has not inspected those inputs and authorizes no host effect.
+Before publication retain the exact approved candidate/archive/executable/UI digests; current DNS ownership/target/TTL; only the `pipe.ufobe.com` Caddy site and guard; loopback listener/service identity; protected mapping identity; TLS/origin results; active job/provider identities; and previous site/candidate/configuration recovery references. Keep concrete protected values and the host task identity in restricted evidence. This Windows source task has not inspected those inputs and authorizes no host effect.
 
 Qualify anonymous and spoofed/foreign/expired/revoked access, member-versus-owner mutations and missing/wrong CSRF/origin. Confirm real PNG/GLB/renders and original download hashes with the actual managed records, direct URLs, Back/Forward, retained filters, text/attachment admission, durable progress/cancel/results, exact method versions and bounded synthetic comparisons. General provider dispatch remains refused. Record browser geometry/focus at the design matrix sizes and actual sign-in behavior separately from isolated HTTP fixtures.
 
@@ -96,8 +96,14 @@ Prepare site-specific rollback before a controlled additive activation: restore 
 
 ## Backup
 
-For initial delivery, defer new backup work and both local and independent external backup/restore qualification. Preserve existing host backups. Do not stop or restart AssetQ for backup; no cold-backup timer, backup-driven outage, rotation or additional platform is authorized. These deferred gaps do not block initial functional installation and testing.
+For initial delivery, defer new backup work and both local and independent external backup/restore qualification. Preserve existing host backups. Do not stop or restart Pipe for backup; no cold-backup timer, backup-driven outage, rotation or additional platform is authorized. These deferred gaps do not block initial functional installation and testing.
 
-The later restoration recipe uses a consistent paired snapshot of metadata and the complete data root. Restore into a separate database and data root, never over production, and run `assetq restore-check` against restored configuration; it must replay every job and verify all blob/manifest hashes. A loopback-only restored service and restored project grant then verify `assetq status <job>`, `assetq result <job>`, `assetq methods`, and `assetq download <object> <new-file>`. Denied cross-project reads and unknown usage remain intact. Restore-check is read-only and refuses unknown schema versions or missing/corrupt payloads. This recipe does not authorize running new backup or restoration work during initial delivery.
+The later restoration recipe uses a consistent paired snapshot of metadata and the complete data root. Restore into a separate database and data root, never over production, and run `pipe restore-check` against restored configuration; it must replay every job and verify all blob/manifest hashes. A loopback-only restored service and restored project grant then verify `pipe status <job>`, `pipe result <job>`, `pipe methods`, and `pipe download <object> <new-file>`. Denied cross-project reads and unknown usage remain intact. Restore-check is read-only and refuses unknown schema versions or missing/corrupt payloads. This recipe does not authorize running new backup or restoration work during initial delivery.
 
 Report deferred/unobserved backup and restoration as unknown with their scope and reason. RAID and provider URLs alone are not backup evidence. Until a restore observation exists, `GET /v1/status` reports backup as `unknown`; a local receipt never proves independent external restoration. Data integrity, authentication, resource bounds and durable job recovery remain required.
+
+## Pipe hostname cutover
+
+Publish only `pipe.ufobe.com` through the verified existing pds18 Caddy guard and loopback service. Remove the previous Pipe site on `assets.ufobe.com` without a redirect; Pipe must not serve that name. Preserve unrelated DNS records, sites and services. Retain exact prior named-site configuration, candidate identity and rollback before changes. Qualify TLS, sign-in, scoped API, canonical-origin/CSRF refusal and retained-asset retrieval on `pipe.ufobe.com`. Host-specific inputs and receipts belong to task #25, not this public repository.
+
+The package contains only `bin/pipe`. The deployment tool retains the exact existing unit executable path by making its existing verified copy there when required; it does not add a global `assetq` alias or edit the unit. The dedicated `assetq` account, database/role, unit, install/data roots and protected `ASSETQ_*` environment remain unchanged.

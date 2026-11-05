@@ -20,6 +20,10 @@ class QualificationDriver(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "worker cannot control"):
                     main()
             self.assertFalse(directory.exists())
+            with patch("sys.argv", args), patch.dict("os.environ", {}, clear=True):
+                with self.assertRaisesRegex(RuntimeError, "legacy TaskQ adapter is recovery-only"):
+                    main()
+            self.assertFalse(directory.exists())
 
     def test_retained_import_keeps_source_and_refuses_worker_before_effects(self):
         source={"id":"invented-source","request":{"text":"original text","attachments":["invented-attachment"],"constraints":{"max_width":1024}}}

@@ -1,6 +1,6 @@
 # First two real asset journeys
 
-These checks implement AssetQ R2-R8. They are required outcomes; revision-specific evidence below distinguishes observed runs from remaining qualification.
+These checks implement Pipe R2-R8. They are required outcomes; revision-specific evidence below distinguishes observed runs from remaining qualification.
 
 ## Image through a worker
 
@@ -44,10 +44,10 @@ Keep exact source and binary identities, method versions, input/output hashes, j
 
 ## Website and API origin
 
-AssetQ R3/R5/R7-R9 apply at `https://assets.ufobe.com`. Verify real TLS and named-site routing to the managed service, browser sign-in and scoped machine API access. Anonymous and foreign-project requests cannot retrieve private thumbnails, payloads, search hits or benchmark attachments, or dispatch paid work.
+Pipe R3/R5/R7-R9 apply at `https://pipe.ufobe.com`. Verify real TLS and named-site routing to the managed service, browser sign-in and scoped machine API access. Anonymous and foreign-project requests cannot retrieve private thumbnails, payloads, search hits or benchmark attachments, or dispatch paid work.
 
 Through the browser, find the generated crate image by text/project/type, inspect its preview and provenance, navigate to the related 3D model, inspect its available preview and download the verified original. Unsupported media previews remain explicit. Stable URLs, pagination and returning from detail retain the user's search/selection.
 
 Submit a generation request with text/attachments, follow its durable progress through a page reload, inspect failures/cancellation and retrieve its results. Inspect and version a method, configure a bounded benchmark, compare case outputs and quality/cost/time/failure evidence, and read the scoped recommendation. Preserve budget and permission checks on every browser/API path.
 
-Test empty, loading, long-running, cancelled, failed, stale/unknown and denied states. Verify that DashQ summary/deep links open the AssetQ destination without creating another editor or granting access. Browser mocks and local checks do not prove live domain, provider, authentication or storage acceptance.
+Test empty, loading, long-running, cancelled, failed, stale/unknown and denied states. Verify that DashQ summary/deep links open the Pipe destination without creating another editor or granting access. Browser mocks and local checks do not prove live domain, provider, authentication or storage acceptance.

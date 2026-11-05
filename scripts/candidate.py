@@ -21,14 +21,14 @@ def main():
     revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, text=True, capture_output=True).stdout.strip()
     if subprocess.run(["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT, check=True, text=True, capture_output=True).stdout.strip():
         raise RuntimeError("candidate requires a clean committed source revision")
-    name = f"assetq-{version}-{revision[:12]}-{target}"
+    name = f"pipe-{version}-{revision[:12]}-{target}"
     dist = ROOT / "dist"
     stage = dist / name
     shutil.rmtree(stage, ignore_errors=True)
     (stage / "bin").mkdir(parents=True)
-    executable = "assetq.exe" if sys.platform == "win32" else "assetq"
+    executable = "pipe.exe" if sys.platform == "win32" else "pipe"
     shutil.copy2(ROOT / "target/release" / executable, stage / "bin" / executable)
-    for doc in ["assetq.md", "docs/service.md", "docs/method-evaluation.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md", "docs/meshy-pipeline.md"]:
+    for doc in ["pipe.md", "docs/service.md", "docs/method-evaluation.md", "docs/deploy.md", "docs/architecture.md", "docs/acceptance.md", "docs/meshy-baseline.md", "docs/meshy-pipeline.md"]:
         (stage / doc).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / doc, stage / doc)
     binary_sha = hashlib.sha256((stage / "bin" / executable).read_bytes()).hexdigest()

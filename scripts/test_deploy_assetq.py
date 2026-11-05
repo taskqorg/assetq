@@ -157,9 +157,9 @@ class Evidence:
         self.zip_override = None
 
     def archive(self):
-        name = f"assetq-0.1.0-{self.source[:12]}-{deploy.TARGET}"
-        members = {"bin/assetq": self.binary, "candidate.json": json.dumps(self.manifest).encode(),
-                   "SHA256SUMS": (self.inner_sums or f"{sha(self.binary)}  bin/assetq\n").encode(),
+        name = f"pipe-0.1.0-{self.source[:12]}-{deploy.TARGET}"
+        members = {"bin/pipe": self.binary, "candidate.json": json.dumps(self.manifest).encode(),
+                   "SHA256SUMS": (self.inner_sums or f"{sha(self.binary)}  bin/pipe\n").encode(),
                    "docs/contract.md": self.doc_in_archive}
         stream = io.BytesIO()
         with gzip.GzipFile(fileobj=stream, mode="wb", mtime=0) as compressed, tarfile.open(fileobj=compressed, mode="w") as tar:
@@ -399,7 +399,7 @@ class Plan(Fixture):
         def no_digest(e): e.artifact_edit = {"digest": None}
         def unmerged(e): e.compare = "diverged"
         def outer_sums(e): e.outer_sums = "0" * 64 + "  x.tar.gz\n"
-        def inner_sums(e): e.inner_sums = "0" * 64 + "  bin/assetq\n"
+        def inner_sums(e): e.inner_sums = "0" * 64 + "  bin/pipe\n"
         def wrong_binary_digest(e): e.manifest["binary_sha256"] = "0" * 64
         def wrong_source(e): e.manifest["source_sha"] = OTHER
         def wrong_target(e): e.manifest["target"] = "aarch64-unknown-linux-gnu"
@@ -414,9 +414,9 @@ class Plan(Fixture):
         def no_libc(e): e.manifest["libc"] = ["", ""]
         def not_zip(e): e.zip_override = b"not a zip"
         def traversal(e):
-            e.extra_member = tarfile.TarInfo(f"assetq-0.1.0-{SOURCE[:12]}-{deploy.TARGET}/../escape")
+            e.extra_member = tarfile.TarInfo(f"pipe-0.1.0-{SOURCE[:12]}-{deploy.TARGET}/../escape")
         def symlink(e):
-            e.extra_member = tarfile.TarInfo(f"assetq-0.1.0-{SOURCE[:12]}-{deploy.TARGET}/link")
+            e.extra_member = tarfile.TarInfo(f"pipe-0.1.0-{SOURCE[:12]}-{deploy.TARGET}/link")
             e.extra_member.type, e.extra_member.linkname = tarfile.SYMTYPE, "/etc/passwd"
         for case in [edit_job, red, running, push_only, absent, other_workflow, expired, other_run, artifact_digest, no_digest,
                      unmerged, outer_sums, inner_sums, wrong_binary_digest, wrong_source, wrong_target, wrong_doc, wrong_ui,
@@ -668,7 +668,7 @@ class Apply(Fixture):
         self.assertFalse((self.host / "opt/deploy.lock").exists())
         self.assertFalse((self.host / "opt/releases" / f"{self.evidence.release}.tmp").exists())
         self.assertEqual(self.preserved(), before)
-        self.assertEqual((self.host / "opt/releases" / self.evidence.release / "bin/assetq").read_bytes(), self.evidence.binary)
+        self.assertEqual((self.host / "opt/releases" / self.evidence.release / "bin/pipe").read_bytes(), self.evidence.binary)
         log = self.tools_log()
         self.assertEqual(log.count("systemctl --user restart"), 1)
         self.assertEqual(log.count("migrate candidate"), 1)
@@ -694,7 +694,7 @@ class Apply(Fixture):
         self.assertEqual((self.link("current"), self.link("previous")), (OLD, None))
         self.assertEqual(self.tools_log().count("systemctl --user restart"), 1)
         self.assertEqual(self.preserved(), before)
-        self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/assetq").exists())
+        self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/pipe").exists())
         self.assertEqual(self.rollback(plan), deploy.EXIT_REFUSED)
         self.assertIn("rollback does not apply", self.stderr)
 
@@ -713,7 +713,7 @@ class Apply(Fixture):
                 self.assertEqual(self.preserved(), before)
                 self.assertFalse((self.host / "opt/deploy.lock").exists())
                 self.assertFalse((self.host / "opt/releases" / self.evidence.release / "healthy").exists())
-                self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/assetq").exists())
+                self.assertTrue((self.host / "opt/releases" / self.evidence.release / "bin/pipe").exists())
                 self.assertEqual(self.tools_log().count("systemctl --user restart"), 2)
                 pid = (self.state / "pid").read_text().strip()
                 self.assertEqual(os.readlink(self.host / f"proc/{pid}/exe").replace("\\", "/").split("/")[-3], OLD)
@@ -799,11 +799,11 @@ class Apply(Fixture):
         plan = self.planned()
         release = self.host / "opt/releases" / self.evidence.release
         (release / "bin").mkdir(parents=True)
-        (release / "bin/assetq").write_bytes(b"different bytes\n")
+        (release / "bin/pipe").write_bytes(b"different bytes\n")
         (release / "candidate.json").write_text("{}")
         self.assertEqual(self.apply(plan), deploy.EXIT_REFUSED)
         self.assertIn("different bytes", self.stderr)
-        self.assertEqual((release / "bin/assetq").read_bytes(), b"different bytes\n")
+        self.assertEqual((release / "bin/pipe").read_bytes(), b"different bytes\n")
         self.assertEqual(self.link("current"), OLD)
 
     def test_held_lock_refuses_and_is_not_removed(self):

@@ -56,6 +56,12 @@ fn json_response(status: u16, v: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn handle(ctx: &Ctx, client: &mut Option<Client>, mut req: Request, browser: Option<&crate::browser::Browser>) {
+    if header(&req, "Host")
+        .is_some_and(|host| host.split(':').next().unwrap_or("").trim_end_matches('.').eq_ignore_ascii_case("assets.ufobe.com"))
+    {
+        let _ = req.respond(json_response(421, &Error::new(421, "wrong_origin", "Pipe is served at https://pipe.ufobe.com").json()));
+        return;
+    }
     if client.as_ref().is_none_or(|c| c.is_closed()) {
         *client = db::connect_config(&ctx.cfg).ok();
     }

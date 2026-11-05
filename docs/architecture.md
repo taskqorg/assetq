@@ -11,10 +11,12 @@ The owner-approved target separates agent execution, optional optimization, prod
 | AgentQ optimization | Existing tool-output compression, original retrieval, engine qualification and integration controls |
 | TaskQ | Board truth, task/attempt/reviewer lifecycle, admission/capacity, workspaces and publication |
 | PilotQ | Conversation input, PM instructions, user/route grants, tools, delivery and its durable journal |
-| AssetQ | Asset request/job/effect lifecycle, method registry, executors, validation, comparisons, asset records and the management site/API at `assets.ufobe.com` |
-| pds18 storage | AssetQ-owned persistent bytes, database, backup and restoration |
+| Pipe | Asset request/job/effect lifecycle, method registry, executors, validation, comparisons, asset records and the management site/API at `pipe.ufobe.com` |
+| pds18 storage | Pipe-owned persistent bytes, database, backup and restoration |
 
-Dependency direction: TaskQ/PilotQ/other projects -> `agentq-runtime` -> CoreQ. AssetQ uses AgentQ only for steps requiring an agent. Direct Meshy or Blender steps do not start an LLM. CoreQ never depends upward on AgentQ.
+Dependency direction: TaskQ/PilotQ/other projects -> `agentq-runtime` -> CoreQ. Pipe uses AgentQ only for steps requiring an agent. Direct Meshy or Blender steps do not start an LLM. CoreQ never depends upward on AgentQ.
+
+Pipe is a standalone pipeline service. Any agent call to an external service, including a single step, goes through a pipeline; agents hold no service keys. TaskQ may call Pipe. Pipe R10 permits its legacy TaskQ adapter only for recovery of existing protected operations; new launches refuse pending an independent AgentQ/CoreQ adapter. Assets remain one output kind.
 
 ## Agent extraction scope
 
@@ -38,13 +40,13 @@ Only after all inventoried consumers adopt and required qualification passes may
 
 One initial service owns PostgreSQL metadata and an immutable local object store. A job resolves a method version once, checkpoints step/effect state, releases agent capacity during provider waits and imports final outputs before completion. Executors claim fenced work and can run on another qualified host.
 
-The first service needs a versioned method registry, bounded step sequences and an executable state model. It does not need a visual workflow editor, a new agent framework or a separate scheduler per project. TaskQ tracks the implementation work; it does not become AssetQ's asset database.
+The first service needs a versioned method registry, bounded step sequences and an executable state model. It does not need a visual workflow editor, a new agent framework or a separate scheduler per project. TaskQ tracks the implementation work; it does not become Pipe's asset database.
 
 ## Management site and public entry
 
-`https://assets.ufobe.com` is the canonical AssetQ web application and API origin. AssetQ owns asset previews/search/detail, generation controls, method/pipeline management and benchmark comparisons. The browser uses the same project-scoped service and versioned registry as agents and CLI.
+`https://pipe.ufobe.com` is the canonical Pipe web application and API origin. Pipe owns asset previews/search/detail, generation controls, method/pipeline management and benchmark comparisons. The browser uses the same project-scoped service and versioned registry as agents and CLI.
 
-DashQ remains the fleet/tool overview and links to the canonical AssetQ workspace with source-backed summary metadata. Reuse suitable shared components without implementing a second asset editor or benchmark workspace inside DashQ.
+DashQ remains the fleet/tool overview and links to the canonical Pipe workspace with source-backed summary metadata. Reuse suitable shared components without implementing a second asset editor or benchmark workspace inside DashQ.
 
 The public HTTPS entry is the existing Caddy service on pds18; the application and storage remain loopback/private. Configure only the named DNS record/site after current-state verification. Browser access uses the qualified existing guard; machine API routes enforce their own explicit scoped authentication. Publication never makes private assets anonymous.
 

@@ -24,7 +24,7 @@ Recommendations remain proposals until an owner explicitly promotes them. Operat
 
 `GET /v1/status` exposes scoped job counts, reported/unknown usage, bounded per-method outcomes, provider observations, physical storage/capacity, integrity, backup and restore unknowns, and registry/comparison/recommendation revision identifiers. All routes use the existing bearer authority and counted metadata writes. CLI commands are projections of these routes, including `dataset-add`, `evaluator-add`, `comparison-run`, `comparison`, and `comparison-score`; agent callers read the same JSON.
 
-DashQ consumes authenticated summary metadata from `/v1/status` and links to `https://assets.ufobe.com`; the site owns asset and benchmark journeys. ServerQ remains the host-observation owner. Neither integration receives credentials, provider download URLs, direct storage paths or generation authority. No dashboard, host installation, monitoring duplication, paid run or recommendation promotion is part of this delivery.
+DashQ consumes authenticated summary metadata from `/v1/status` and links to `https://pipe.ufobe.com`; the site owns asset and benchmark journeys. ServerQ remains the host-observation owner. Neither integration receives credentials, provider download URLs, direct storage paths or generation authority. No dashboard, host installation, monitoring duplication, paid run or recommendation promotion is part of this delivery.
 
 ## Acceptance evidence
 

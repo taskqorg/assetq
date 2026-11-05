@@ -1,8 +1,10 @@
 # Management site design package
 
-Design and acceptance package for [task #9](https://github.com/taskqorg/assetq/issues/9). The owner selected the table library and shared visual style in answer [6638318903](https://github.com/taskqorg/assetq/issues/9#issuecomment-6638318903). This approval does not prove implementation or live acceptance. The owning requirements are [AssetQ R1-R9](../../assetq.md), [website acceptance](../acceptance.md#website-and-api-origin) and the [service contract](../service.md). Apply the pinned specq design workflow, operator rules D1-D14 and fidelity rules F1-F7.
+Design and acceptance package for [task #9](https://github.com/taskqorg/assetq/issues/9). The owner selected the table library and shared visual style in answer [6638318903](https://github.com/taskqorg/assetq/issues/9#issuecomment-6638318903). This approval does not prove implementation or live acceptance. The owning requirements are [Pipe R1-R9](../../pipe.md), [website acceptance](../acceptance.md#website-and-api-origin) and the [service contract](../service.md). Apply the pinned specq design workflow, operator rules D1-D14 and fidelity rules F1-F7.
 
 ## Request and baseline
+
+The current Pipe R9 origin is `https://pipe.ufobe.com` only. Pipe does not serve `assets.ufobe.com` and provides no redirect. The original request quoted below and static images remain historical evidence; the layout is unchanged by the brand rename.
 
 The [owner intake](../intake/2026-11-01-owner-request.md#website-direction) preserves the original request:
 
@@ -16,7 +18,7 @@ The intake's Meshy testing amendment supersedes its historical 1000-credit ceili
 
 ## Scenarios and navigation proposal
 
-These browser journeys implement the existing task acceptance and selected table structure. All routes below are browser views under `https://assets.ufobe.com`; `/v1` retains its published machine contract. A project in a URL selects only an already authorized scope.
+These browser journeys implement the existing task acceptance and selected table structure. All routes below are browser views under `https://pipe.ufobe.com`; `/v1` retains its published machine contract. A project in a URL selects only an already authorized scope.
 
 | ID / acceptance | Intent and action | Observable result and recovery | Proposed destination |
 |---|---|---|---|
@@ -86,7 +88,7 @@ The table candidate is approved by answer 6638318903. Its selected structure is 
 
 After implementation, run affected browser/API checks against the frozen candidate, the R8 canonical gate and merge-result CI. Package the exact source commit, executable/UI digests, fixture identities, screenshots and interaction evidence. Mocks never qualify actual image/3D retrieval or the live host (A6/A7).
 
-For A8, prepare a restricted handoff through the private host task: named DNS ownership/current target/TTL, exact Caddy site and existing guard, loopback upstream/service identity, signed candidate digest, origin/CSRF/session mapping, TLS checks, retained active jobs and site-specific rollback/readback commands. Concrete values and host receipts remain unknown until inspected there. Publish only `assets.ufobe.com`; preserve other records/sites/services and existing backups. A deployed authenticated journey remains required for final acceptance.
+For A8, prepare a restricted handoff through the private host task: named DNS ownership/current target/TTL, exact Caddy site and existing guard, loopback upstream/service identity, signed candidate digest, origin/CSRF/session mapping, TLS checks, retained active jobs and site-specific rollback/readback commands. Concrete values and host receipts remain unknown until inspected there. Publish only `pipe.ufobe.com`; preserve other records/sites/services and existing backups. A deployed authenticated journey remains required for final acceptance.
 
 Current verdict: the owner-approved table structure and browser/API implementation are present; the [candidate evidence](https://github.com/taskqorg/assetq/blob/7388734a40502323fb34932471ed4b8f7a0d089b/docs/evidence/9-management-site.md) separates isolated tests from outstanding browser, packaging and deployed acceptance. No host configuration or provider state changed. Backup/restore qualification remains deferred/unknown.
 
