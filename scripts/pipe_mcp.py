@@ -129,11 +129,14 @@ def register_codex(command):
     # Text edit, not `codex mcp add`: that command rewrites the whole file and drops fields of other servers.
     path = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
     text = path.read_text() if path.exists() else ""
-    kept, skipping = [], False
+    search_app = "apps.connector_openai_search_service"
+    kept, skipping, in_root = [], False, True
     for line in text.splitlines(keepends=True):
         if line.startswith("["):
-            skipping = line.startswith((f"[mcp_servers.{NAME}]", f"[mcp_servers.{NAME}."))
-        if not skipping:
+            in_root = False
+            skipping = line.startswith((f"[mcp_servers.{NAME}]", f"[mcp_servers.{NAME}.", f"[{search_app}]", f"[{search_app}."))
+        # ponytail: a multi-line root array with a line starting "[" ends the root early; parse the TOML if one appears.
+        if not skipping and not (in_root and re.match(r"web_search\s*=", line)):
             kept.append(line)
     # json.dumps writes valid TOML strings and arrays for these plain values.
     block = (f"[mcp_servers.{NAME}]\ncommand = {json.dumps(command[0])}\nargs = {json.dumps([*command[1:], 'codex'])}\n"
@@ -141,7 +144,9 @@ def register_codex(command):
     # Same approval shape as the other web server, so a tool call never waits on a person.
     for tool in TOOLS:
         block += f'\n[mcp_servers.{NAME}.tools.{tool["name"]}]\napproval_mode = "approve"\n'
-    path.write_text("".join(kept).rstrip("\n") + "\n\n" + block)
+    # Built-in web tools bypass Pipe, so their calls go unrecorded (docs/research/49.md). A root key must precede every table.
+    block += f"\n[{search_app}]\nenabled = false\n"
+    path.write_text('web_search = "disabled"\n' + "".join(kept).rstrip("\n") + "\n\n" + block)
 
 
 def install(arguments):
