@@ -66,6 +66,8 @@ Agents read the web through Pipe. `web_search` and `web_extract` are one-step pi
 
 **Agent interface.** The MCP tools `web_search` and `web_extract` are thin Pipe clients with instructions for the agent. They hold a Pipe token, never a provider key, and have no stored-key fallback: a Pipe failure returns its reason to the agent. One command installs them per host for every runtime present. The separate `shared-search` server stays unchanged until a decision replaces it.
 
+**Built-in web tools.** Where the command installs for Codex, it also disables Codex's built-in `web_search` and the hosted `search_service.web_run`, so that Codex web reads go through Pipe and are recorded. Claude's built-in web tools stay enabled, because its measured runs did not use them ([evidence](docs/research/49.md)). Shell and browser access are not web tool settings and stay available.
+
 **Restore runbook.** Keys and configuration live encrypted off-host with SOPS and age, using no paid service.
 
 Restoring on a clean host needs only that copy, the age identity held by the operator and the `pipe-read` release: decrypt, install the units, start the socket, then run one real call. [Read lane](docs/read-lane.md#restore) holds the exact steps; a restore counts only when its steps ran on a clean host or container from that copy alone.

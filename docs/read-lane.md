@@ -90,7 +90,7 @@ python3 pipe_mcp.py install --url http://127.0.0.1:8741 --token-file <file>
 python3 pipe_mcp.py install --url https://pipe.ufobe.com --token-file <file> --access-file <file>
 ```
 
-It writes `~/.config/pipe/read.json` (mode 0600), copies the client to `~/.local/share/pipe/mcp.py` and registers the server `pipe` with `claude mcp add` and a text edit of Codex's `config.toml`, because `codex mcp add` rewrites other servers' fields. It does not touch `shared-search`.
+It writes `~/.config/pipe/read.json` (mode 0600), copies the client to `~/.local/share/pipe/mcp.py` and registers the server `pipe` with `claude mcp add` and a text edit of Codex's `config.toml`, because `codex mcp add` rewrites other servers' fields. The same edit sets `web_search = "disabled"` and `[apps.connector_openai_search_service] enabled = false`, which remove Codex's built-in search and the hosted `search_service.web_run`. To restore them, delete those two settings from `config.toml`; the next install sets them again. It does not touch `shared-search` or Claude's built-in tools.
 
 ## Backup
 

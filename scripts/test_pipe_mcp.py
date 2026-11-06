@@ -103,7 +103,7 @@ class Mcp(Base):
         self.assertNotIn("codex", registered, "codex mcp add rewrites other servers and dropped their empty args")
         self.assertNotIn("shared-search", registered)
         config = (self.home / "codex-home/config.toml").read_text()
-        self.assertTrue(config.startswith(self.original), "the existing server stays unchanged")
+        self.assertIn(self.original, config, "the existing server stays unchanged")
         parsed = tomllib.loads(config)["mcp_servers"]["pipe"]
         self.assertEqual(parsed["args"][-2:], ["serve", "codex"])
         self.assertEqual(parsed["env_vars"], ["TASKQ_TASK", "PIPE_TASK"])
@@ -112,6 +112,20 @@ class Mcp(Base):
         self.assertIn('[mcp_servers.pipe.tools.web_search]\napproval_mode = "approve"', config)
         mode = stat.S_IMODE((self.home / ".config/pipe/read.json").stat().st_mode)
         self.assertEqual(mode, 0o600)
+
+    def test_install_disables_codex_builtin_web_tools(self):
+        # Risk: Codex keeps a built-in search that bypasses Pipe, so its web reads go unrecorded.
+        env = self.install()
+        path = self.home / "codex-home/config.toml"
+        other = '[apps.connector_other]\nenabled = true\n\n[other]\nweb_search = "kept"\n'
+        path.write_text('web_search = "live"\nmodel = "invented"\n\n[apps.connector_openai_search_service]\nenabled = true\n\n' + other)
+        for _ in range(2):
+            subprocess.run([sys.executable, str(MCP), "install", "--url", self.url, "--token-file", str(self.home / "token")], check=True, env=env, capture_output=True)
+            parsed = tomllib.loads(path.read_text())
+            self.assertEqual(parsed["web_search"], "disabled")
+            self.assertIs(parsed["apps"]["connector_openai_search_service"]["enabled"], False)
+            self.assertEqual((parsed["model"], parsed["other"]["web_search"]), ("invented", "kept"))
+            self.assertIs(parsed["apps"]["connector_other"]["enabled"], True)
 
     def test_handshake_offers_tools_with_instructions(self):
         env = self.install()
