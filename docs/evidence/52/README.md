@@ -27,11 +27,11 @@ The eight protected API/host/signing blobs match across all three AgentQ pins: `
 | Item | Published evidence and limit |
 |---|---|
 | A1 | The owning [AgentQ contract §12 M12.8](https://github.com/taskqorg/agentq/blob/f87f308a90b34564cb8ab6f3686ca09ffdde638f/agentq.md#12-agent-runtime) and its linked runtime detail define the independent signed route. The pins and final digests above are published. The route uses `agentq agent host` with no TaskQ binary, command, slot service or CA. Legacy support remains a separate upstream route, not an independent-route fallback. |
-| A2 | Upstream preparation, every-input grant/profile and process-incarnation guards, one-shot launch, cancellation, native/descendant completion and durable journal checks are published. Missing or changed proof refuses effects and leaves occupancy unknown; transport exit or a stop acknowledgment cannot release it. Deterministic checks are evidence for the model/process boundaries; working-host native enforcement remains unqualified. |
+| A2 | Upstream preparation, every-input grant/profile and process-incarnation guards, one-shot launch, cancellation, native/descendant completion and durable journal checks are published. Missing or changed proof refuses effects and leaves occupancy unknown; transport exit or a stop acknowledgment cannot release it. Deterministic checks are evidence for the model/process boundaries. [#61](#native-qualification-through-61) adds native transport and recovery readback for the replacement adapter; native workload enforcement remains unqualified. |
 | A3 | The host accepts authenticated `pipe.permits/1` caller permits. Pipe owns admission and final release acknowledgment; host cleanup cannot release its capacity. Authenticated retained archives preserve exact original checkpoints/receipts, operation identity and consumed stop intent without relaunch, receipt rewriting or TaskQ runtime fallback. Pipe's issuer, permit persistence and integration are still #47 work. |
-| A4 | Deterministic adversarial recovery checks and green merge-result CI are published. The original Mac launch failed; the replacement publication and its failure-before/pass-after checks are recorded below. Native non-generating transport qualification under existing Mac operator authority remains **unknown**. Neither #241 nor #266 closure proves it. No new grant, model/account/capacity change or image generation is authorized by this record. |
+| A4 | Deterministic adversarial recovery checks and green merge-result CI are published. The original Mac launch failed; the replacement publication and its failure-before/pass-after checks are recorded below. [#61](#native-qualification-through-61) qualifies the signed non-generating transport under existing Mac operator authority for replacement adapter `a1cbb7b8` only. Neither #241 nor #266 closure proves it; the #61 receipts do. No new grant, model/account/capacity change or image generation is authorized by this record. |
 
-AgentQ #241 A4 did not include #52's sentence requiring existing Mac operator qualification. Its closure therefore does not establish that additional native requirement. This record preserves that acceptance gap; it does not amend A4 or treat portable signing checks as native transport proof. Pipe consumer integration and live image qualification remain in #47.
+AgentQ #241 A4 did not include #52's sentence requiring existing Mac operator qualification. Its closure therefore does not establish that additional native requirement. That gap stayed open until #61 supplied native evidence for the replacement adapter. This record does not amend A4 or treat portable signing checks as native transport proof. Pipe consumer integration and live image qualification remain in #47.
 
 ## Checks and failure evidence
 
@@ -108,7 +108,7 @@ Upstream's latest read-only retained-journal observation remains 9,862 bytes, SH
 
 ### Bounded replacement Mac handoff
 
-[Mac prerequisite #61](https://github.com/taskqorg/assetq/issues/61) owns the separately runnable native receipt, pinned to host `mac`; #52 waits for that evidence under TaskQ §7.3. Open-task readback found no duplicate native prerequisite. This Windows worker has no authenticated Mac operator transport and makes no native call. The new task does not grant runtime authority or weaken #52 acceptance.
+#61 has since run this handoff; its result is in [the next section](#native-qualification-through-61). The text below records the handoff as written at `17ddcae` and authorizes nothing further. [Mac prerequisite #61](https://github.com/taskqorg/assetq/issues/61) owns the separately runnable native receipt, pinned to host `mac`; #52 waits for that evidence under TaskQ §7.3. Open-task readback found no duplicate native prerequisite. This Windows worker has no authenticated Mac operator transport and makes no native call. The new task does not grant runtime authority or weaken #52 acceptance.
 
 The original numbered operator handoff above describes the old digest and must not be used to launch that artifact again. For the replacement, first stage and verify only the exact new bytes and manifest pinned here. Read back current authority independently: the previously observed Workspace grant revision 34 and approver `kirs` are historical evidence, not action-time authorization.
 
@@ -117,3 +117,35 @@ The existing operator must authenticate the replacement against its existing sig
 Only after action-time authorization may the existing operator prepare one new incarnation-bound operation with a caller-owned `pipe.permits/1` permit, persist its checkpoint and one-shot launch intent, then initialize the non-generating transport. No model turn, image generation, model/account/capacity change, TaskQ slot/adapter/CA or fallback is allowed. Keep transport alive through cancellation readback and recover/reconcile that same checkpoint without relaunch. Missing native/descendant completion or exact-generation cleanup acknowledgment retains occupancy. Report TCC denial as Open, not an owner ask.
 
 Preserve the failed operation and original journal entries, adapters, permits, receipts and accepted crate; do not mistake an expected new-operation journal append for permission to rewrite retained entries. Publish only safe candidate identities, check outcomes and receipt references. Pipe's permits implementation, consumer integration and live image qualification remain #47. A4 stays incomplete until the existing Mac operator supplies this native evidence.
+
+## Native qualification through #61
+
+[Mac prerequisite #61](https://github.com/taskqorg/assetq/issues/61) closed after [PR #62](https://github.com/taskqorg/assetq/pull/62) merged as `3b5134660a5dffb3535b59e33d01375852339a61`. [Run 42255613069](https://github.com/taskqorg/assetq/actions/runs/42255613069) returned `event: merge_group`, that exact `headSha` and `conclusion: success`. The immutable [#61 record](https://github.com/taskqorg/assetq/blob/3b5134660a5dffb3535b59e33d01375852339a61/docs/evidence/61/README.md) owns the commands, receipts and readback tables.
+
+This Windows continuation made no native call and read no private receipt. The native results below are attributed to the [owner's operator run](https://github.com/taskqorg/assetq/issues/61#issuecomment-6690095841) and the #61 Mac worker's read-only readback, which the #61 review accepted. They qualify the replacement adapter only (R3–R6/R10).
+
+| Check | Failed `425c5924` launch | Replacement `a1cbb7b8` operation |
+|---|---|---|
+| Effective boundary | `verified-effective` | `verified-effective`, before and after initialize |
+| Initialize | Frontend exited with `native stdout interrupted` before initialize | Returned; `native.jsonl` holds exactly one line, the `initialize` response |
+| Completion certificate | None | `agentq.native-completion/1`, counts `[20,19]`, for the exact supervisor, native process and scope |
+| Cleanup acknowledgment | None | `bootout_ack: true`, `cleanup_verified: true` |
+| Recovery | `unknown`, occupancy retained, no relaunch | Same checkpoint recovered with no relaunch; `observe` and `reconcile` read `completed`, also from a fresh process |
+| Model turn, thread, input replay, image | None | None |
+
+This is the native failure before and pass after for A4's transport sentence. The second column stays true of the retained operation: the new operation did not complete, release, replace or rewrite it. Its journal entry reads byte-equal inside the new 19,999-byte journal, SHA-256 `b1fbe9216f0bd9000ea56c74601e2294619bb162bd3b8f1feec398c9a2b80554`.
+
+A4's authority limits held. Current grant readback stayed Codex Workspace revision 34 by `kirs`, and the policy file and permit issuer are unchanged. The operator repinned host trust to the reviewed manifest, keeping the old trust copy, and issued one new `pipe.permits/1` permit from the existing issuer; neither is a new grant. #61 records no model, account or capacity configuration change; this attempt did not read those values directly. `taskq service permissions` appears in #61 only as a read-only comparison of the current grant, not as a host dependency.
+
+This attempt checked what it could reach from Windows. The published harness source reads back as 17,136 bytes, SHA-256 `6008b334b3fd60510529909b1f9d1e71368eddeaaf210bf1942308bd20f225a6`. It calls `ProtectedHost::signed`, `prepare`, `launch_prepared`, `recover_preparation`, `observe` and `reconcile`, and a search finds no `taskq`, `slot`, `thread/start`, `turn/start` or `image_generation` in it. This reads source only; the binary's build pin to `a610cf7` remains the operator's statement. AgentQ `main` is one commit past `a610cf7` and that commit changes no protected host path, so the pin below is still current.
+
+### What #47 receives
+
+#47 consumes source and API `a610cf7680b1ecc0d5b51847a0ea03eced077ded`, macOS arm64 adapter `a1cbb7b88959532f2be28ea8d696c4cc1ae17b7c97205d6549f7156164c82a58` and the publication key above. `425c5924` stays retained for evidence and must not be launched again. These items remain open and are not closed by #52 A4:
+
+- Native workload enforcement, live account login and model-metadata network use are unproved. The receipt itself says `native workload qualification separate`.
+- The new operation's journal record reads `occupied: true`. The host cannot release capacity, and the Pipe-owned final release is #47 work that has not run.
+- The retained failed operation stays occupied with completion unknown. Its native reconciliation has not run; A3 rests on the published deterministic API and retained-archive checks.
+- `trust.json` holds one pin, now the replacement. From source, not from a run, the old adapter refuses the retained operation with `adapter not pinned by host operator` until the kept trust copy returns, and returning it stops the replacement. #47 must plan this before it reconciles the retained operation.
+- Windows native containment stays unsupported, and the Windows digest above has no native qualification.
+- Pipe permits, consumer integration and live image qualification are unchanged and stay in #47.
