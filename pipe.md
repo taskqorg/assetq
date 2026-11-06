@@ -123,7 +123,9 @@ The build pins macOS arm64 adapter SHA-256 `a1cbb7b88959532f2be28ea8d696c4cc1ae1
 
 A replacement adapter must first qualify an isolated build from reviewed immutable AgentQ/CoreQ source against the existing policy and host boundary. Record its final staged digest after signing, then review and pin it before composed qualification. Preserve prior adapters and receipts for recovery; no temporary trust override or grant edit is permitted.
 
-Protected capacity comes from Pipe's own `pipe.permits/1` permits. Each installation holds one permit at a time, the existing one-concurrent-job bound, under the caller name the signed host policy already authorizes. The issuer key stays in protected host configuration. A permit grants occupancy only, never filesystem, process, model or account authority.
+Protected capacity comes from Pipe's own `pipe.permits/1` permits. Each issuer key holds one permit at a time, the existing one-concurrent-job bound, under the caller name the signed host policy already authorizes.
+
+Occupancy lives beside the issuer key, so a run with a new data root sees it. The key stays in protected host configuration, outside the workspace a worker can write. A permit grants occupancy only, never filesystem, process, model or account authority.
 
 Occupancy follows one executable model with replayable traces: an operation acquires the permit, records launch intent once, and releases only after verified native and descendant completion and cleanup. Launch that never reached intent may release. Cancellation acknowledgment, transport exit, crash and unknown reconciliation keep occupancy. Detail: [image worker](docs/image-worker.md#protected-capacity).
 
