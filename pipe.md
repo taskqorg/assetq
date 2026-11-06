@@ -15,7 +15,8 @@ Any external service call by an agent is a pipeline, even with one step. Agents 
 - **R9 Canonical web surface.** `https://pipe.ufobe.com` is the Pipe management site and API origin. Asset browsing, search, generation jobs, pipeline benchmarks and method management belong here. DashQ shows source-backed summary metadata and links to Pipe; it does not duplicate the asset workspace. Pipe does not serve `assets.ufobe.com` or redirect it; all requests naming
   that host are refused before database access.
 
-- **R10 Independent execution.** Pipe never uses TaskQ except temporarily for observation, cancellation, reconciliation, slot release and retained import of existing protected operations. Preserve their original signed adapter, identities and receipts under R3-R6 until migration to independent AgentQ/CoreQ authority. This exception permits no new TaskQ-backed launch or qualification.
+- **R10 Independent execution.** Pipe never calls, pins or depends on TaskQ. Protected launch, cancellation and recovery use only the signed AgentQ host adapter and Pipe's own permits; `python3 scripts/check.py` fails if a TaskQ link returns. TaskQ may call Pipe as a client, and an operator command may refuse to run inside a TaskQ worker.
+  Operations started through TaskQ recover under R3-R6 through operator-authenticated retained archives, keeping their identities and receipts.
 - **R11 Telemetry contract.** Pipe writes its operations as observations under the [specq telemetry contract](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md#telemetry-contract), to one CoreQ local store and nothing else. `agentq-runtime` owns agent run and model call records. See [Telemetry](#telemetry).
 
 ## Requests and durable execution
@@ -100,7 +101,9 @@ Control summaries expose registry/comparison/recommendation revisions for downst
 
 Infrastructure builds pin CoreQ `v0.21.0` at `18b177c445e92c5df58bd1dea1b473776dd0c6ae`, the version `agentq-runtime` 0.6.0 resolves, so Pipe and the runtime share one telemetry store type.
 
-New worker builds use `agentq-runtime` 0.6.0 at immutable revision `c80675a557417532393e143ca2783c0f4c83b8d9` from AgentQ PR243. Cargo.lock retains the resolved revision. Method version 5, its receipts and its provenance keep their original runtime 0.2.0 identity `70f85434546bd1c303ccdb7b0dd71866421627e2`.
+New worker builds use `agentq-runtime` 0.6.0 at immutable revision `f87f308a90b34564cb8ab6f3686ca09ffdde638f` from AgentQ PR244, which publishes the signed host API and keeps the native messages that image evidence requires.
+
+Cargo.lock retains the resolved revision. Method version 5, its receipts and its provenance keep their original runtime 0.2.0 identity `70f85434546bd1c303ccdb7b0dd71866421627e2`.
 
 The runtime owns structured text/image forwarding and read-only account identity; Pipe verifies attachment ownership, hashes and PNG limits before `Runtime::input`, and requires subscription login through `Runtime::account` before any turn. No raw account request or credential refresh supplies an alternative path.
 
@@ -114,17 +117,25 @@ Consume protected launch through AgentQ and shared CoreQ infrastructure, using t
 
 Until the composed protected worker and its current image capability are qualified, refuse new generation launches; retain observation, cancellation and import of existing operations. A bounded owner-authorized example qualifies its tool/output path only.
 
-Keep the bounded non-generating qualification command unavailable until an independent protected transport replaces the legacy adapter under R10. Independent qualification must retain incarnation-bound capacity and independently read expected identities. Pin the qualified host adapter artifact in the build; task, environment and receipt text cannot select another authority.
+The bounded non-generating qualification command and the operator-bound image job use only the independent protected host under R10. Independent qualification must retain incarnation-bound capacity and independently read expected identities. Pin the qualified host adapter artifact in the build; task, environment and receipt text cannot select another authority.
+
+The build pins macOS arm64 adapter SHA-256 `a1cbb7b88959532f2be28ea8d696c4cc1ae17b7c97205d6549f7156164c82a58`, its detached signature and publication key `7f739abab8625718e2e5dbedf0deb5a98373260d3c22ecd20a1148f42bf6d584`.
 
 A replacement adapter must first qualify an isolated build from reviewed immutable AgentQ/CoreQ source against the existing policy and host boundary. Record its final staged digest after signing, then review and pin it before composed qualification. Preserve prior adapters and receipts for recovery; no temporary trust override or grant edit is permitted.
 
-For existing-operation recovery only under R10, the selected installed TaskQ `4.6.66-261103-26` artifact is an explicit exception to that compilation order: retain its verified signed bytes for original-operation recovery; new qualification and generation launches through it are refused. Its SHA-256 is `bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42`.
+Protected capacity comes from Pipe's own `pipe.permits/1` permits. Each installation holds one permit at a time, the existing one-concurrent-job bound, under the caller name the signed host policy already authorizes. The issuer key stays in protected host configuration. A permit grants occupancy only, never filesystem, process, model or account authority.
+
+Occupancy follows one executable model with replayable traces: an operation acquires the permit, records launch intent once, and releases only after verified native and descendant completion and cleanup. Launch that never reached intent may release. Cancellation acknowledgment, transport exit, crash and unknown reconciliation keep occupancy. Detail: [image worker](docs/image-worker.md#protected-capacity).
+
+An operation started through TaskQ recovers only through `reconcile_retained` and `cancel_retained` on the pinned adapter, using its exact retained checkpoint and receipt bytes in an operator-authenticated archive. Without that archive it stays unknown.
+
+Pipe has no path to a TaskQ slot: a job whose original slot release was never acknowledged stays unknown with reservations charged, even after verified completion.
 
 Native qualification remains required; installation, signature and policy parsing alone do not qualify launch.
 
 The prior qualified adapter source `e990d88943e95abd8d182d8157bfe84a94343a07` and digest `f8b04708db09c764ec14bbaa77d0dd40fd7bfc9a521104f93f20885ebb7d5df4` remain historical evidence. Preserve its original binaries for recovery. The refreshed build accepts only the new digest; it cannot use the prior artifact as a fallback.
 
-Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. The non-generating qualification command cannot start a model turn. No qualification may release an uncertain slot.
+Retain private launch intent, authority, native journal and cancellation/reconciliation receipts. The non-generating qualification command cannot start a model turn. No qualification may release an uncertain permit.
 
 The runtime-trait qualification command exposes read-only account identity and catalogue progress; native probe methods unsupported by the selected runtime refuse explicitly. Historical boundary-probe receipts retain their exact original candidate.
 
@@ -135,11 +146,11 @@ strings cannot enable this path.
 
 General dispatch remains refused. Preserve the accepted crate and its initial 3D-input identity; never replay it.
 
-The qualification runner acquires its own existing-host slot for its actual incarnation, persists its independent AgentQ preparation before launch, and submits at most one Runtime input. It inherits subscription, model, effort and optional optimization without edits.
+The qualification runner acquires a Pipe permit for its actual incarnation, persists its independent AgentQ preparation before launch, and submits at most one Runtime input. It inherits subscription, model, effort and optional optimization without edits.
 
 One concurrent job has at most 600 seconds generating plus 30 seconds observing interruption, a 64 MiB original PNG and 32 MiB native journal under existing resource guards. Report unreported usage/charge as unknown; no direct paid API, replacement submission, new grants, ordinary configuration change or deployment is authorized.
 
-The runner retains Runtime through cancellation, then uses AgentQ original-operation reconciliation before terminal publication and slot release. A restart observes retained preparation/turn receipts without relaunch; missing terminal or descendant evidence preserves unknown and reservations. The executable job model remains the lifecycle owner.
+The runner retains Runtime through cancellation, then uses AgentQ original-operation reconciliation before terminal publication and permit release. A restart observes retained preparation/turn receipts without relaunch; missing terminal or descendant evidence preserves unknown and reservations. The executable job model remains the lifecycle owner.
 
 Qualification requires duplicate-request, control-service interruption, original-tool/path, immutable import and authenticated retrieval evidence; a missing tool refuses precisely.
 
