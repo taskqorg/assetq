@@ -99,7 +99,7 @@ Control summaries expose registry/comparison/recommendation revisions for downst
 
 **Image worker (`image.worker.v1`).** The method names the capability, not a runtime: provider `agentq.image` with capability `image_generation`. AgentQ selects and qualifies the worker runtime that holds that capability; it receives text, attachments and output constraints and invokes its qualified image-generation tool. Preserve original generated bitmap files and native evidence.
 
-Infrastructure builds pin CoreQ `v0.21.0` at `18b177c445e92c5df58bd1dea1b473776dd0c6ae`, the version `agentq-runtime` 0.6.0 resolves, so Pipe and the runtime share one telemetry store type.
+Infrastructure builds pin CoreQ `v0.21.0` at `18b177c445e92c5df58bd1dea1b473776dd0c6ae`, the version `agentq-runtime` 0.6.0 resolves, so Pipe and the runtime share one telemetry store type. These pins are part of the qualified signed host identity, so an automatic pin update opens a PR and goes through review instead of merging itself.
 
 New worker builds use `agentq-runtime` 0.6.0 at immutable revision `f87f308a90b34564cb8ab6f3686ca09ffdde638f` from AgentQ PR244, which publishes the signed host API and keeps the native messages that image evidence requires.
 
