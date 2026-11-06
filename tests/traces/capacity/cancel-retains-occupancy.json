@@ -1,0 +1,8 @@
+{"name":"cancellation acknowledgment proves nothing","covers":"R3/R6 cancellation; transport exit keeps the permit until the certificate","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"}},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"release","op":"a"},"reject":"unproved"},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"release","op":"a"},"reject":"unproved"}
+],"expect":{"phase":"launched","op":"a"}}

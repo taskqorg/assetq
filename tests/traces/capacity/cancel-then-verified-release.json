@@ -1,0 +1,8 @@
+{"name":"cancelled work releases only on proof","covers":"R3/R6 cancellation","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"}},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"completion_verified","op":"a"}},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"release","op":"a"}}
+],"expect":{"phase":"free"}}

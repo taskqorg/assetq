@@ -1552,19 +1552,19 @@ fn http() -> ureq::Agent {
 
 // R3/R5/R9: browser proof, sessions and CSRF cannot widen the shared API grant;
 // search and preview must protect private objects before any file access.
-// R10/A2: public identity and refusal must hold before any host effect or spool write.
+// R3/R10: public identity, and missing permit authority refuses before any host effect or spool write.
 #[test]
-fn management_pipe_identity_and_recovery_only() {
+fn management_pipe_identity_and_permit_refusal() {
     let help = Command::new(bin()).arg("--help").output().unwrap();
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).starts_with("pipe <command>"));
     let dir = std::env::temp_dir().join(format!("pipe-refused-{}", uuid::Uuid::new_v4()));
-    let out = Command::new(bin()).args(["image-qualify", dir.to_str().unwrap()]).output().unwrap();
+    let out = Command::new(bin()).args(["image-qualify", dir.to_str().unwrap()]).env_remove("ASSETQ_PERMIT_ISSUER_KEY").output().unwrap();
     assert!(!out.status.success());
     // Off Mac the platform refusal comes first; both refuse before any effect.
-    let expected = if cfg!(target_os = "macos") { "legacy TaskQ adapter is recovery-only" } else { "existing approved Mac Workspace" };
+    let expected = if cfg!(target_os = "macos") { "ASSETQ_PERMIT_ISSUER_KEY" } else { "existing approved Mac Workspace" };
     assert!(String::from_utf8_lossy(&out.stderr).contains(expected));
-    assert!(!dir.exists(), "refusal must precede spool creation and TaskQ calls");
+    assert!(!dir.exists(), "refusal must precede spool creation and any host call");
 }
 
 #[test]

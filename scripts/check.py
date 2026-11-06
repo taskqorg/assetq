@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import glob
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -99,6 +100,26 @@ def rust_checks(name=None):
     print(f"Selected Rust checks passed (filter: {name or 'all'}); fixture providers do not qualify real generation.")
 
 
+# R10: a link means calling or pinning TaskQ. Worker-environment refusals, the opaque task label
+# and the board registration are not links. Documents and retained evidence record history.
+TASKQ_LINK = re.compile(
+    r"taskq\.slots|taskq\.app-server|taskq\.native-completion|taskqorg/taskq\b|ProtectedHost::new"
+    r"|[\"']service[\"'],\s*[\"'](?:slots|app-server)[\"']|\bservice (?:slots|app-server)\b"
+    r"|Command::new\(\s*\"taskq|\[\s*[\"']taskq[\"']\s*,"
+    r"|bd6dc0de5024ff7b|f8b04708db09c764")
+TASKQ_LINK_EXEMPT = {"scripts/check.py", "scripts/test_check.py"}
+
+
+def taskq_links(root, paths):
+    found = []
+    for path in paths:
+        if path.endswith(".md") or path in TASKQ_LINK_EXEMPT or not (root / path).is_file():
+            continue
+        text = (root / path).read_text(errors="replace")
+        found += [f"{path}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(0)}" for m in TASKQ_LINK.finditer(text)]
+    return found
+
+
 def needs_rust(paths):
     # An unknown file type is implementation impact, never silently docs-only.
     return not paths or any(not p.endswith(".md") for p in paths)
@@ -138,6 +159,9 @@ def main():
               "pipe.md"), end="")
     print(run("git", "diff", "--check"), end="")
     print(run("git", "diff", "--cached", "--check"), end="")
+    links = taskq_links(ROOT, run("git", "ls-files", "--cached", "--others", "--exclude-standard").splitlines())
+    if links:
+        raise RuntimeError("R10: Pipe code, config or tests link TaskQ:\n" + "\n".join(links))
     print("Contract and whitespace checks passed.")
     if needs_rust(changed_paths()):
         rust_checks()

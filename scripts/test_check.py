@@ -12,6 +12,23 @@ import check
 
 
 class GateTrust(unittest.TestCase):
+    def test_taskq_link_fails_and_documented_exceptions_pass(self):
+        # R10: each kind of returned link is caught; the allowed non-links are not.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            links = {"a.rs": 'schema == "taskq.slots/1"', "b.toml": 'git = "https://github.com/taskqorg/taskq"',
+                     "c.rs": 'ProtectedHost::new(a, b)', "d.rs": 'args(["service", "slots"])',
+                     "e.py": 'run("taskq service app-server")', "f.rs": 'Command::new("taskq")',
+                     "g.py": 'subprocess.run(["taskq", "x"])', "h.rs": 'const A: &str = "bd6dc0de5024ff7b6b0a"'}
+            allowed = {"i.py": 'if "TASKQ_ATTEMPT" in os.environ:', "j.toml": 'git = "https://github.com/taskqorg/agentq"',
+                       "k.md": "taskq.slots history", "taskq.json": '{"repo":"taskqorg/assetq"}',
+                       "l.py": 'os.environ.get("TASKQ_TASK")', "m.rs": "ProtectedHost::signed(a, b, c, d)"}
+            for name, text in {**links, **allowed}.items():
+                (root / name).write_text(text)
+            found = check.taskq_links(root, [*links, *allowed, "absent.rs"])
+            self.assertEqual(sorted(line.split(":")[0] for line in found), sorted(links))
+        self.assertEqual(check.taskq_links(check.ROOT, check.run("git", "ls-files").splitlines()), [])
+
     def test_timeout_retains_partial_command_evidence(self):
         # R8: a stalled check must identify the last observed work, not discard it.
         with self.assertRaises(subprocess.TimeoutExpired) as error:

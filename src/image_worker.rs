@@ -18,6 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub mod capacity;
 pub mod protected;
 pub mod retained;
 
@@ -33,7 +34,7 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant launch is limited to the consumed qualification; legacy TaskQ adapter is recovery-only; new launches and qualification require independent AgentQ/CoreQ authority; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant launch is limited to the operator-bound qualification; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
@@ -88,11 +89,10 @@ impl ImageWorker {
     }
     /// Explicit local operator entry only; never populated by API or environment.
     pub fn qualification_job(cfg: Config, root: PathBuf, job: &str, adapter: &Path) -> Res<Self> {
-        dispatch_authority()?;
         if !cfg!(target_os = "macos") {
             return Err("capability_unavailable: image qualification requires the existing Mac authority".into());
         }
-        protected::check_adapter(adapter)?;
+        protected::signed_host(adapter)?;
         let mut worker = Self::new(cfg, root).map_err(|e| e.to_string())?;
         worker.qualification = Some((job.into(), adapter.into()));
         let mut c = db::connect_config(&worker.cfg).map_err(|e| e.to_string())?;
@@ -257,7 +257,18 @@ impl Provider for ImageWorker {
         {
             retained::resume(self, op)?;
         }
-        if dir.join("preparation.json").exists() && !dir.join("result.json").exists() && !runner_alive(&dir)? {
+        if !dir.join("result.json").exists()
+            && dir.join("runner.json").exists()
+            && !runner_alive(&dir)?
+            && protected::launch_unreached(&dir)?
+        {
+            return Err(format!(
+                "runner ended before launch; nothing native started; run image-observe {} --release to free the permit; no replay",
+                dir.display()
+            ));
+        }
+        let launch_possible = dir.join("protected-launch").exists() || dir.join("slot-request.json").exists();
+        if launch_possible && dir.join("preparation.json").exists() && !dir.join("result.json").exists() && !runner_alive(&dir)? {
             protected::cancel_prepared(&dir)?;
             recover_native(&self.cfg, &dir)?;
         }
@@ -489,12 +500,12 @@ pub fn run_job(cfg: Config, op: &str, job: &str, adapter: &Path) -> Res<()> {
         Ok(_) => Ok(()),
         Err(reason) => {
             // Never leave a failed launch running; errors still reconcile the original identity.
-            if dir.join("preparation.json").exists() {
+            if dir.join("protected-launch").exists() {
                 let _ = protected::cancel_prepared(&dir);
                 if recover_native(&cfg, &dir).is_ok() {
                     return Ok(());
                 }
-            } else if dir.join("slot-request.json").exists() {
+            } else if dir.join("permit-capacity.json").exists() {
                 let _ = protected::release_unlaunched(&dir);
             }
             save(&dir.join("unknown.json"), &json!({"reason":reason}))?;
@@ -553,7 +564,7 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     input.insert(0, Part::Text(prompt));
     let adapter = PathBuf::from(read_json(&dir.join("qualification.json"))?["adapter"].as_str().ok_or("qualification adapter missing")?);
     let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-    let (server, home) = protected::prepare_launch(cfg.image_worker_root.as_deref().unwrap(), dir, op, &adapter)?;
+    let (server, home) = protected::prepare_launch(cfg.image_worker_root.as_deref().unwrap(), dir, op, &adapter, None)?;
     let opt = server.optimization();
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
@@ -1080,6 +1091,27 @@ mod tests {
         assert!(!worker.dir(&op).unwrap().exists());
         fs::remove_dir_all(dir).unwrap();
     }
+    // R4/R6: a runner that died before launch is observable, names its release and never calls the host.
+    #[test]
+    fn image_worker_poll_names_release_when_runner_died_before_launch() {
+        let (dir, cfg, worker) = fixture();
+        let op = db::new_id();
+        let spool = worker.reserve(&op, &json!({"method":"image.worker.v1@5"})).unwrap();
+        save(&spool.join("runner.json"), &json!({"pid":std::process::id(),"started":"invented-dead-incarnation"})).unwrap();
+        save(&spool.join("preparation.json"), &json!({"invented":"unlaunched checkpoint"})).unwrap();
+        let occupancy = cfg.data_root.join("invented-occupancy.json");
+        save(&spool.join("permit-capacity.json"), &json!({"path":occupancy,"op":op})).unwrap();
+        let held = capacity::Capacity(occupancy.clone());
+        held.apply(capacity::Event::Acquire { op: op.clone() }).unwrap();
+        let reason = worker.poll(&op).err().unwrap();
+        assert!(reason.contains("--release") && reason.contains("nothing native started"), "{reason}");
+        assert!(held.holds(&op).unwrap());
+        protected::release_unlaunched(&spool).unwrap();
+        let reason = worker.poll(&op).err().unwrap();
+        assert!(reason.contains("worker interrupted") && !reason.contains("launch identity"), "{reason}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     // R2/R4/R6/R7: transport exit cannot publish a terminal result or free capacity.
     #[test]
     fn image_worker_supervisor_exit_retains_unknown_native_completion() {

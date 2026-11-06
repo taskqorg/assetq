@@ -21,7 +21,10 @@ class QualificationDriver(unittest.TestCase):
                     main()
             self.assertFalse(directory.exists())
             with patch("sys.argv", args), patch.dict("os.environ", {}, clear=True):
-                with self.assertRaisesRegex(RuntimeError, "legacy TaskQ adapter is recovery-only"):
+                with self.assertRaisesRegex(RuntimeError, "ASSETQ_PERMIT_ISSUER_KEY"):
+                    main()
+            with patch("sys.argv", args), patch.dict("os.environ", {"ASSETQ_PERMIT_ISSUER_KEY": "invented"}, clear=True):
+                with self.assertRaises(FileNotFoundError):
                     main()
             self.assertFalse(directory.exists())
 

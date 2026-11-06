@@ -16,3 +16,25 @@ fn trace_runner_detects_a_wrong_expectation() {
     let raw = happy.replace("\"succeeded\"", "\"failed\"");
     assert!(pipe::traces::run(&raw).is_err());
 }
+
+#[test]
+fn every_capacity_trace_replays() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/traces/capacity");
+    assert_eq!(
+        std::fs::read_dir(&dir).unwrap().count(),
+        pipe::traces::CAPACITY_TRACES.len(),
+        "embed every capacity trace in src/traces.rs"
+    );
+    let failures: Vec<String> = pipe::traces::CAPACITY_TRACES
+        .iter()
+        .filter_map(|(name, raw)| pipe::image_worker::capacity::replay(raw).err().map(|e| format!("{name}: {e}")))
+        .collect();
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn capacity_trace_runner_detects_a_wrong_expectation() {
+    let trace = pipe::traces::CAPACITY_TRACES.iter().find(|(n, _)| *n == "cancel-retains-occupancy.json").unwrap().1;
+    assert!(pipe::image_worker::capacity::replay(&trace.replace("\"launched\"", "\"free\"")).is_err());
+    assert!(pipe::image_worker::capacity::replay(&trace.replace("\"reject\":\"unproved\"", "\"note\":\"\"")).is_err());
+}
