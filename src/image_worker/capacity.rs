@@ -114,6 +114,11 @@ impl Capacity {
         serde_json::from_value(read_json(&self.0)?).map_err(|_| "protected capacity corrupt; retain occupancy".into())
     }
 
+    /// Launch intent recorded for this operation, with no proof either way yet.
+    pub(super) fn intended(&self, op: &str) -> Res<bool> {
+        Ok(matches!(self.load()?, State::Launched { op: holder } if holder == op))
+    }
+
     pub(super) fn holds(&self, op: &str) -> Res<bool> {
         Ok(match self.load()? {
             State::Free => false,
@@ -123,9 +128,12 @@ impl Capacity {
 
     /// Only the holder writes after acquisition, and the link makes first acquisition atomic.
     pub(super) fn apply(&self, event: Event) -> Res<()> {
-        let refuse = |reject: Reject| match reject {
-            Reject::Busy => "capability_unavailable: protected permit held by another operation; no launch".to_string(),
-            other => format!("protected permit transition refused: {other}; retain occupancy"),
+        let refuse = |reject: Reject| match (reject, self.load()) {
+            (Reject::Busy, Ok(State::Held { op: holder } | State::Launched { op: holder } | State::Completed { op: holder })) => format!(
+                "capability_unavailable: protected permit held by another operation {holder}; no launch; reconcile it with image-observe"
+            ),
+            (Reject::Busy, _) => "capability_unavailable: protected permit held by another operation; no launch".to_string(),
+            (other, _) => format!("protected permit transition refused: {other}; retain occupancy"),
         };
         let before = self.load()?;
         match apply(&before, &event).map_err(refuse)? {

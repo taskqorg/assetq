@@ -34,6 +34,16 @@ At `a610cf7`, `Runtime::progress` returns typed events and `Runtime::send` is go
 
 A later runtime upgrade needs AgentQ to expose native image evidence on the protected path. This change opens no upstream task for it.
 
+## The gate is a helper, not the boundary
+
+`scripts/check.py` catches plain text forms only. It misses `Command::new` with a full path and `.arg("service").arg("slots")`. The boundary is the code: no TaskQ dependency, and `ProtectedHost::signed` with a pinned digest, signature and key.
+
+## Occupancy across data roots
+
+Review of the first candidate found the one-concurrent-job bound lost. Occupancy sat under the data root, `scripts/qualify_image.py` makes a new data root per run, and host `prepare` does not limit concurrency, so a stuck operation plus a new run gave a second native Codex under one Workspace grant. The review proposed binding occupancy to the worker root. It sits beside the issuer key instead, because the Workspace grant lets a worker write the worker root and so delete the file.
+
+`image_worker_one_permit_holds_across_data_roots` covers it. With occupancy moved back to each spool's data root, it fails with `second native operation under one grant`.
+
 ## Checks
 
 On macOS 27.2 arm64 at this branch:
@@ -41,7 +51,7 @@ On macOS 27.2 arm64 at this branch:
 | Check | Outcome |
 |---|---|
 | `python3 scripts/check.py` | Passed locally; CI runs the same gate on `ubuntu-latest` |
-| `cargo test --locked --lib image_worker` | 22 passed |
+| `cargo test --locked --lib image_worker` | 26 passed |
 | `cargo test --locked --test traces` | 4 passed, including 8 capacity traces and a wrong-expectation check |
 | Permit signature | Accepted by `agentq_runtime::agent::host::verify_signature`; refused for a changed binding and a foreign key |
 
@@ -62,7 +72,7 @@ Each item needs host or owner authority, or an upstream change. None is done her
 Nothing below has run. It needs action-time authorization from the owner, on the Mac, in the existing operator session.
 
 1. Build Pipe from the merged source. Stage the adapter already verified in #61 and point `--adapter` at it.
-2. Set `ASSETQ_PERMIT_ISSUER_KEY` to the existing issuer key for caller `assetq-52-qualification`. The policy and grant need no edit.
+2. Set `ASSETQ_PERMIT_ISSUER_KEY` to the existing issuer key for caller `assetq-52-qualification`. Pipe writes occupancy beside it, so that directory must be writable by Pipe and outside the workspace. The policy and grant need no edit.
 3. Run `python3 scripts/qualify_image.py --binary <pipe> --adapter <adapter> --workspace <project> --directory <new-dir>` once. It creates an isolated store, submits the one blue-wedge job, restarts the service and retrieves the outputs. Never reuse the directory.
 4. For an operation started through TaskQ that needs recovery, set `ASSETQ_PROTECTED_ADAPTER` and seal its exact `preparation.json` and receipt bytes as a retained archive first.
 

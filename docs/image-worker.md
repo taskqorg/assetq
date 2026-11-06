@@ -32,7 +32,7 @@ The registry's `native-inherited` model selector preserves ordinary native setti
 
 ## Protected capacity
 
-Capacity comes from Pipe's own `pipe.permits/1` permits; the host validates them and cannot release them. Each installation holds one permit at a time in `tmp/image-worker/protected-capacity.json`, the existing one-concurrent-job bound. A permit signs its binding with the issuer key named by `ASSETQ_PERMIT_ISSUER_KEY`, under the caller name `assetq-52-qualification` that the signed host policy already authorizes, so no policy or grant changes. Permit lifetime before first preparation stays the prior 120 seconds; occupancy survives expiry.
+Capacity comes from Pipe's own `pipe.permits/1` permits; the host validates them and cannot release them. Each issuer key holds one permit at a time, the existing one-concurrent-job bound. Occupancy is the file `<issuer key name>.occupancy.json` beside the key, so `scripts/qualify_image.py`, which makes a new data root per run, still sees an earlier operation. A worker can write its Workspace, so a key inside the worker root refuses. A permit signs its binding with the issuer key named by `ASSETQ_PERMIT_ISSUER_KEY`, under the caller name `assetq-52-qualification` that the signed host policy already authorizes, so no policy or grant changes. Permit lifetime before first preparation stays the prior 120 seconds; occupancy survives expiry.
 
 `src/image_worker/capacity.rs` holds the one occupancy model, and `tests/traces/capacity` replays it through `python3 scripts/check.py` and `pipe selftest`.
 
@@ -43,13 +43,13 @@ Capacity comes from Pipe's own `pipe.permits/1` permits; the host validates them
 | launched | one-shot launch intent, persisted before the launch marker and native launch | verified completion only |
 | completed | AgentQ-validated completion certificate and cleanup acknowledgment | release |
 
-Cancellation acknowledgment, transport exit, crash and unknown reconciliation change nothing: launched stays occupied. A crash between intent and marker is treated as launched, because occupancy cannot be freed without proof. A durable release intent lets a repeated release succeed after a crash without freeing the next holder. A corrupt occupancy file refuses every effect.
+Cancellation acknowledgment, transport exit, crash and unknown reconciliation change nothing: launched stays occupied. A crash between intent and marker is treated as launched, because occupancy cannot be freed without proof. `image-observe <dir> --release` then refuses and names the operator step: run `image-observe <dir>`; if the host answers `launch identity absent`, remove the occupancy file by hand and keep the spool. No code path does this automatically. A durable release intent lets a repeated release succeed after a crash without freeing the next holder. A corrupt occupancy file refuses every effect. A runner that dies before intent makes `poll` report `runner ended before launch` with the `--release` command; the job itself stays unknown, never replayed.
 
 ## Operations started through TaskQ
 
 These spools hold `slot-request.json` and take a separate path. `ASSETQ_PROTECTED_ADAPTER` names the pinned adapter. Recovery calls `reconcile_retained` or `cancel_retained` with the exact bytes of `preparation.json` and of `reconciliation.json`, or `authority.json` if no reconciliation exists; the operator must have sealed those bytes as a retained archive in the host store. Answers go to new `retained-*.json` files and never overwrite an original receipt.
 
-Pipe has no path to a TaskQ slot. A terminal result needs retained `completed` and the operation's own earlier `slot-release.json` acknowledgment. Otherwise the job stays unknown with reservations charged. Consumer directories from the old `image-qualify` have no preparation checkpoint and refuse with their evidence kept.
+Pipe has no path to a TaskQ slot. A terminal result needs retained `completed` and the operation's own earlier `slot-release.json` acknowledgment. `image-observe --release` answers `confirmed` with `pipe_released: false`, because Pipe released nothing. Otherwise the job stays unknown with reservations charged. Consumer directories from the old `image-qualify` have no preparation checkpoint and refuse with their evidence kept.
 
 ## Result and qualification
 

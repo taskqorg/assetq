@@ -63,10 +63,18 @@ fn boot_time() -> Res<i64> {
     Err("capability_unavailable: protected permit requires the existing Mac authority".into())
 }
 
-fn issuer_key() -> Res<Vec<u8>> {
+fn issuer_path() -> Res<PathBuf> {
     let path = std::env::var_os("ASSETQ_PERMIT_ISSUER_KEY")
         .ok_or("capability_unavailable: ASSETQ_PERMIT_ISSUER_KEY is not configured; no permit")?;
-    fs::read(path).map_err(|_| "capability_unavailable: protected permit issuer key unreadable; no permit".into())
+    PathBuf::from(path).canonicalize().map_err(|_| "capability_unavailable: protected permit issuer key unreadable; no permit".into())
+}
+
+/// R7: one permit per issuer key on any data root. Beside the key, because a worker can write its workspace.
+fn occupancy_path(issuer: &Path, root: &Path) -> Res<PathBuf> {
+    if issuer.starts_with(root) {
+        return Err("capability_unavailable: protected permit issuer key is inside the worker workspace; no permit".into());
+    }
+    Ok(issuer.with_extension("occupancy.json"))
 }
 
 /// The signed payload keeps the binding's own field order, as the host reads it back.
@@ -95,22 +103,20 @@ pub(super) fn prepare_launch(
     dir: &Path,
     op: &str,
     adapter: &Path,
-    capacity: &Path,
     expected: Option<&Expected>,
 ) -> Res<(ProtectedAppServer, PathBuf)> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected Workspace adapter is qualified on Mac only; no Windows grant or fallback".into());
     }
     let host = signed_host(adapter)?;
-    let pkcs8 = issuer_key()?;
+    let issuer = issuer_path()?;
+    let pkcs8 = fs::read(&issuer).map_err(|_| "capability_unavailable: protected permit issuer key unreadable; no permit")?;
     let owner = coreq::process::identity(std::process::id()).map_err(|_| "runner identity unknown")?.ok_or("runner absent")?;
     save(&dir.join("runner.json"), &json!({"pid":owner.pid,"started":owner.started}))?;
     let root = root.canonicalize().map_err(|_| "qualification project unavailable")?;
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| "permit clock unknown")?.as_secs();
     let permit = issue_permit(&pkcs8, &root, op, &owner, boot_time()?, at)?;
-    seal(&dir.join("permit-capacity.json"), &json!({"path":capacity,"op":op}))?;
-    let (capacity, _) = capacity_of(dir)?;
-    capacity.apply(Event::Acquire { op: op.into() })?;
+    let capacity = acquire(dir, op, &occupancy_path(&issuer, &root)?)?;
     seal(&dir.join("permit.json"), &permit)?;
     let preparation = host.prepare(&permit, Instant::now() + Duration::from_secs(5))?;
     save(&dir.join("preparation.json"), &preparation.checkpoint())?;
@@ -148,6 +154,13 @@ pub(super) fn prepare_launch(
         }
     }
     Ok((server, home))
+}
+
+fn acquire(dir: &Path, op: &str, occupancy: &Path) -> Res<Capacity> {
+    seal(&dir.join("permit-capacity.json"), &json!({"path":occupancy,"op":op}))?;
+    let (capacity, _) = capacity_of(dir)?;
+    capacity.apply(Event::Acquire { op: op.into() })?;
+    Ok(capacity)
 }
 
 /// R3: the host resolves authority; the operator's independent reading must agree before launch.
@@ -242,7 +255,22 @@ pub(super) fn release_unlaunched(dir: &Path) -> Res<()> {
         return Err("launch may have occurred; reconcile original preparation".into());
     }
     let (capacity, op) = capacity_of(dir)?;
+    if capacity.intended(&op)? {
+        return Err(format!(
+            "launch intent has no launch marker: the launch was probably not attempted, but nothing proves it; occupancy retained. Run image-observe on this directory; if the host answers `launch identity absent`, the operator removes {} by hand and keeps this directory",
+            capacity.0.display()
+        ));
+    }
     release_capacity(dir, &capacity, &op)
+}
+
+/// R4/R6: a dead runner that still holds the permit and never reached the launch marker has nothing to cancel.
+pub(super) fn launch_unreached(dir: &Path) -> Res<bool> {
+    if dir.join("protected-launch").exists() || started_through_taskq(dir) || !dir.join("permit-capacity.json").exists() {
+        return Ok(false);
+    }
+    let (capacity, op) = capacity_of(dir)?;
+    capacity.holds(&op)
 }
 
 pub(super) fn reconcile_release(dir: &Path) -> Res<()> {
@@ -294,11 +322,24 @@ fn reconcile_then_release(
 }
 
 /// Operator entry: release only what proof allows; a launch intent always needs reconciliation.
-pub fn release(dir: &Path) -> Res<()> {
+pub fn release(dir: &Path) -> Res<Value> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected adapter requires Mac".into());
     }
-    if dir.join("protected-launch").exists() || started_through_taskq(dir) { reconcile_release(dir) } else { release_unlaunched(dir) }
+    if dir.join("protected-launch").exists() || started_through_taskq(dir) {
+        reconcile_release(dir)?;
+    } else {
+        release_unlaunched(dir)?;
+    }
+    Ok(release_answer(dir))
+}
+
+fn release_answer(dir: &Path) -> Value {
+    if started_through_taskq(dir) {
+        json!({"state":"confirmed","original_slot_release":"acknowledged earlier","pipe_released":false})
+    } else {
+        json!({"state":"released","pipe_released":true})
+    }
 }
 
 /// Recovery uses the original operation; a dead consumer never authorizes replay/release.
@@ -374,11 +415,7 @@ pub fn qualify(dir: &Path) -> Res<()> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: composed protected qualification requires the existing approved Mac Workspace host".into());
     }
-    issuer_key()?;
-    let data_root = std::env::var_os("ASSETQ_DATA_ROOT").ok_or("capability_unavailable: ASSETQ_DATA_ROOT is not configured; no permit")?;
-    let capacity = PathBuf::from(data_root).join("tmp/image-worker");
-    fs::create_dir_all(&capacity).map_err(|e| e.to_string())?;
-    let capacity = capacity.join("protected-capacity.json");
+    issuer_path()?;
     let root = std::env::current_dir().and_then(|p| p.canonicalize()).map_err(|e| e.to_string())?;
     let parent = dir
         .parent()
@@ -430,7 +467,7 @@ pub fn qualify(dir: &Path) -> Res<()> {
         save(&dir.join("qualification.json"), &json!({"adapter":requirements.adapter}))?;
         let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
         let op = format!("pipe-qualify-{}", uuid::Uuid::new_v4());
-        let prepared = prepare_launch(&root, &dir, &op, &requirements.adapter, &capacity, Some(&requirements));
+        let prepared = prepare_launch(&root, &dir, &op, &requirements.adapter, Some(&requirements));
         if prepared.is_err() && !dir.join("protected-launch").exists() && dir.join("permit-capacity.json").exists() {
             let _ = release_unlaunched(&dir);
         }
@@ -517,12 +554,12 @@ mod tests {
     fn image_worker_prepare_refuses_before_any_effect() {
         let dir = std::env::temp_dir().join(format!("pipe-never-launch-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&dir).unwrap();
-        let (adapter, capacity) = (dir.join("invented-adapter"), dir.join("capacity.json"));
+        let adapter = dir.join("invented-adapter");
         fs::write(&adapter, b"invented adapter bytes").unwrap();
-        let error = prepare_launch(&dir, &dir, "invented-op", &adapter, &capacity, None).err().unwrap();
+        let error = prepare_launch(&dir, &dir, "invented-op", &adapter, None).err().unwrap();
         let expected = if cfg!(target_os = "macos") { "protected" } else { "Mac only" };
         assert!(error.contains(expected), "{error}");
-        assert!(!capacity.exists() && !dir.join("permit-capacity.json").exists() && !dir.join("protected-launch").exists());
+        assert!(!dir.join("permit-capacity.json").exists() && !dir.join("protected-launch").exists());
         assert!(signed_host(&adapter).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -621,6 +658,57 @@ mod tests {
         fs::create_dir(&foreign).unwrap();
         assert!(release_capacity(&foreign, &capacity, op).is_err());
         assert!(capacity.holds("invented-next").unwrap() && !foreign.join("permit-release-intent").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R7: a stuck operation on one data root refuses a new run on another, under one issuer key.
+    #[test]
+    fn image_worker_one_permit_holds_across_data_roots() {
+        let top = std::env::temp_dir().join(format!("aq-roots-{}", uuid::Uuid::new_v4()));
+        let (workspace, keys) = (top.join("workspace"), top.join("protected"));
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&keys).unwrap();
+        let spool = |store: &str, op: &str| {
+            let dir = workspace.join(store).join("tmp/image-worker").join(op);
+            fs::create_dir_all(&dir).unwrap();
+            dir
+        };
+        let (first, second) = (spool("store-1", "invented-stuck"), spool("store-2", "invented-new"));
+        let issuer = keys.join("invented-issuer.pk8");
+        let occupancy = occupancy_path(&issuer, &workspace).unwrap();
+        let held = acquire(&first, "invented-stuck", &occupancy).unwrap();
+        held.apply(Event::LaunchIntended { op: "invented-stuck".into() }).unwrap();
+        let error = acquire(&second, "invented-new", &occupancy).err().expect("second native operation under one grant");
+        assert!(error.contains("held by another operation invented-stuck"), "{error}");
+        assert!(held.intended("invented-stuck").unwrap());
+        // A worker can write its workspace, so occupancy and key never live there.
+        assert!(!occupancy.starts_with(&workspace));
+        assert!(occupancy_path(&workspace.join("invented-issuer.pk8"), &workspace).unwrap_err().contains("inside the worker workspace"));
+        fs::remove_dir_all(top).unwrap();
+    }
+
+    // R4/R6: intent without a marker never frees itself, and the refusal names the operator step.
+    #[test]
+    fn image_worker_intent_without_marker_names_operator_step() {
+        let dir = std::env::temp_dir().join(format!("aq-intent-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let capacity = acquire(&dir, "invented-op", &dir.join("occupancy.json")).unwrap();
+        assert!(launch_unreached(&dir).unwrap());
+        capacity.apply(Event::LaunchIntended { op: "invented-op".into() }).unwrap();
+        let error = release_unlaunched(&dir).unwrap_err();
+        assert!(error.contains("image-observe") && error.contains("launch identity absent") && error.contains("occupancy.json"), "{error}");
+        assert!(capacity.holds("invented-op").unwrap());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R4: the CLI answer never claims Pipe released an original slot.
+    #[test]
+    fn image_worker_release_answer_separates_confirmation_from_release() {
+        let dir = std::env::temp_dir().join(format!("aq-answer-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        assert_eq!(release_answer(&dir)["state"], "released");
+        save(&dir.join("slot-request.json"), &json!({})).unwrap();
+        assert_eq!(release_answer(&dir), json!({"state":"confirmed","original_slot_release":"acknowledged earlier","pipe_released":false}));
         fs::remove_dir_all(dir).unwrap();
     }
 

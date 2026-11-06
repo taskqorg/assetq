@@ -14,7 +14,7 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   serve [--listen 127.0.0.1:8740] [--http-threads 8]   API plus embedded executors
   work                                                 executors only (separate host)
   image-serve <accepted-job-id> <pinned-adapter>         operator-bound image qualification; needs ASSETQ_PERMIT_ISSUER_KEY
-  image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; needs ASSETQ_PROTECTED_ADAPTER
+  image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; a TaskQ-era source needs ASSETQ_PROTECTED_ADAPTER
   meshy-serve <accepted-job-id> <private-profile.json>  operator-bound initial Meshy qualification
   meshy-admit                                        loopback admission only; zero executors/effects
   meshy-preflight [blender-executable]                read-only host/candidate/budget prerequisites
@@ -77,8 +77,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let dir = pos(rest, 0)?;
             let dir = std::path::Path::new(&dir);
             if rest.iter().any(|s| s == "--release") {
-                pipe::image_worker::protected::release(dir)?;
-                print(&json!({"state":"released"}));
+                print(&pipe::image_worker::protected::release(dir)?);
             } else {
                 print(&pipe::image_worker::protected::observe(dir, rest.iter().any(|s| s == "--cancel"))?);
             }
