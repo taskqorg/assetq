@@ -1,0 +1,7 @@
+{"name":"nothing to release","covers":"R6 duplicate release and foreign events on a free permit","steps":[
+{"event":{"type":"release","op":"a"},"reject":"foreign"},
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"release","op":"a"}},
+{"event":{"type":"release","op":"a"},"reject":"foreign"},
+{"event":{"type":"completion_verified","op":"a"},"reject":"foreign"}
+],"expect":{"phase":"free"}}

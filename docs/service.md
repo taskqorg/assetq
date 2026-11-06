@@ -114,4 +114,4 @@ The crate, binary, CLI and browser brand are Pipe. The canonical origin is `http
 
 The rename changes no database/role name, SQL schema, data/object path, stored method/asset ID, immutable method specification or provenance. Keep `ASSETQ_*`, `X-AssetQ-Guard`, `X-AssetQ-Subject`, `__Host-assetq`, pending request storage keys and the operator binding field `assetq_binary_sha256` compatible. They are transport or retained identities, not another product name.
 
-Pipe R10 keeps the pinned TaskQ adapter solely for observation, cancellation, reconciliation, original-slot release and retained import. New protected qualification and launches refuse. The original worker state model, uncertain reservations and receipt validation stay unchanged.
+Under Pipe R10 the protected worker uses only the signed AgentQ adapter and Pipe permits; see [image worker](image-worker.md#protected-capacity). General dispatch stays refused. The original worker state model, uncertain reservations and receipt validation stay unchanged.

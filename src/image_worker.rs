@@ -18,6 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub mod capacity;
 pub mod protected;
 pub mod retained;
 
@@ -33,7 +34,7 @@ const RESERVATION: u64 = 136 << 20;
 type Res<T> = Result<T, String>;
 
 fn dispatch_authority() -> Res<()> {
-    Err("capability_unavailable: protected project/profile grant launch is limited to the consumed qualification; legacy TaskQ adapter is recovery-only; new launches and qualification require independent AgentQ/CoreQ authority; no native launch or permission change".into())
+    Err("capability_unavailable: protected project/profile grant launch is limited to the operator-bound qualification; no native launch or permission change".into())
 }
 
 pub fn method() -> Value {
@@ -88,11 +89,10 @@ impl ImageWorker {
     }
     /// Explicit local operator entry only; never populated by API or environment.
     pub fn qualification_job(cfg: Config, root: PathBuf, job: &str, adapter: &Path) -> Res<Self> {
-        dispatch_authority()?;
         if !cfg!(target_os = "macos") {
             return Err("capability_unavailable: image qualification requires the existing Mac authority".into());
         }
-        protected::check_adapter(adapter)?;
+        protected::signed_host(adapter)?;
         let mut worker = Self::new(cfg, root).map_err(|e| e.to_string())?;
         worker.qualification = Some((job.into(), adapter.into()));
         let mut c = db::connect_config(&worker.cfg).map_err(|e| e.to_string())?;
@@ -489,12 +489,12 @@ pub fn run_job(cfg: Config, op: &str, job: &str, adapter: &Path) -> Res<()> {
         Ok(_) => Ok(()),
         Err(reason) => {
             // Never leave a failed launch running; errors still reconcile the original identity.
-            if dir.join("preparation.json").exists() {
+            if dir.join("protected-launch").exists() {
                 let _ = protected::cancel_prepared(&dir);
                 if recover_native(&cfg, &dir).is_ok() {
                     return Ok(());
                 }
-            } else if dir.join("slot-request.json").exists() {
+            } else if dir.join("permit-capacity.json").exists() {
                 let _ = protected::release_unlaunched(&dir);
             }
             save(&dir.join("unknown.json"), &json!({"reason":reason}))?;
@@ -553,7 +553,14 @@ fn native_run(cfg: &Config, dir: &Path, op: &str) -> Res<Value> {
     input.insert(0, Part::Text(prompt));
     let adapter = PathBuf::from(read_json(&dir.join("qualification.json"))?["adapter"].as_str().ok_or("qualification adapter missing")?);
     let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-    let (server, home) = protected::prepare_launch(cfg.image_worker_root.as_deref().unwrap(), dir, op, &adapter)?;
+    let (server, home) = protected::prepare_launch(
+        cfg.image_worker_root.as_deref().unwrap(),
+        dir,
+        op,
+        &adapter,
+        &cfg.data_root.join("tmp/image-worker/protected-capacity.json"),
+        None,
+    )?;
     let opt = server.optimization();
     let deadline = Instant::now() + Duration::from_millis(cfg.max_execution_ms.min(600_000));
     let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;

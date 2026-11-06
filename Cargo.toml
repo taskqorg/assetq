@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-agentq-runtime = { git = "https://github.com/taskqorg/agentq", rev = "c80675a557417532393e143ca2783c0f4c83b8d9" }
+agentq-runtime = { git = "https://github.com/taskqorg/agentq", rev = "f87f308a90b34564cb8ab6f3686ca09ffdde638f" }
 base64 = "0.22.1"
 coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.21.0" }
 hex = "0.4.3"
+ring = "0.17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2"
 postgres = { version = "0.19.14", features = ["with-serde_json-1"] }

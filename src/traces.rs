@@ -23,6 +23,17 @@ pub const TRACES: &[(&str, &str)] = &[
     ("store-full.json", include_str!("../tests/traces/store-full.json")),
 ];
 
+pub const CAPACITY_TRACES: &[(&str, &str)] = &[
+    ("launch-complete-release.json", include_str!("../tests/traces/capacity/launch-complete-release.json")),
+    ("second-operation-busy.json", include_str!("../tests/traces/capacity/second-operation-busy.json")),
+    ("launch-is-one-shot.json", include_str!("../tests/traces/capacity/launch-is-one-shot.json")),
+    ("cancel-retains-occupancy.json", include_str!("../tests/traces/capacity/cancel-retains-occupancy.json")),
+    ("cancel-then-verified-release.json", include_str!("../tests/traces/capacity/cancel-then-verified-release.json")),
+    ("crash-after-launch-intent.json", include_str!("../tests/traces/capacity/crash-after-launch-intent.json")),
+    ("crash-before-launch-intent.json", include_str!("../tests/traces/capacity/crash-before-launch-intent.json")),
+    ("release-of-free-refused.json", include_str!("../tests/traces/capacity/release-of-free-refused.json")),
+];
+
 /// Replay one trace: accepted steps must apply, `reject` steps must be refused
 /// with the named kind and leave the state unchanged, then `expect` must match.
 pub fn run(raw: &str) -> Result<(), String> {

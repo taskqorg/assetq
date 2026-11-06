@@ -1,18 +1,26 @@
-//! R3/R4: one protected consumer path, including non-generating qualification.
+//! R3/R4/R10: one protected consumer path, including non-generating qualification.
+use super::capacity::{Capacity, Event};
 use super::*;
-use agentq_runtime::agent::{ProtectedAppServer, ProtectedHost, ProtectedIdentity, ProtectedPreparation};
+use agentq_runtime::agent::{ProtectedAppServer, ProtectedHost, ProtectedPreparation};
+use ring::signature::Ed25519KeyPair;
 use serde::Deserialize;
 use std::io::{BufRead, BufReader};
 use std::sync::mpsc;
 
-// Pinned signed TaskQ 4.6.66; bounded image qualification is separate from general dispatch.
-pub const ADAPTER_SHA256: &str = "bd6dc0de5024ff7b6b0ae0a987f5467aa0c5196b005c7cdfd434d043709c7e42";
+// AgentQ #266 macOS arm64 adapter, natively qualified for transport through Pipe #61.
+pub const ADAPTER_SHA256: &str = "a1cbb7b88959532f2be28ea8d696c4cc1ae17b7c97205d6549f7156164c82a58";
+const ADAPTER_PUBLIC_KEY: &str = "7f739abab8625718e2e5dbedf0deb5a98373260d3c22ecd20a1148f42bf6d584";
+const ADAPTER_SIGNATURE: &str =
+    "b1c2afbaf90ac266027564fc9d40887a1fafc7dfb31a1964678ec652be7ed5794c08013652468a1d916ea190e0ed3e4169bf085428d869d3d671133b1c907d04";
+// The caller the existing signed host policy already authorizes; using it needs no policy or grant edit.
+const PERMIT_CALLER: &str = "assetq-52-qualification";
+const PERMIT_SECONDS: u64 = 120;
 
+/// Expected identities the operator read independently of this operation's receipts.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Launch {
+pub(super) struct Expected {
     adapter: PathBuf,
-    request: Value,
     profile_sha256: String,
     executable: PathBuf,
     executable_sha256: String,
@@ -32,129 +40,89 @@ pub(super) fn with_run<T>(
     (result, cleanup)
 }
 
-pub(super) fn launch(root: &Path, dir: &Path, launch: Launch) -> Res<(ProtectedAppServer, PathBuf)> {
-    dispatch_authority()?;
+pub(super) fn signed_host(adapter: &Path) -> Res<ProtectedHost> {
+    ProtectedHost::signed(adapter, ADAPTER_SHA256, ADAPTER_PUBLIC_KEY, ADAPTER_SIGNATURE)
+}
+
+#[cfg(target_os = "macos")]
+fn boot_time() -> Res<i64> {
+    let mut time = std::mem::MaybeUninit::<libc::timeval>::zeroed();
+    let mut size = std::mem::size_of::<libc::timeval>();
+    let mut mib = [libc::CTL_KERN, libc::KERN_BOOTTIME];
+    // SAFETY: the buffer and its length describe one timeval, which sysctl fills.
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 2, time.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) } != 0 {
+        return Err("host boot unknown; no permit".into());
+    }
+    // SAFETY: zeroed is a valid timeval, whether or not sysctl wrote to it.
+    Ok(unsafe { time.assume_init() }.tv_sec)
+        .and_then(|seconds| if seconds > 0 { Ok(seconds) } else { Err("host boot unknown; no permit".into()) })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn boot_time() -> Res<i64> {
+    Err("capability_unavailable: protected permit requires the existing Mac authority".into())
+}
+
+fn issuer_key() -> Res<Vec<u8>> {
+    let path = std::env::var_os("ASSETQ_PERMIT_ISSUER_KEY")
+        .ok_or("capability_unavailable: ASSETQ_PERMIT_ISSUER_KEY is not configured; no permit")?;
+    fs::read(path).map_err(|_| "capability_unavailable: protected permit issuer key unreadable; no permit".into())
+}
+
+/// The signed payload keeps the binding's own field order, as the host reads it back.
+fn issue_permit(pkcs8: &[u8], root: &Path, op: &str, owner: &coreq::process::Identity, boot: i64, now: u64) -> Res<Value> {
+    let pair = Ed25519KeyPair::from_pkcs8(pkcs8).map_err(|_| "capability_unavailable: protected permit issuer key invalid; no permit")?;
+    let key = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+    let binding = json!({"schema":"pipe.permits/1","caller":PERMIT_CALLER,"op_id":op,"root":root,"runtime":"codex",
+        "pid":owner.pid,"started":owner.started,"boot":boot,"expires_at":now+PERMIT_SECONDS});
+    let payload = json!({"binding":binding,"key_sha256":db::sha256_hex(key.as_bytes())});
+    let mut message = b"pipe.permits/1\0".to_vec();
+    message.extend_from_slice(payload.to_string().as_bytes());
+    Ok(json!({"binding":binding,"key":key,"signature":hex::encode(pair.sign(&message).as_ref())}))
+}
+
+fn capacity_of(dir: &Path) -> Res<(Capacity, String)> {
+    let scope = read_json(&dir.join("permit-capacity.json"))?;
+    Ok((
+        Capacity(PathBuf::from(scope["path"].as_str().ok_or("protected capacity path missing")?)),
+        scope["op"].as_str().ok_or("protected capacity operation missing")?.into(),
+    ))
+}
+
+/// Hold-first ordering: the permit exists only for an operation that owns capacity.
+pub(super) fn prepare_launch(
+    root: &Path,
+    dir: &Path,
+    op: &str,
+    adapter: &Path,
+    capacity: &Path,
+    expected: Option<&Expected>,
+) -> Res<(ProtectedAppServer, PathBuf)> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected Workspace adapter is qualified on Mac only; no Windows grant or fallback".into());
     }
-    let root = root.canonicalize().map_err(|_| "protected consumer project unavailable")?;
-    if launch.request["slot"]["binding"]["root"] != json!(root) {
-        return Err("protected consumer project differs from slot; no native launch".into());
-    }
-    let host = ProtectedHost::new(&launch.adapter, ADAPTER_SHA256)?;
-    let expected = ProtectedIdentity {
-        profile_sha256: launch.profile_sha256,
-        executable: launch.executable,
-        executable_sha256: launch.executable_sha256,
-        account_home: launch.account_home,
-        approver: launch.approver,
-    };
-    let home = expected.account_home.clone();
-    // Match requirements are retained for recovery, never accepted as a grant.
-    let marker = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(dir.join("protected-launch"))
-        .map_err(|_| "protected launch already attempted; observe original operation, never replay")?;
-    marker.sync_all().map_err(|e| e.to_string())?;
-    save(&dir.join("host-request.json"), &launch.request)?;
-    sync_spool(dir)?;
-    let mut checks = OpenOptions::new().create_new(true).write(true).open(dir.join("host-readback.jsonl")).map_err(|e| e.to_string())?;
-    let mut server = host.launch(launch.request, expected, Intent::Inherit, Path::new("/dev/null"))?;
-    let verified = (|| -> Res<()> {
-        let ready_until = Instant::now() + Duration::from_secs(10);
-        let receipt = loop {
-            match server.verify(ready_until) {
-                Ok(receipt) => break receipt,
-                Err(reason) if Instant::now() < ready_until => {
-                    journal(&mut checks, "unknown", &json!({"reason":reason}))?;
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(reason) => return Err(reason),
-            }
-        };
-        save(&dir.join("authority.json"), &receipt)
-    })();
-    if let Err(reason) = verified {
-        let cancel = server.cancel(Instant::now() + Duration::from_secs(5));
-        let persisted = save(&dir.join("host-cancel.json"), &json!({"receipt":cancel.as_ref().ok(),"unknown":cancel.as_ref().err()}));
-        return Err(match persisted {
-            Ok(()) => reason,
-            Err(error) => format!("{reason}; cancellation receipt persistence unknown: {error}"),
-        });
-    }
-    Ok((server, home))
-}
-
-pub(super) fn check_adapter(adapter: &Path) -> Res<()> {
-    ProtectedHost::new(adapter, ADAPTER_SHA256).map(|_| ())
-}
-
-fn slot_read(adapter: &Path, args: &[&str]) -> Res<Value> {
-    check_adapter(adapter)?;
-    let mut command = Command::new(adapter);
-    command.args(["service", "slots"]).args(args).arg("--json");
-    let output = coreq::process::output("assetq.image.slot", &mut command, Duration::from_secs(5))
-        .map_err(|e| format!("original slot readback unknown: {}; retain operation", e.class()))?;
-    serde_json::from_slice(&output.stdout).map_err(|_| "original slot readback invalid; retain operation".into())
-}
-
-fn slot_exchange(adapter: &Path, dir: &Path, action: &str, until: Instant) -> Res<Value> {
-    slot_exchange_with(dir, action, until, |action, slot| slot_read(adapter, &["--action", action, "--request", &slot.to_string()]))
-}
-
-fn slot_exchange_with(dir: &Path, action: &str, until: Instant, mut read: impl FnMut(&str, &Value) -> Res<Value>) -> Res<Value> {
-    let slot = read_json(&dir.join("slot-request.json"))?;
-    let mut action = action;
-    loop {
-        let receipt = read(action, &slot)?;
-        save(&dir.join(format!("slot-{action}.json")), &receipt)?;
-        if receipt["schema"] != "taskq.slots/1"
-            || receipt["caller"] != slot["binding"]["caller"]
-            || receipt["op_id"] != slot["binding"]["op_id"]
-        {
-            return Err("original slot receipt identity differs; retain operation".into());
-        }
-        let desired = if dir.join("slot-release-intent").exists() { "released" } else { "reserved" };
-        if receipt["state"] == desired && receipt["occupied"] == (desired == "reserved") {
-            return Ok(receipt);
-        }
-        if !matches!(receipt["state"].as_str(), Some("queued" | "busy" | "unknown" | "releasing" | "cancelling")) || Instant::now() >= until
-        {
-            return Err("original slot admission/release unconfirmed; retain operation; no new slot".into());
-        }
-        action = "observe";
-        std::thread::sleep(Duration::from_millis(250).min(until.saturating_duration_since(Instant::now())));
-    }
-}
-
-pub(super) fn prepare_launch(root: &Path, dir: &Path, op: &str, adapter: &Path) -> Res<(ProtectedAppServer, PathBuf)> {
-    dispatch_authority()?;
-    let host = ProtectedHost::new(adapter, ADAPTER_SHA256)?;
+    let host = signed_host(adapter)?;
+    let pkcs8 = issuer_key()?;
     let owner = coreq::process::identity(std::process::id()).map_err(|_| "runner identity unknown")?.ok_or("runner absent")?;
     save(&dir.join("runner.json"), &json!({"pid":owner.pid,"started":owner.started}))?;
-    let identity = slot_read(adapter, &["--identity", &owner.pid.to_string()])?;
-    if identity["schema"] != "taskq.slots/1"
-        || identity["pid"] != owner.pid
-        || identity["started"] != owner.started
-        || identity["boot"].as_i64().is_none_or(|n| n <= 0)
-    {
-        return Err("runner slot incarnation unknown; no reservation".into());
-    }
     let root = root.canonicalize().map_err(|_| "qualification project unavailable")?;
-    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| "slot clock unknown")?.as_secs();
-    let slot = json!({"binding":{"schema":"taskq.slots/1","caller":"assetq-image-qualification","op_id":op,"root":root,"runtime":"codex",
-        "pid":owner.pid,"started":owner.started,"boot":identity["boot"],"expires_at":at+120},
-        "key":format!("{}{}",uuid::Uuid::new_v4().simple(),uuid::Uuid::new_v4().simple())});
-    seal(&dir.join("slot-request.json"), &slot)?;
-    slot_exchange(adapter, dir, "reserve", Instant::now() + Duration::from_secs(60))?;
-    let preparation = host.prepare(&slot, Instant::now() + Duration::from_secs(5))?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|_| "permit clock unknown")?.as_secs();
+    let permit = issue_permit(&pkcs8, &root, op, &owner, boot_time()?, at)?;
+    seal(&dir.join("permit-capacity.json"), &json!({"path":capacity,"op":op}))?;
+    let (capacity, _) = capacity_of(dir)?;
+    capacity.apply(Event::Acquire { op: op.into() })?;
+    seal(&dir.join("permit.json"), &permit)?;
+    let preparation = host.prepare(&permit, Instant::now() + Duration::from_secs(5))?;
     save(&dir.join("preparation.json"), &preparation.checkpoint())?;
     save(&dir.join("host-request.json"), preparation.request())?;
+    if let Some(expected) = expected {
+        expected_matches(&preparation.checkpoint(), expected)?;
+    }
     // Prepared authority is resolved by the pinned host before launch, never copied from an operation observation.
     let home = PathBuf::from(
         preparation.checkpoint()["receipt"]["prepared"]["authority"]["account_home"].as_str().ok_or("prepared account home unknown")?,
     );
+    capacity.apply(Event::LaunchIntended { op: op.into() })?;
     let marker = private_file(&dir.join("protected-launch")).map_err(|_| "protected launch already attempted; no replay")?;
     marker.sync_all().map_err(|e| e.to_string())?;
     sync_spool(dir)?;
@@ -182,62 +150,123 @@ pub(super) fn prepare_launch(root: &Path, dir: &Path, op: &str, adapter: &Path) 
     Ok((server, home))
 }
 
+/// R3: the host resolves authority; the operator's independent reading must agree before launch.
+fn expected_matches(checkpoint: &Value, expected: &Expected) -> Res<()> {
+    let authority = &checkpoint["receipt"]["prepared"]["authority"];
+    if authority["profile_sha256"] != expected.profile_sha256
+        || authority["executable"] != json!(expected.executable)
+        || authority["executable_sha256"] != expected.executable_sha256
+        || authority["account_home"] != json!(expected.account_home)
+        || authority["saved"]["grant"]["by"] != expected.approver
+    {
+        return Err("prepared authority differs from independent readback; no native launch".into());
+    }
+    Ok(())
+}
+
+/// Operations started through the original adapter recover only through authenticated retained bytes.
+fn started_through_taskq(dir: &Path) -> bool {
+    dir.join("slot-request.json").exists()
+}
+
+fn retained(dir: &Path, cancel: bool) -> Res<Value> {
+    let adapter = std::env::var_os("ASSETQ_PROTECTED_ADAPTER")
+        .ok_or("ASSETQ_PROTECTED_ADAPTER is not configured; retained operation stays unknown")?;
+    let host = signed_host(Path::new(&adapter))?;
+    let text = |name: &str| fs::read_to_string(dir.join(name));
+    let checkpoint = text("preparation.json").map_err(|_| "retained checkpoint missing; operation stays unknown")?;
+    let receipt =
+        text("reconciliation.json").or_else(|_| text("authority.json")).map_err(|_| "retained receipt missing; operation stays unknown")?;
+    let until = Instant::now() + Duration::from_secs(5);
+    let answer =
+        if cancel { host.cancel_retained(&checkpoint, &receipt, until)? } else { host.reconcile_retained(&checkpoint, &receipt, until)? };
+    save(&dir.join(if cancel { "retained-cancel.json" } else { "retained-reconciliation.json" }), &answer)?;
+    Ok(answer)
+}
+
+/// R4: verified completion cannot stand in for the original slot's own release acknowledgment.
+fn original_release_acknowledged(dir: &Path) -> Res<bool> {
+    if !dir.join("slot-release-intent").exists() || !dir.join("slot-release.json").exists() {
+        return Ok(false);
+    }
+    let (request, receipt) = (read_json(&dir.join("slot-request.json"))?, read_json(&dir.join("slot-release.json"))?);
+    Ok(receipt["caller"] == request["binding"]["caller"]
+        && receipt["op_id"] == request["binding"]["op_id"]
+        && receipt["state"] == "released"
+        && receipt["occupied"] == false)
+}
+
 fn prepared(dir: &Path) -> Res<(ProtectedHost, ProtectedPreparation)> {
     let scope = read_json(&dir.join("qualification.json"))?;
     let adapter = Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?);
-    let host = ProtectedHost::new(adapter, ADAPTER_SHA256)?;
+    let host = signed_host(adapter)?;
     let preparation = host.recover_preparation(&read_json(&dir.join("preparation.json"))?)?;
     if *preparation.request() != read_json(&dir.join("host-request.json"))?
-        || preparation.request()["slot"] != read_json(&dir.join("slot-request.json"))?
+        || preparation.request()["permit"] != read_json(&dir.join("permit.json"))?
     {
-        return Err("original preparation/request/slot mismatch; no replay or release".into());
+        return Err("original preparation/request/permit mismatch; no replay or release".into());
     }
     Ok((host, preparation))
 }
 
 pub(super) fn prepared_home(dir: &Path) -> Res<PathBuf> {
-    let (_, preparation) = prepared(dir)?;
-    Ok(PathBuf::from(preparation.checkpoint()["receipt"]["prepared"]["authority"]["account_home"].as_str().ok_or("prepared home missing")?))
+    let checkpoint = if started_through_taskq(dir) { read_json(&dir.join("preparation.json"))? } else { prepared(dir)?.1.checkpoint() };
+    Ok(PathBuf::from(checkpoint["receipt"]["prepared"]["authority"]["account_home"].as_str().ok_or("prepared home missing")?))
 }
 
 pub(super) fn cancel_prepared(dir: &Path) -> Res<Value> {
+    if started_through_taskq(dir) {
+        return retained(dir, true);
+    }
     let (host, preparation) = prepared(dir)?;
     let receipt = host.cancel(preparation.request(), Instant::now() + Duration::from_secs(5))?;
     save(&dir.join("host-cancel.json"), &receipt)?;
     Ok(receipt)
 }
 
+fn release_capacity(dir: &Path, capacity: &Capacity, op: &str) -> Res<()> {
+    let repeated = dir.join("permit-release-intent").exists();
+    if !repeated && !capacity.holds(op)? {
+        return Err("protected permit held by another operation; nothing released".into());
+    }
+    seal(&dir.join("permit-release-intent"), &json!(true))?;
+    // A repeat after a crash may find the permit already free or held by the next operation.
+    if repeated && !capacity.holds(op)? {
+        return Ok(());
+    }
+    capacity.apply(Event::Release { op: op.into() })
+}
+
 pub(super) fn release_unlaunched(dir: &Path) -> Res<()> {
     if dir.join("protected-launch").exists() {
         return Err("launch may have occurred; reconcile original preparation".into());
     }
-    seal(&dir.join("slot-release-intent"), &json!(true))?;
-    let scope = read_json(&dir.join("qualification.json"))?;
-    slot_exchange(
-        Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?),
-        dir,
-        "release",
-        Instant::now() + Duration::from_secs(10),
-    )?;
-    Ok(())
+    let (capacity, op) = capacity_of(dir)?;
+    release_capacity(dir, &capacity, &op)
 }
 
 pub(super) fn reconcile_release(dir: &Path) -> Res<()> {
+    if started_through_taskq(dir) {
+        if retained(dir, false)?["state"] != "completed" {
+            return Err("retained native/descendant completion unknown; operation stays unknown".into());
+        }
+        if !original_release_acknowledged(dir)? {
+            return Err("retained completion verified but the original slot release was never acknowledged; Pipe has no TaskQ path; operation stays unknown".into());
+        }
+        return Ok(());
+    }
     let (host, preparation) = prepared(dir)?;
+    let (capacity, op) = capacity_of(dir)?;
     reconcile_then_release(
         dir,
         Instant::now() + Duration::from_secs(15),
         |until| host.reconcile(&preparation, until),
         || {
-            let scope = read_json(&dir.join("qualification.json"))?;
-            slot_exchange(
-                Path::new(scope["adapter"].as_str().ok_or("original adapter missing")?),
-                dir,
-                "release",
-                Instant::now() + Duration::from_secs(10),
-            )?;
-            Ok(())
+            capacity
+                .apply(Event::CompletionVerified { op: op.clone() })
+                .or_else(|e| if dir.join("permit-release-intent").exists() { Ok(()) } else { Err(e) })
         },
+        || release_capacity(dir, &capacity, &op),
     )
 }
 
@@ -245,6 +274,7 @@ fn reconcile_then_release(
     dir: &Path,
     until: Instant,
     mut reconcile: impl FnMut(Instant) -> Res<Value>,
+    verified: impl FnOnce() -> Res<()>,
     release: impl FnOnce() -> Res<()>,
 ) -> Res<()> {
     loop {
@@ -255,12 +285,20 @@ fn reconcile_then_release(
             break;
         }
         if Instant::now() >= until {
-            return Err("protected native/descendant completion unknown; retain original slot".into());
+            return Err("protected native/descendant completion unknown; retain original permit".into());
         }
         std::thread::sleep(Duration::from_millis(250).min(until.saturating_duration_since(Instant::now())));
     }
-    seal(&dir.join("slot-release-intent"), &json!(true))?;
+    verified()?;
     release()
+}
+
+/// Operator entry: release only what proof allows; a launch intent always needs reconciliation.
+pub fn release(dir: &Path) -> Res<()> {
+    if !cfg!(target_os = "macos") {
+        return Err("capability_unavailable: protected adapter requires Mac".into());
+    }
+    if dir.join("protected-launch").exists() || started_through_taskq(dir) { reconcile_release(dir) } else { release_unlaunched(dir) }
 }
 
 /// Recovery uses the original operation; a dead consumer never authorizes replay/release.
@@ -268,14 +306,15 @@ pub fn observe(dir: &Path, cancel: bool) -> Res<Value> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: protected adapter requires Mac".into());
     }
-    let control: Launch =
-        serde_json::from_value(read_json(&dir.join("control.json"))?).map_err(|_| "protected recovery control invalid")?;
-    if read_json(&dir.join("host-request.json"))? != control.request {
-        return Err("protected recovery request differs from original operation".into());
+    if started_through_taskq(dir) {
+        return retained(dir, cancel);
     }
-    let host = ProtectedHost::new(&control.adapter, ADAPTER_SHA256)?;
+    if dir.join("control.json").exists() && !dir.join("permit.json").exists() {
+        return Err("original consumer retained no preparation checkpoint; operation stays unknown; no replay".into());
+    }
+    let (host, preparation) = prepared(dir)?;
     let until = Instant::now() + Duration::from_secs(5);
-    let receipt = if cancel { host.cancel(&control.request, until)? } else { host.observe(&control.request, until)? };
+    let receipt = if cancel { host.cancel(preparation.request(), until)? } else { host.observe(preparation.request(), until)? };
     save(&dir.join(if cancel { "recovery-cancel.json" } else { "recovery-observe.json" }), &receipt)?;
     Ok(receipt)
 }
@@ -290,8 +329,8 @@ fn next_frame(rx: &mpsc::Receiver<Res<Value>>, until: Instant) -> Res<Value> {
     let left = until
         .checked_duration_since(Instant::now())
         .filter(|left| !left.is_zero())
-        .ok_or("qualification deadline; retain original slot")?;
-    rx.recv_timeout(left).map_err(|_| "qualification input ended/deadline; retain original slot")?
+        .ok_or("qualification deadline; retain original permit")?;
+    rx.recv_timeout(left).map_err(|_| "qualification input ended/deadline; retain original permit")?
 }
 
 fn non_generating(frame: &Value) -> Res<&'static str> {
@@ -329,13 +368,17 @@ fn catalogue_progress(runtime: &dyn Runtime, run: &mut Run, log: &mut File, id: 
     }
 }
 
-/// PM drives this one real consumer over private stdio; no development-board task
-/// is created for its native operation and no slot is released by this command.
+/// The operator drives this one real consumer over private stdio; its permit stays held
+/// until `image-observe --release` verifies the original operation.
 pub fn qualify(dir: &Path) -> Res<()> {
     if !cfg!(target_os = "macos") {
         return Err("capability_unavailable: composed protected qualification requires the existing approved Mac Workspace host".into());
     }
-    dispatch_authority()?;
+    issuer_key()?;
+    let data_root = std::env::var_os("ASSETQ_DATA_ROOT").ok_or("capability_unavailable: ASSETQ_DATA_ROOT is not configured; no permit")?;
+    let capacity = PathBuf::from(data_root).join("tmp/image-worker");
+    fs::create_dir_all(&capacity).map_err(|e| e.to_string())?;
+    let capacity = capacity.join("protected-capacity.json");
     let root = std::env::current_dir().and_then(|p| p.canonicalize()).map_err(|e| e.to_string())?;
     let parent = dir
         .parent()
@@ -359,7 +402,7 @@ pub fn qualify(dir: &Path) -> Res<()> {
     let owner = coreq::process::identity(std::process::id()).map_err(|e| e.to_string())?.ok_or("consumer identity unknown")?;
     save(&dir.join("consumer.json"), &json!({"pid":owner.pid,"started":owner.started,"root":root,"runtime":PIN}))?;
     emit(
-        &json!({"state":"awaiting-existing-slot","pid":owner.pid,"started":owner.started,"root":root,"runtime":PIN,"adapter_sha256":ADAPTER_SHA256}),
+        &json!({"state":"awaiting-control","pid":owner.pid,"started":owner.started,"root":root,"runtime":PIN,"adapter_sha256":ADAPTER_SHA256}),
     )?;
     let (tx, rx) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
@@ -382,10 +425,16 @@ pub fn qualify(dir: &Path) -> Res<()> {
     let until = Instant::now() + Duration::from_secs(120);
     let attempt = (|| -> Res<()> {
         let control = next_frame(&rx, until)?;
-        let requirements: Launch = serde_json::from_value(control.clone()).map_err(|_| "invalid protected launch match requirements")?;
+        let requirements: Expected = serde_json::from_value(control.clone()).map_err(|_| "invalid protected launch match requirements")?;
         save(&dir.join("control.json"), &control)?;
+        save(&dir.join("qualification.json"), &json!({"adapter":requirements.adapter}))?;
         let mut log = OpenOptions::new().create_new(true).write(true).open(dir.join("native.jsonl")).map_err(|e| e.to_string())?;
-        let (server, home) = launch(&root, &dir, requirements)?;
+        let op = format!("pipe-qualify-{}", uuid::Uuid::new_v4());
+        let prepared = prepare_launch(&root, &dir, &op, &requirements.adapter, &capacity, Some(&requirements));
+        if prepared.is_err() && !dir.join("protected-launch").exists() && dir.join("permit-capacity.json").exists() {
+            let _ = release_unlaunched(&dir);
+        }
+        let (server, home) = prepared?;
         let runtime = agent::runtime("codex").ok_or("Codex runtime unavailable")?;
         let (work, cancelled) = with_run(
             server.open(None, &runtime_launch(&root, &home, until)),
@@ -443,18 +492,18 @@ pub fn qualify(dir: &Path) -> Res<()> {
         let supervisor_exit = json!({"unknown":"Runtime owns transport; supervisor exit is not whole-operation completion"});
         save(
             &dir.join("cancel.json"),
-            &json!({"receipt":cancelled.as_ref().ok(),"unknown":cancelled.as_ref().err(),"supervisor_exit":supervisor_exit,"slot_release":"not attempted; PM must reconcile all probe descendants"}),
+            &json!({"receipt":cancelled.as_ref().ok(),"unknown":cancelled.as_ref().err(),"supervisor_exit":supervisor_exit,"permit_release":"not attempted; run image-observe --release"}),
         )?;
         let recovered = observe(&dir, false);
         journal(&mut log, "recovery", &json!({"receipt":recovered.as_ref().ok(),"unknown":recovered.as_ref().err()}))?;
         work?;
         cancelled?;
         emit(
-            &json!({"state":"cancel-requested","slot_release":"not attempted","image_tool":"unknown","usage":"no model turn submitted; image usage unobserved"}),
+            &json!({"state":"cancel-requested","permit_release":"not attempted","image_tool":"unknown","usage":"no model turn submitted; image usage unobserved"}),
         )
     })();
     if let Err(ref reason) = attempt {
-        save(&dir.join("unknown.json"), &json!({"reason":reason,"no_replay":true,"slot_release":"not attempted"}))?;
+        save(&dir.join("unknown.json"), &json!({"reason":reason,"no_replay":true,"permit_release":"not attempted"}))?;
     }
     attempt
 }
@@ -463,101 +512,147 @@ pub fn qualify(dir: &Path) -> Res<()> {
 mod tests {
     use super::*;
 
-    // R10: reject before reading the adapter, reserving capacity or writing a launch marker.
+    // R3/R10: an unverified adapter refuses before any spool, capacity or launch effect.
     #[test]
-    fn image_worker_recovery_only_blocks_native_entry_points() {
-        let absent = std::env::temp_dir().join(format!("pipe-never-launch-{}", uuid::Uuid::new_v4()));
-        let launch = Launch {
-            adapter: absent.clone(),
-            request: json!({}),
-            profile_sha256: String::new(),
-            executable: absent.clone(),
-            executable_sha256: String::new(),
-            account_home: absent.clone(),
-            approver: String::new(),
-        };
-        for error in
-            [super::launch(&absent, &absent, launch).err().unwrap(), prepare_launch(&absent, &absent, "invented", &absent).err().unwrap()]
-        {
-            assert!(error.contains("legacy TaskQ adapter is recovery-only"), "{error}");
-        }
-        // Off Mac, qualify keeps its platform refusal; the qualification test below guards it.
-        if cfg!(target_os = "macos") {
-            assert!(qualify(&absent).unwrap_err().contains("legacy TaskQ adapter is recovery-only"));
-        }
-        assert!(!absent.exists());
+    fn image_worker_prepare_refuses_before_any_effect() {
+        let dir = std::env::temp_dir().join(format!("pipe-never-launch-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let (adapter, capacity) = (dir.join("invented-adapter"), dir.join("capacity.json"));
+        fs::write(&adapter, b"invented adapter bytes").unwrap();
+        let error = prepare_launch(&dir, &dir, "invented-op", &adapter, &capacity, None).err().unwrap();
+        let expected = if cfg!(target_os = "macos") { "protected" } else { "Mac only" };
+        assert!(error.contains(expected), "{error}");
+        assert!(!capacity.exists() && !dir.join("permit-capacity.json").exists() && !dir.join("protected-launch").exists());
+        assert!(signed_host(&adapter).is_err());
+        fs::remove_dir_all(dir).unwrap();
     }
 
-    // R3/R4/R7: one reservation request, then same-binding observation; no launch
-    // from unknown/mismatched occupancy and no release before AgentQ completion.
+    fn invented_issuer() -> (Vec<u8>, Vec<u8>) {
+        use ring::signature::KeyPair;
+        let document = Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new()).unwrap();
+        let public = Ed25519KeyPair::from_pkcs8(document.as_ref()).unwrap().public_key().as_ref().to_vec();
+        (document.as_ref().to_vec(), public)
+    }
+
+    // R3/R7: the host's own verifier accepts the permit; a changed binding or foreign key refuses.
     #[test]
-    fn image_worker_slot_and_completion_order_preserve_original_operation() {
-        let dir = std::env::temp_dir().join(format!("aq-slot-{}", uuid::Uuid::new_v4()));
-        fs::create_dir(&dir).unwrap();
-        let slot = json!({"binding":{"caller":"invented","op_id":"invented-op"},"key":"invented-private-key"});
-        save(&dir.join("slot-request.json"), &slot).unwrap();
-        let receipt = |state: &str, occupied: bool| json!({"schema":"taskq.slots/1","caller":"invented","op_id":"invented-op","state":state,"occupied":occupied});
-        let mut calls = vec![];
-        slot_exchange_with(&dir, "reserve", Instant::now() + Duration::from_secs(1), |action, request| {
-            assert_eq!(*request, slot);
-            calls.push(action.to_string());
-            Ok(if calls.len() == 1 { receipt("queued", false) } else { receipt("reserved", true) })
-        })
-        .unwrap();
-        assert_eq!(calls, ["reserve", "observe"]);
-        for value in [
-            receipt("unknown", true),
-            receipt("reserved", false),
-            json!({"schema":"taskq.slots/1","caller":"foreign","op_id":"invented-op","state":"reserved","occupied":true}),
+    fn image_worker_permit_verifies_under_issuer_and_binds_operation() {
+        let (pkcs8, public) = invented_issuer();
+        let owner = coreq::process::Identity { pid: 42, started: "invented-start".into() };
+        let permit = issue_permit(&pkcs8, Path::new("/invented/root"), "invented-op", &owner, 7, 1000).unwrap();
+        let binding = &permit["binding"];
+        assert_eq!(binding["expires_at"], 1000 + PERMIT_SECONDS);
+        assert_eq!(binding["caller"], PERMIT_CALLER);
+        assert_eq!(permit["key"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            binding.as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(),
+            ["schema", "caller", "op_id", "root", "runtime", "pid", "started", "boot", "expires_at"]
+        );
+        let payload = |binding: &Value| {
+            json!({"binding":binding,"key_sha256":db::sha256_hex(permit["key"].as_str().unwrap().as_bytes())}).to_string()
+        };
+        let verify = |key: &[u8], text: String| {
+            agentq_runtime::agent::host::verify_signature(
+                &hex::encode(key),
+                permit["signature"].as_str().unwrap(),
+                "pipe.permits/1",
+                text.as_bytes(),
+            )
+        };
+        verify(&public, payload(binding)).unwrap();
+        let mut changed = binding.clone();
+        changed["op_id"] = json!("invented-other");
+        assert!(verify(&public, payload(&changed)).is_err());
+        assert!(verify(&invented_issuer().1, payload(binding)).is_err());
+        assert!(issue_permit(b"invented bad key", Path::new("/invented/root"), "invented-op", &owner, 7, 1000).is_err());
+    }
+
+    // R3: an independent reading that disagrees with prepared authority stops before launch.
+    #[test]
+    fn image_worker_expected_identity_must_match_preparation() {
+        let expected = || Expected {
+            adapter: "/invented/adapter".into(),
+            profile_sha256: "invented-profile".into(),
+            executable: "/invented/native".into(),
+            executable_sha256: "invented-native-hash".into(),
+            account_home: "/invented/home".into(),
+            approver: "invented-approver".into(),
+        };
+        let checkpoint = json!({"receipt":{"prepared":{"authority":{"profile_sha256":"invented-profile","executable":"/invented/native",
+            "executable_sha256":"invented-native-hash","account_home":"/invented/home","saved":{"grant":{"by":"invented-approver"}}}}}});
+        expected_matches(&checkpoint, &expected()).unwrap();
+        for change in [
+            |e: &mut Expected| e.profile_sha256 = "other".into(),
+            |e: &mut Expected| e.executable = "/other".into(),
+            |e: &mut Expected| e.executable_sha256 = "other".into(),
+            |e: &mut Expected| e.account_home = "/other".into(),
+            |e: &mut Expected| e.approver = "other".into(),
         ] {
-            assert!(slot_exchange_with(&dir, "reserve", Instant::now(), |_, _| Ok(value.clone())).is_err());
+            let mut other = expected();
+            change(&mut other);
+            assert!(expected_matches(&checkpoint, &other).is_err());
         }
-        let released = std::cell::Cell::new(false);
-        assert!(
-            reconcile_then_release(
-                &dir,
-                Instant::now(),
-                |_| Ok(json!({"state":"unknown"})),
-                || {
-                    released.set(true);
-                    Ok(())
-                }
-            )
-            .is_err()
-        );
-        assert!(!released.get());
-        assert!(!dir.join("slot-release-intent").exists());
-        assert!(
-            reconcile_then_release(
-                &dir,
-                Instant::now(),
-                |_| Err("certificate mismatched".into()),
-                || {
-                    released.set(true);
-                    Ok(())
-                }
-            )
-            .is_err()
-        );
-        assert!(!released.get());
-        reconcile_then_release(
-            &dir,
-            Instant::now(),
-            |_| Ok(json!({"state":"completed"})),
-            || {
-                released.set(true);
-                Ok(())
-            },
-        )
-        .unwrap();
-        assert!(released.get());
-        assert!(dir.join("slot-release-intent").exists());
-        slot_exchange_with(&dir, "release", Instant::now(), |action, request| {
-            assert_eq!(action, "release");
-            assert_eq!(*request, slot);
-            Ok(receipt("released", false))
-        })
-        .unwrap();
+        assert!(serde_json::from_value::<Expected>(json!({"grant":"full","adapter_sha256":"forged"})).is_err());
+    }
+
+    // R3/R4/R7: no release before AgentQ completion, and a repeat after a crash cannot free the next holder.
+    #[test]
+    fn image_worker_permit_release_follows_verified_completion() {
+        let dir = std::env::temp_dir().join(format!("aq-permit-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let capacity = Capacity(dir.join("capacity.json"));
+        let op = "invented-op";
+        capacity.apply(Event::Acquire { op: op.into() }).unwrap();
+        capacity.apply(Event::LaunchIntended { op: op.into() }).unwrap();
+        let verified = || capacity.apply(Event::CompletionVerified { op: op.into() });
+        let released = || release_capacity(&dir, &capacity, op);
+        assert!(reconcile_then_release(&dir, Instant::now(), |_| Ok(json!({"state":"unknown"})), verified, released).is_err());
+        assert!(capacity.holds(op).unwrap() && !dir.join("permit-release-intent").exists());
+        assert!(reconcile_then_release(&dir, Instant::now(), |_| Err("certificate mismatched".into()), verified, released).is_err());
+        assert!(capacity.holds(op).unwrap() && !dir.join("permit-release-intent").exists());
+        assert!(released().is_err(), "launch intent without completion keeps the permit");
+        assert!(capacity.holds(op).unwrap());
+        reconcile_then_release(&dir, Instant::now(), |_| Ok(json!({"state":"completed"})), verified, released).unwrap();
+        assert!(!capacity.0.exists() && dir.join("permit-release-intent").exists());
+        capacity.apply(Event::Acquire { op: "invented-next".into() }).unwrap();
+        released().unwrap();
+        assert!(capacity.holds("invented-next").unwrap());
+        let foreign = dir.join("foreign");
+        fs::create_dir(&foreign).unwrap();
+        assert!(release_capacity(&foreign, &capacity, op).is_err());
+        assert!(capacity.holds("invented-next").unwrap() && !foreign.join("permit-release-intent").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    // R4/R10: operations started through the original adapter never publish on unacknowledged release.
+    #[test]
+    fn image_worker_taskq_era_operation_needs_its_own_release_receipt() {
+        let dir = std::env::temp_dir().join(format!("aq-retained-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        assert!(!started_through_taskq(&dir));
+        save(&dir.join("slot-request.json"), &json!({"binding":{"caller":"invented","op_id":"invented-op"},"key":"invented"})).unwrap();
+        assert!(started_through_taskq(&dir));
+        assert!(!original_release_acknowledged(&dir).unwrap());
+        save(&dir.join("slot-release.json"), &json!({"caller":"invented","op_id":"invented-op","state":"released","occupied":false}))
+            .unwrap();
+        assert!(!original_release_acknowledged(&dir).unwrap(), "receipt without durable intent");
+        save(&dir.join("slot-release-intent"), &json!(true)).unwrap();
+        assert!(original_release_acknowledged(&dir).unwrap());
+        for receipt in [
+            json!({"caller":"invented","op_id":"invented-op","state":"releasing","occupied":false}),
+            json!({"caller":"invented","op_id":"invented-op","state":"released","occupied":true}),
+            json!({"caller":"foreign","op_id":"invented-op","state":"released","occupied":false}),
+        ] {
+            save(&dir.join("slot-release.json"), &receipt).unwrap();
+            assert!(!original_release_acknowledged(&dir).unwrap());
+        }
+        // An operation started through TaskQ never takes the permit path, and refuses without the operator's adapter.
+        assert!(prepared_home(&dir).is_err());
+        if std::env::var_os("ASSETQ_PROTECTED_ADAPTER").is_none() {
+            assert!(reconcile_release(&dir).unwrap_err().contains("ASSETQ_PROTECTED_ADAPTER"));
+            assert!(cancel_prepared(&dir).unwrap_err().contains("ASSETQ_PROTECTED_ADAPTER"));
+        }
+        assert!(release_unlaunched(&dir).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -714,7 +809,6 @@ mod tests {
                 accepted
             );
         }
-        assert!(serde_json::from_value::<Launch>(json!({"grant":"full","adapter_sha256":"forged"})).is_err());
         let (tx, rx) = mpsc::channel();
         tx.send(Ok(json!({"action":"receive"}))).unwrap();
         assert!(next_frame(&rx, Instant::now() - Duration::from_secs(1)).unwrap_err().contains("deadline"));

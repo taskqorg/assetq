@@ -11,11 +11,12 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 [[package]]
 name = "agentq-runtime"
 version = "0.6.0"
-source = "git+https://github.com/taskqorg/agentq?rev=c80675a557417532393e143ca2783c0f4c83b8d9#c80675a557417532393e143ca2783c0f4c83b8d9"
+source = "git+https://github.com/taskqorg/agentq?rev=f87f308a90b34564cb8ab6f3686ca09ffdde638f#f87f308a90b34564cb8ab6f3686ca09ffdde638f"
 dependencies = [
  "coreq",
  "libc",
  "ring",
+ "serde",
  "serde_json",
 ]
 
@@ -691,6 +692,7 @@ dependencies = [
  "image",
  "libc",
  "postgres",
+ "ring",
  "serde",
  "serde_json",
  "sha2 0.10.9",

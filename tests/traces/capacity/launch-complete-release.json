@@ -1,0 +1,8 @@
+{"name":"launch, verified completion, release","covers":"R6/R7 launch","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"}},
+{"event":{"type":"completion_verified","op":"a"}},
+{"event":{"type":"completion_verified","op":"a"}},
+{"event":{"type":"release","op":"a"}},
+{"event":{"type":"acquire","op":"b"}}
+],"expect":{"phase":"held","op":"b"}}

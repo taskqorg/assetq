@@ -1,0 +1,7 @@
+{"name":"one permit at a time","covers":"R7 capacity; a duplicate of the holder changes nothing","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"acquire","op":"b"},"reject":"busy"},
+{"event":{"type":"launch_intended","op":"b"},"reject":"foreign"},
+{"event":{"type":"release","op":"b"},"reject":"foreign"}
+],"expect":{"phase":"held","op":"a"}}

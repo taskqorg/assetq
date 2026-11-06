@@ -1,0 +1,7 @@
+{"name":"launch intent is never repeated","covers":"R4/R6 no replay, including after completion","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"},"reject":"replay"},
+{"event":{"type":"completion_verified","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"},"reject":"replay"}
+],"expect":{"phase":"completed","op":"a"}}

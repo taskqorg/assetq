@@ -28,6 +28,8 @@ def main():
     args = parser.parse_args()
     if "TASKQ_ATTEMPT" in os.environ:
         raise RuntimeError("worker cannot reconcile external app servers; use existing operator channel, never remove role variables")
+    if "ASSETQ_PROTECTED_ADAPTER" not in os.environ:
+        raise RuntimeError("ASSETQ_PROTECTED_ADAPTER names the pinned adapter; retained operation stays unknown")
     binary, workspace, directory = (p.resolve(strict=True) for p in (args.binary, args.workspace, args.directory))
     assert directory.is_relative_to(workspace)
     assert len(args.sha256) == 64 and all(c in "0123456789abcdef" for c in args.sha256)

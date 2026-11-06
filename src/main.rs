@@ -13,8 +13,8 @@ const USAGE: &str = "pipe <command>
 Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   serve [--listen 127.0.0.1:8740] [--http-threads 8]   API plus embedded executors
   work                                                 executors only (separate host)
-  image-serve <accepted-job-id> <pinned-adapter>         unavailable: legacy adapter is recovery-only
-  image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; no generation
+  image-serve <accepted-job-id> <pinned-adapter>         operator-bound image qualification; needs ASSETQ_PERMIT_ISSUER_KEY
+  image-import-serve <source-job-id> <png-sha256>       reconcile and import retained native PNG; needs ASSETQ_PROTECTED_ADAPTER
   meshy-serve <accepted-job-id> <private-profile.json>  operator-bound initial Meshy qualification
   meshy-admit                                        loopback admission only; zero executors/effects
   meshy-preflight [blender-executable]                read-only host/candidate/budget prerequisites
@@ -26,8 +26,8 @@ Service (configuration from ASSETQ_* environment, see docs/deploy.md):
   restore-check                                        verify isolated restored metadata, manifests and payloads
   audit <job-id>                                       replay a stored job's events
   selftest [--database]                                offline checks; --database adds DB checks
-  image-qualify <new-private-workspace-dir>             unavailable: requires independent host adapter
-  image-observe <private-workspace-dir> [--cancel]      reconcile original protected operation; never launch or release
+  image-qualify <new-private-workspace-dir>             non-generating protected transport check; holds the permit
+  image-observe <private-workspace-dir> [--cancel|--release]  observe original operation; release only after proof; never launch
 
 Client (ASSETQ_URL, default http://127.0.0.1:8740; ASSETQ_TOKEN):
   submit --method M --operation O --key K --budget N [--recommendation ID] [--text T] [--attach ID].. [--set k=JSON]..
@@ -74,7 +74,14 @@ fn run(args: &[String]) -> Result<(), String> {
     match cmd {
         "image-qualify" => pipe::image_worker::protected::qualify(std::path::Path::new(&pos(rest, 0)?)),
         "image-observe" => {
-            print(&pipe::image_worker::protected::observe(std::path::Path::new(&pos(rest, 0)?), rest.iter().any(|s| s == "--cancel"))?);
+            let dir = pos(rest, 0)?;
+            let dir = std::path::Path::new(&dir);
+            if rest.iter().any(|s| s == "--release") {
+                pipe::image_worker::protected::release(dir)?;
+                print(&json!({"state":"released"}));
+            } else {
+                print(&pipe::image_worker::protected::observe(dir, rest.iter().any(|s| s == "--cancel"))?);
+            }
             Ok(())
         }
         "image-turn" if rest.len() == 3 => {
@@ -250,7 +257,11 @@ fn selftest(database: bool) -> Result<(), String> {
     for (name, raw) in traces::TRACES {
         traces::run(raw).map_err(|e| format!("trace {name}: {e}"))?;
     }
+    for (name, raw) in traces::CAPACITY_TRACES {
+        pipe::image_worker::capacity::replay(raw).map_err(|e| format!("capacity trace {name}: {e}"))?;
+    }
     checks.push(json!({"check": "lifecycle traces", "count": traces::TRACES.len(), "outcome": "pass"}));
+    checks.push(json!({"check": "protected capacity traces", "count": traces::CAPACITY_TRACES.len(), "outcome": "pass"}));
     let dir = std::env::temp_dir().join(format!("assetq-selftest-{}", uuid::Uuid::new_v4()));
     let s = store::Store::open(&dir).map_err(|e| e.to_string())?;
     let put = s.put(&mut &b"assetq selftest"[..], 1024, 1024).map_err(|e| e.to_string())?;

@@ -1,0 +1,6 @@
+{"name":"crash before launch intent","covers":"R6 crash recovery: nothing native can exist, so the permit releases without a certificate","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"completion_verified","op":"a"},"reject":"unproved"},
+{"event":{"type":"release","op":"a"}}
+],"expect":{"phase":"free"}}

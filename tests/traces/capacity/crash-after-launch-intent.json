@@ -1,0 +1,9 @@
+{"name":"crash after launch intent","covers":"R4/R6 crash recovery: the new process finds intent, observes and never relaunches or frees","steps":[
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"launch_intended","op":"a"}},
+{"event":{"type":"acquire","op":"a"}},
+{"event":{"type":"unknown","op":"a"}},
+{"event":{"type":"acquire","op":"b"},"reject":"busy"},
+{"event":{"type":"launch_intended","op":"a"},"reject":"replay"},
+{"event":{"type":"release","op":"a"},"reject":"unproved"}
+],"expect":{"phase":"launched","op":"a"}}
