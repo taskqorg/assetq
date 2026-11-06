@@ -12,6 +12,8 @@ The owner request is preserved in [intake](intake/2026-11-01-owner-request.md). 
 | CoreQ runtime retirement | [coreq#112](https://github.com/taskqorg/coreq/issues/112) | Runtime and both verified consumer adoptions |
 | Durable service, registry and object API | [assetq#3](https://github.com/taskqorg/assetq/issues/3) | Bootstrap contract and CI |
 | Real image-worker method | [assetq#4](https://github.com/taskqorg/assetq/issues/4) | Foundation, published [agentq#186](https://github.com/taskqorg/agentq/issues/186) protected runtime and composed native qualification |
+| Independent protected host publication | [assetq#52](https://github.com/taskqorg/assetq/issues/52) | [AgentQ #241/#266 publications and immutable pins](evidence/52/README.md); [Mac prerequisite #61](https://github.com/taskqorg/assetq/issues/61) supplied native non-generating transport proof for the replacement adapter |
+| Pipe-owned protected permits and integration | [assetq#47](https://github.com/taskqorg/assetq/issues/47) | #52 publication; composed host qualification and live image recovery remain separate |
 | Image-to-3D prop method | [assetq#5](https://github.com/taskqorg/assetq/issues/5) | Image-worker method |
 | Managed-store connected live journeys | [assetq#6](https://github.com/taskqorg/assetq/issues/6) | Both methods and reviewed private host activation receipts |
 | Method comparisons and guidance | [assetq#7](https://github.com/taskqorg/assetq/issues/7) | Real generation and storage receipts |
