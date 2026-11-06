@@ -4,7 +4,7 @@
 
 The fresh #52 inbox resumed this task after [AgentQ #241](https://github.com/taskqorg/agentq/issues/241) closed. [PR #244](https://github.com/taskqorg/agentq/pull/244) published the independent API and signed adapters. This record reconciles that trusted publication; it changes no Pipe runtime, host trust or authority. Pipe R3–R6/R10 and TaskQ §7/R12/R13 apply. The [#42 legacy recovery decision](https://github.com/taskqorg/assetq/issues/42#issuecomment-6661217844) remains temporary and unchanged.
 
-## Immutable identities
+## Original publication identities
 
 | Item | Pin |
 |---|---|
@@ -29,7 +29,7 @@ The eight protected API/host/signing blobs match across all three AgentQ pins: `
 | A1 | The owning [AgentQ contract §12 M12.8](https://github.com/taskqorg/agentq/blob/f87f308a90b34564cb8ab6f3686ca09ffdde638f/agentq.md#12-agent-runtime) and its linked runtime detail define the independent signed route. The pins and final digests above are published. The route uses `agentq agent host` with no TaskQ binary, command, slot service or CA. Legacy support remains a separate upstream route, not an independent-route fallback. |
 | A2 | Upstream preparation, every-input grant/profile and process-incarnation guards, one-shot launch, cancellation, native/descendant completion and durable journal checks are published. Missing or changed proof refuses effects and leaves occupancy unknown; transport exit or a stop acknowledgment cannot release it. Deterministic checks are evidence for the model/process boundaries; working-host native enforcement remains unqualified. |
 | A3 | The host accepts authenticated `pipe.permits/1` caller permits. Pipe owns admission and final release acknowledgment; host cleanup cannot release its capacity. Authenticated retained archives preserve exact original checkpoints/receipts, operation identity and consumed stop intent without relaunch, receipt rewriting or TaskQ runtime fallback. Pipe's issuer, permit persistence and integration are still #47 work. |
-| A4 | Deterministic adversarial recovery checks and green merge-result CI are published. The corrected signed macOS artifact has platform build/tests/offline-selftest evidence and detached-signature verification. Native non-generating transport qualification under the existing Mac operator authority is **unknown**, so the native portion of #52 A4 is not proved by #241's closure. No new grant, model/account/capacity change or image generation is established or authorized by this record. |
+| A4 | Deterministic adversarial recovery checks and green merge-result CI are published. The original Mac launch failed; the replacement publication and its failure-before/pass-after checks are recorded below. Native non-generating transport qualification under existing Mac operator authority remains **unknown**. Neither #241 nor #266 closure proves it. No new grant, model/account/capacity change or image generation is authorized by this record. |
 
 AgentQ #241 A4 did not include #52's sentence requiring existing Mac operator qualification. Its closure therefore does not establish that additional native requirement. This record preserves that acceptance gap; it does not amend A4 or treat portable signing checks as native transport proof. Pipe consumer integration and live image qualification remain in #47.
 
@@ -75,6 +75,45 @@ The accepted [operator answer 6684045657](https://github.com/taskqorg/assetq/iss
 
 One non-generating launch reached host state `verified-effective`, then the frontend exited with `native stdout interrupted` before initialize. The operator reports no input reached Codex and no model turn ran. No completion certificate or cleanup acknowledgment exists; recovery reports `unknown` and occupancy remains retained. The original operation was not relaunched. This fails A4 native transport qualification; `verified-effective` alone does not establish it (R4/R6/R10).
 
-[AgentQ #266](https://github.com/taskqorg/agentq/issues/266) owns diagnosis and correction. Accepted sockets inheriting non-blocking mode on macOS is a hypothesis, not an established cause; #266 requires the actual errno, a macOS failure-before/pass-after check, unchanged fencing/no-replay protection and a reviewed adapter with a new final signed digest. Its signing key stays on its current host. The failed operation, original adapter, permit, journal and receipts must not be relaunched, rewritten, reset or deleted. No pass-after or recovery-completion evidence is available yet.
+[AgentQ #266](https://github.com/taskqorg/agentq/issues/266) took ownership of diagnosis and correction. At that checkpoint, accepted sockets inheriting non-blocking mode on macOS was a hypothesis; #266 required the actual errno, a macOS failure-before/pass-after check, unchanged fencing/no-replay protection and a reviewed adapter with a new final signed digest. Its signing key stays on its current host. The failed operation, original adapter, permit, journal and receipts must not be relaunched, rewritten, reset or deleted. No native pass-after or recovery-completion evidence was available at that checkpoint.
 
-Per the accepted answer, park #52 on #266 and do not rerun qualification now. After that prerequisite closes, reconcile its immutable source, signed digest and merge-result CI before any separately authorized new-operation qualification; a new operation cannot release or replace the retained failed operation. A1–A3 publication evidence above remains historical for its exact pins, and A4 stays open. Pipe integration and live image qualification remain #47.
+At `18fee94`, #52 parked on #266 per the accepted answer without rerunning qualification. Its closure requires reconciliation of immutable source, signed digest and merge-result CI before any separately authorized new-operation qualification; a new operation cannot release or replace the retained failed operation. A1–A3 publication evidence above remains historical for its exact pins, and A4 stays open. Pipe integration and live image qualification remain #47.
+
+## Replacement publication after AgentQ #266
+
+[AgentQ #266](https://github.com/taskqorg/agentq/issues/266) is now closed following [PR #267](https://github.com/taskqorg/agentq/pull/267). Its immutable [runtime-266 evidence](https://github.com/taskqorg/agentq/blob/a610cf7680b1ecc0d5b51847a0ea03eced077ded/docs/evidence/runtime-266.md) and [public manifest](https://github.com/taskqorg/agentq/blob/a610cf7680b1ecc0d5b51847a0ea03eced077ded/docs/evidence/runtime-266/adapter-macos-aarch64.json) supersede the old artifact for a future new-operation qualification. They do not change the retained failed operation or qualify native launch (R3–R6/R10).
+
+| Item | Replacement pin |
+|---|---|
+| Published AgentQ API/merged source | `a610cf7680b1ecc0d5b51847a0ea03eced077ded` |
+| Signed macOS arm64 build source | `1c46de5b12d7bcd3a1ce1ffbcbef962090778031` |
+| Final adapter SHA-256, 7,675,376 bytes | `a1cbb7b88959532f2be28ea8d696c4cc1ae17b7c97205d6549f7156164c82a58` |
+| Build run / macOS artifact | [42231396039](https://github.com/taskqorg/agentq/actions/runs/42231396039) / `13509232169` |
+| Public manifest Git blob | `c35460a4c25bee32ed77165469771fedde1f76a0` |
+| Existing publication public key | `7f739abab8625718e2e5dbedf0deb5a98373260d3c22ecd20a1148f42bf6d584` |
+
+Fresh direct Git tree comparison found all 100 non-document blobs identical between the signed build source and published merge. GitHub's three-dot commit comparison uses their merge base and is not that tree-equality check. The replacement includes both stdout fixes and upstream #265/#270; it is not the superseded `711a6066` candidate. The prior Windows digest remains historical and supplies no native Mac proof.
+
+Fresh readback of [run 42248842330](https://github.com/taskqorg/agentq/actions/runs/42248842330) returned `event: merge_group`, `headSha: a610cf7680b1ecc0d5b51847a0ea03eced077ded`, `conclusion: success`. Contract and Rust jobs on Linux, macOS and Windows all succeeded, including locked tests and offline selftest. This establishes upstream merge-result CI under TaskQ §7/R12; #58 still requires its own merge-result CI before publication.
+
+The upstream macOS observations provide failure-before/pass-after evidence, not a successful rerun of the retained operation:
+
+- `protected_scope_stream_waits_for_idle_native_output` failed before the socket fix with `Err(Some(35))` instead of `Ok(6)` on macOS 27.2 arm64. Darwin's accepted socket inherited `O_NONBLOCK`; clearing it made the same check pass. Errno 35 is from that reproduction; the old live run's errno remains unknown.
+- `protected_scope_stdout_failure_exits_while_native_stderr_is_idle` timed out before the stderr-lock fix instead of returning `native stdout interrupted; retain scope`. Per-write stderr locking and a non-panicking error log made the same check pass. No-replay, fencing and retained-scope guards stayed unchanged.
+- The upstream local authority-snapshot test was `sandbox-blocked` by EPERM, not PASS. The merged candidate's affected-platform CI above passed; neither observation proves working-host authority or TCC.
+
+This Windows continuation downloaded artifact `13509232169` through `gh run download 42231396039 --repo taskqorg/agentq --name macos-aarch64` into a fresh temporary directory. `Get-FileHash -Algorithm SHA256` and file-size readback matched the replacement identity above; the binary was not executed. The connector returned a hosted artifact reference, but its local transfer stalled and was stopped; that transfer is not a passing check. Node's built-in Ed25519 verification accepted the published manifest using the independently retained publication key and refused both a zeroed signature and a changed digest. No signing key moved. These observations establish bytes and detached signature, not macOS codesigning, TCC, installed trust or native containment.
+
+Upstream's latest read-only retained-journal observation remains 9,862 bytes, SHA-256 `ab4281c3aa8971a1ab965d68495364c8dcc5c9410de2dbe29f7884b2b77d96f6`. This is attributed historical Mac evidence, not a fresh journal observation by this worker. The failed operation remains unknown with occupancy retained. A new operation cannot complete, release, replace or rewrite it.
+
+### Bounded replacement Mac handoff
+
+[Mac prerequisite #61](https://github.com/taskqorg/assetq/issues/61) owns the separately runnable native receipt, pinned to host `mac`; #52 waits for that evidence under TaskQ §7.3. Open-task readback found no duplicate native prerequisite. This Windows worker has no authenticated Mac operator transport and makes no native call. The new task does not grant runtime authority or weaken #52 acceptance.
+
+The original numbered operator handoff above describes the old digest and must not be used to launch that artifact again. For the replacement, first stage and verify only the exact new bytes and manifest pinned here. Read back current authority independently: the previously observed Workspace grant revision 34 and approver `kirs` are historical evidence, not action-time authorization.
+
+The existing operator must authenticate the replacement against its existing signed trust/policy and current grant/profile, account/native identity, durable journal and caller-owned permit. #266 provisioned none of these for the replacement. An unavailable signing/operator channel or a policy that does not authorize this digest stops before effects; request the concrete bounded existing-authority provisioning action. Do not edit a grant, transfer a private key, reset a journal or silently widen the trusted boundary.
+
+Only after action-time authorization may the existing operator prepare one new incarnation-bound operation with a caller-owned `pipe.permits/1` permit, persist its checkpoint and one-shot launch intent, then initialize the non-generating transport. No model turn, image generation, model/account/capacity change, TaskQ slot/adapter/CA or fallback is allowed. Keep transport alive through cancellation readback and recover/reconcile that same checkpoint without relaunch. Missing native/descendant completion or exact-generation cleanup acknowledgment retains occupancy. Report TCC denial as Open, not an owner ask.
+
+Preserve the failed operation and original journal entries, adapters, permits, receipts and accepted crate; do not mistake an expected new-operation journal append for permission to rewrite retained entries. Publish only safe candidate identities, check outcomes and receipt references. Pipe's permits implementation, consumer integration and live image qualification remain #47. A4 stays incomplete until the existing Mac operator supplies this native evidence.
